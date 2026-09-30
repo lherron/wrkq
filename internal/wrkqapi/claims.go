@@ -19,6 +19,7 @@ import (
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/nodeauth"
 	"github.com/lherron/wrkq/internal/scope"
+	"github.com/lherron/wrkq/internal/store"
 )
 
 func (a *API) TaskClaim(ctx context.Context, p TaskClaimParams) (*WrkqTaskClaim, error) {
@@ -58,6 +59,13 @@ func (a *API) TaskClaim(ctx context.Context, p TaskClaimParams) (*WrkqTaskClaim,
 			"field": "scope", "scopeTask": parsedScope.TaskID, "task": row.taskID,
 		})
 	}
+	var ownerState sql.NullString
+	if err := tx.QueryRow("SELECT owner.state FROM tasks t LEFT JOIN tasks owner ON owner.uuid=t.subtask_owner_uuid WHERE t.uuid=?", uuid).Scan(&ownerState); err != nil {
+		return nil, NewInternalError(err)
+	}
+	if ownerState.Valid && (ownerState.String == "archived" || ownerState.String == "deleted") {
+		return nil, NewWrongStateError(map[string]any{"task": row.taskID, "ownerState": ownerState.String})
+	}
 	if !isClaimableState(row.state) {
 		return nil, NewWrongStateError(map[string]any{"task": row.taskID, "state": row.state})
 	}
@@ -87,10 +95,14 @@ func (a *API) TaskClaim(ctx context.Context, p TaskClaimParams) (*WrkqTaskClaim,
 	if err := tx.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", uuid).Scan(&etag); err != nil {
 		return nil, NewInternalError(err)
 	}
-	payload, _ := json.Marshal(map[string]any{
+	payloadMap := map[string]any{
 		"action": "claimed", "claimed_by": attr.PrincipalRef, "claimed_scope": attr.ScopeRef,
 		"claimed_node": nodeID, "claim_generation": newGeneration, "take_over": p.TakeOver,
-	})
+	}
+	if err := store.StampTaskCampaignContext(tx, uuid, payloadMap); err != nil {
+		return nil, NewInternalError(err)
+	}
+	payload, _ := json.Marshal(payloadMap)
 	payloadText := string(payload)
 	if _, err := events.NewWriter(a.db.DB).LogEventReturning(tx, &domain.Event{
 		PrincipalRef: attr.PrincipalRef, ScopeRef: attr.ScopeRef, ResourceType: "task",
@@ -189,10 +201,14 @@ func (a *API) TaskRelease(ctx context.Context, p TaskReleaseParams) (*WrkqTaskCl
 	if err := tx.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", uuid).Scan(&etag); err != nil {
 		return nil, NewInternalError(err)
 	}
-	payload, _ := json.Marshal(map[string]any{
+	payloadMap := map[string]any{
 		"action": "released", "claim_generation": row.generation, "force": p.Force,
 		"prior_holder": row.claimedBy.String, "prior_node": row.claimedNode.String,
-	})
+	}
+	if err := store.StampTaskCampaignContext(tx, uuid, payloadMap); err != nil {
+		return nil, NewInternalError(err)
+	}
+	payload, _ := json.Marshal(payloadMap)
 	payloadText := string(payload)
 	if _, err := events.NewWriter(a.db.DB).LogEventReturning(tx, &domain.Event{
 		PrincipalRef: attr.PrincipalRef, ScopeRef: claimScope, ResourceType: "task",

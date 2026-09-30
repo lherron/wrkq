@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+
+	"github.com/lherron/wrkq/internal/taskmember"
 )
 
 type campaignValidation struct {
@@ -21,15 +23,21 @@ type campaignValidation struct {
 func validateEffectiveMembershipTx(tx *sql.Tx, v campaignValidation) error {
 	for _, taskUUID := range v.taskUUIDs {
 		var residentUUID string
-		var enrolledUUID, residentState, enrolledState sql.NullString
+		var enrolledUUID, residentState, enrolledState, subtaskOwnerUUID sql.NullString
 		if err := tx.QueryRow(`
-			SELECT t.project_uuid, t.campaign_uuid, resident.campaign_state, enrolled.campaign_state
+			SELECT t.project_uuid, t.campaign_uuid, resident.campaign_state, enrolled.campaign_state, t.subtask_owner_uuid
 			  FROM tasks t
 			  LEFT JOIN containers resident ON resident.uuid = t.project_uuid
 			  LEFT JOIN containers enrolled ON enrolled.uuid = t.campaign_uuid
 			 WHERE t.uuid = ?
-		`, taskUUID).Scan(&residentUUID, &enrolledUUID, &residentState, &enrolledState); err != nil {
+		`, taskUUID).Scan(&residentUUID, &enrolledUUID, &residentState, &enrolledState, &subtaskOwnerUUID); err != nil {
 			return fmt.Errorf("failed to validate campaign membership for task %s: %w", taskUUID, err)
+		}
+		if subtaskOwnerUUID.Valid {
+			if v.enrollmentChange && enrolledUUID.Valid {
+				return fmt.Errorf("subtask cannot enroll in a campaign")
+			}
+			continue
 		}
 		if v.enrollmentChange && enrolledUUID.Valid &&
 			(!enrolledState.Valid ||
@@ -66,7 +74,7 @@ func validateEffectiveMembershipTx(tx *sql.Tx, v campaignValidation) error {
 			SELECT t.uuid, t.project_uuid, t.campaign_uuid
 			  FROM tasks t
 			  JOIN containers resident ON resident.uuid = t.project_uuid
-			 WHERE resident.campaign_state IS NOT NULL
+			 WHERE resident.campaign_state IS NOT NULL AND `+taskmember.Filter("t", false)+`
 			   AND t.campaign_uuid IS NOT NULL
 			   AND t.campaign_uuid != t.project_uuid
 			 LIMIT 1
@@ -122,9 +130,10 @@ func StampTaskCampaignContext(tx *sql.Tx, taskUUID string, payload map[string]an
 	var enrolledUUID, residentState sql.NullString
 	if err := tx.QueryRow(`
 		SELECT t.project_uuid, t.campaign_uuid, resident.campaign_state
-		  FROM tasks t
+		  FROM tasks subject
+		  JOIN tasks t ON t.uuid = COALESCE(subject.subtask_owner_uuid, subject.uuid)
 		  LEFT JOIN containers resident ON resident.uuid = t.project_uuid
-		 WHERE t.uuid = ?
+		 WHERE subject.uuid = ?
 	`, taskUUID).Scan(&containerUUID, &enrolledUUID, &residentState); err != nil {
 		return fmt.Errorf("failed to load task campaign context: %w", err)
 	}

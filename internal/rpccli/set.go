@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/bulk"
@@ -450,6 +451,8 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 		Ordered:         opts.ordered,
 		ShowProgress:    isStdoutTTY(cmd.OutOrStdout()),
 	}
+	var noticeMu sync.Mutex
+	var openSubtasks []string
 	result := op.Execute(scopedArgs, func(ref string) error {
 		params := map[string]any{"task": ref, "patch": opts.patch}
 		if actor != "" {
@@ -472,7 +475,7 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 				params["claimScope"] = runtimeScope.FullRef()
 			}
 		}
-		_, err := tr.Call(cmd.Context(), "wrkq.task.update", params)
+		raw, err := tr.Call(cmd.Context(), "wrkq.task.update", params)
 		if err != nil {
 			if re, ok := err.(*Error); ok {
 				if re.DomainID == "WRKQ_CLAIM_SUPERSEDED" {
@@ -481,6 +484,15 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 				return errors.New(re.Message)
 			}
 			return err
+		}
+		if state, ok := opts.patch["state"].(string); ok && state == "completed" {
+			subtasks, err := completionSubtaskNotice(raw)
+			if err != nil {
+				return err
+			}
+			noticeMu.Lock()
+			openSubtasks = append(openSubtasks, subtasks...)
+			noticeMu.Unlock()
 		}
 		return nil
 	})
@@ -493,13 +505,20 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 				"error": itemErr.Error.Error(),
 			}
 		}
-		if err := encodeJSONIndent(cmd, map[string]interface{}{
+		response := map[string]interface{}{
 			"total": result.TotalItems, "succeeded": result.Succeeded, "failed": result.Failed, "errors": errorsOut,
-		}); err != nil {
+		}
+		if len(openSubtasks) > 0 {
+			response["open_subtasks"] = openSubtasks
+		}
+		if err := encodeJSONIndent(cmd, response); err != nil {
 			return err
 		}
 	} else {
 		result.PrintSummary(cmd.OutOrStdout())
+		if len(openSubtasks) > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "Notice: subtasks remain open: %s\n", strings.Join(openSubtasks, ", "))
+		}
 	}
 	if state, ok := opts.patch["state"].(string); ok && state == "completed" && result.Succeeded > 0 {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Hint: For each task just closed, reconcile any worktree under ~/praesidium/under-construction/: preserve or merge needed changes, then remove the task's worktree. Leave worktrees with unrelated or uncommitted work alone.")
@@ -511,4 +530,25 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 		return fmt.Errorf("%d task updates failed", result.Failed)
 	}
 	return nil
+}
+
+func completionSubtaskNotice(raw json.RawMessage) ([]string, error) {
+	var task struct {
+		Subtasks []struct {
+			ID    string `json:"id"`
+			State string `json:"state"`
+		} `json:"subtasks"`
+	}
+	if err := json.Unmarshal(raw, &task); err != nil {
+		return nil, err
+	}
+	var open []string
+	for _, sub := range task.Subtasks {
+		switch sub.State {
+		case "completed", "cancelled", "archived", "deleted":
+			continue
+		}
+		open = append(open, sub.ID)
+	}
+	return open, nil
 }

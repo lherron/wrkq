@@ -18,10 +18,12 @@ import (
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/nodeauth"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
+	"github.com/lherron/wrkq/internal/taskmember"
 	"github.com/lherron/wrkq/internal/webhooks"
 )
 
@@ -58,9 +60,30 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		}
 	}
 
-	projectUUID, slug, err := a.resolveCreateTarget(p)
-	if err != nil {
-		return nil, err
+	var projectUUID, slug string
+	var subtaskOwnerUUID *string
+	var err error
+	if p.SubtaskOwner != "" {
+		if p.Path != "" || p.Project != "" || p.ParentTask != "" || p.Campaign != "" {
+			return nil, NewValidationError("subtaskOwner refuses path, project, parentTask and campaign", nil)
+		}
+		ownerUUID, ownerID, e := selectors.ResolveTask(a.db, p.SubtaskOwner)
+		if e != nil {
+			return nil, NewNotFoundError(p.SubtaskOwner, "task")
+		}
+		if !id.IsTask(ownerID + "." + p.Slug) {
+			return nil, NewValidationError("invalid subtask slug", map[string]any{"field": "slug"})
+		}
+		subtaskOwnerUUID = &ownerUUID
+		slug = p.Slug
+	} else {
+		if p.Slug != "" {
+			return nil, NewValidationError("slug requires subtaskOwner", nil)
+		}
+		projectUUID, slug, err = a.resolveCreateTarget(p)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	state := domain.StateOpen
@@ -171,6 +194,7 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		Priority:             priority,
 		Kind:                 p.Kind,
 		ParentTaskUUID:       parentTaskUUID,
+		SubtaskOwnerUUID:     subtaskOwnerUUID,
 		AssigneePrincipalRef: assigneePrincipalRef,
 		RequestedByProjectID: requestedByProjectID,
 		AssignedProjectID:    assignedProjectID,
@@ -278,7 +302,18 @@ func (a *API) TaskShow(ctx context.Context, p TaskShowParams) (*WrkqTask, error)
 	if err != nil {
 		return nil, err
 	}
-	return a.loadTask(uuid)
+	task, err := a.loadTask(uuid)
+	if err != nil {
+		return nil, err
+	}
+	if task.SubtaskOwnerUUID != "" {
+		room, err := a.roomOrDerivedForTask(ctx, uuid)
+		if err != nil {
+			return nil, err
+		}
+		task.RoomLocator = room.key
+	}
+	return task, nil
 }
 
 // TaskList returns a paginated list of WrkqTask DTOs with optional filters.
@@ -296,8 +331,26 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 		return nil, derr
 	}
 
-	where := []string{}
+	where := []string{taskmember.Filter("t", p.Subtasks)}
 	args := []any{}
+	if p.SubtaskOwner != "" {
+		if !p.Subtasks {
+			return nil, NewValidationError("subtaskOwner requires subtasks", nil)
+		}
+		owner, _, err := selectors.ResolveTask(a.db, p.SubtaskOwner)
+		if err != nil {
+			return nil, NewNotFoundError(p.SubtaskOwner, "task")
+		}
+		where = append(where, "t.subtask_owner_uuid = ?")
+		args = append(args, owner)
+	}
+	if p.OwnerState != "" {
+		clause, err := subtaskOwnerStateClause(p.OwnerState, p.Subtasks)
+		if err != nil {
+			return nil, err
+		}
+		where = append(where, clause)
+	}
 
 	if strings.TrimSpace(p.Path) != "" {
 		containerUUID, _, rerr := selectors.ResolveContainer(a.db, p.Path)
@@ -378,10 +431,10 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 		"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, " +
 		"t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, " +
 		"t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), " +
-		"COALESCE(cp.path || '/' || t.slug, t.slug), " +
+		"COALESCE(cp.path || '/' || CASE WHEN owner.uuid IS NULL THEN t.slug ELSE owner.slug || '/' || t.slug END, t.slug), " +
 		"CAST(LENGTH(TRIM(COALESCE(t.description,''), " + taskPresenceTrimCharsSQL + ")) > 0 AS INTEGER) AS has_description, " +
-		"CAST(LENGTH(TRIM(COALESCE(t.specification,''), " + taskPresenceTrimCharsSQL + ")) > 0 AS INTEGER) AS has_specification " +
-		"FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid"
+		"CAST(LENGTH(TRIM(COALESCE(t.specification,''), " + taskPresenceTrimCharsSQL + ")) > 0 AS INTEGER) AS has_specification, owner.id, t.subtask_owner_uuid, (SELECT COUNT(*) FROM tasks st WHERE st.subtask_owner_uuid=t.uuid AND st.state NOT IN ('completed','cancelled','archived','deleted')) " +
+		"FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid LEFT JOIN tasks owner ON owner.uuid = t.subtask_owner_uuid"
 	if page.WhereClause != "" {
 		where = append(where, page.WhereClause)
 		args = append(args, page.Params...)
@@ -650,7 +703,7 @@ func (a *API) TaskMove(ctx context.Context, p TaskMoveParams) (*WrkqTask, error)
 	}
 	var existingTaskUUID string
 	existingErr := a.db.QueryRow(
-		`SELECT uuid FROM tasks WHERE slug = ? AND project_uuid = ?`,
+		`SELECT uuid FROM tasks WHERE slug = ? AND project_uuid = ? AND `+taskmember.Filter("", false),
 		targetSlug, targetProjectUUID,
 	).Scan(&existingTaskUUID)
 	if existingErr != nil && existingErr != sql.ErrNoRows {
@@ -930,7 +983,7 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 
 		var existingUUID string
 		cerr := a.db.QueryRow(
-			"SELECT uuid FROM tasks WHERE project_uuid = ? AND slug = ? AND uuid != ?",
+			"SELECT uuid FROM tasks WHERE project_uuid = ? AND slug = ? AND uuid != ? AND "+taskmember.Filter("", false),
 			*parentUUID, slug, uuid,
 		).Scan(&existingUUID)
 		if cerr == nil {
@@ -1109,7 +1162,7 @@ func (a *API) cascadeRestoreSubtasks(parentTaskUUID, targetState string, attr at
 		   JOIN tasks p ON p.uuid = c.parent_task_uuid
 		  WHERE c.parent_task_uuid = ?
 		    AND c.project_uuid = p.project_uuid
-		    AND c.state IN ('archived', 'deleted')`,
+		    AND c.state IN ('archived', 'deleted') AND `+taskmember.Filter("c", false),
 		parentTaskUUID,
 	)
 	if err != nil {
@@ -1333,10 +1386,10 @@ func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 			"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, "+
 			"t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, "+
 			"t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), "+
-			"COALESCE(cp.path || '/' || t.slug, t.slug), "+
+			"COALESCE(cp.path || '/' || CASE WHEN owner.uuid IS NULL THEN t.slug ELSE owner.slug || '/' || t.slug END, t.slug), "+
 			"CAST(LENGTH(TRIM(COALESCE(t.description,''), "+taskPresenceTrimCharsSQL+")) > 0 AS INTEGER) AS has_description, "+
-			"CAST(LENGTH(TRIM(COALESCE(t.specification,''), "+taskPresenceTrimCharsSQL+")) > 0 AS INTEGER) AS has_specification "+
-			"FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid WHERE t.uuid = ?",
+			"CAST(LENGTH(TRIM(COALESCE(t.specification,''), "+taskPresenceTrimCharsSQL+")) > 0 AS INTEGER) AS has_specification, owner.id, t.subtask_owner_uuid, (SELECT COUNT(*) FROM tasks st WHERE st.subtask_owner_uuid=t.uuid AND st.state NOT IN ('completed','cancelled','archived','deleted')) "+
+			"FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid LEFT JOIN tasks owner ON owner.uuid = t.subtask_owner_uuid WHERE t.uuid = ?",
 		uuid,
 	)
 	task, _, err := scanTaskRow(row)
@@ -1352,6 +1405,23 @@ func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 	}
 	if len(causedBy) > 0 {
 		task.CausedBy = causedBy
+	}
+	if task.SubtaskOwnerUUID == "" {
+		rows, err := a.db.Query("SELECT id,slug,title,state,COALESCE(claimed_by_principal_ref,'') FROM tasks WHERE subtask_owner_uuid=? ORDER BY slug", uuid)
+		if err != nil {
+			return nil, NewInternalError(err)
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var summary SubtaskSummary
+			if err := rows.Scan(&summary.ID, &summary.Slug, &summary.Title, &summary.State, &summary.ClaimedBy); err != nil {
+				return nil, NewInternalError(err)
+			}
+			task.Subtasks = append(task.Subtasks, summary)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, NewInternalError(err)
+		}
 	}
 	return task, nil
 }
@@ -1373,16 +1443,19 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		claimGeneration                                                             int64
 		riskClass, path                                                             string
 		hasDescription, hasSpecification                                            int
+		subtaskOwner, subtaskOwnerUUID                                              sql.NullString
+		openSubtaskCount                                                            int
 	)
 	if err := s.Scan(
 		&uuid, &id, &slug, &title, &projectUUID, &campaignUUID, &state, &priority, &kind, &description, &specification, &outcome,
 		&labels, &meta, &etag, &startAt, &dueAt, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
 		&assignee, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
-		&createdByPrincipal, &updatedByPrincipal, &riskClass, &path, &hasDescription, &hasSpecification,
+		&createdByPrincipal, &updatedByPrincipal, &riskClass, &path, &hasDescription, &hasSpecification, &subtaskOwner, &subtaskOwnerUUID, &openSubtaskCount,
 	); err != nil {
 		return nil, "", err
 	}
 	task := &WrkqTask{
+		SubtaskOwner: subtaskOwner.String, SubtaskOwnerUUID: subtaskOwnerUUID.String, OpenSubtaskCount: openSubtaskCount,
 		UUID:                  uuid,
 		ID:                    id,
 		Slug:                  slug,

@@ -41,7 +41,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		priority                                                       int
 		startAt, dueAt, labels, meta, outcome, completedAt, archivedAt *string
 		requestedBy, assignedProject, acknowledgedAt, resolution       *string
-		parentTaskUUID, assigneePrincipalRef                           *string
+		parentTaskUUID, subtaskOwnerUUID, assigneePrincipalRef         *string
 		claimedBy, claimedScope, claimedNode, claimedAt                *string
 		claimGeneration                                                int64
 		createdAt, updatedAt                                           string
@@ -53,7 +53,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 		       state, priority,
-		       kind, parent_task_uuid, assignee_principal_ref,
+		       kind, parent_task_uuid, subtask_owner_uuid, assignee_principal_ref,
 		       claimed_by_principal_ref, claimed_scope_ref, claimed_node, claimed_at, claim_generation,
 		       start_at, due_at, labels, meta, description, specification, outcome, etag,
 		       created_at, updated_at, completed_at, archived_at,
@@ -61,7 +61,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		       created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref
 		FROM tasks WHERE uuid = ?`, taskUUID).Scan(
 		&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
-		&kind, &parentTaskUUID, &assigneePrincipalRef,
+		&kind, &parentTaskUUID, &subtaskOwnerUUID, &assigneePrincipalRef,
 		&claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
 		&startAt, &dueAt, &labels, &meta, &description, &specification, &outcome, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
@@ -113,7 +113,16 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		metaValue = *meta
 	}
 
+	var subtaskOwnerID *string
+	if subtaskOwnerUUID != nil {
+		var ownerID string
+		if err := tx.QueryRowContext(ctx, "SELECT id FROM tasks WHERE uuid=?", *subtaskOwnerUUID).Scan(&ownerID); err != nil {
+			return nil, NewInternalError(err)
+		}
+		subtaskOwnerID = &ownerID
+	}
 	view := &WrkqTaskCatView{
+		SubtaskOwnerID: subtaskOwnerID, SubtaskOwnerUUID: subtaskOwnerUUID,
 		ID:                    id,
 		UUID:                  taskUUID,
 		Path:                  taskPath,
@@ -190,6 +199,28 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		view.BlockedBy = blockers
 	}
 
+	if subtaskOwnerUUID == nil {
+		rows, err := tx.QueryContext(ctx, "SELECT id,slug,title,state,COALESCE(claimed_by_principal_ref,'') FROM tasks WHERE subtask_owner_uuid=? ORDER BY slug", taskUUID)
+		if err != nil {
+			return nil, NewInternalError(err)
+		}
+		for rows.Next() {
+			var item SubtaskSummary
+			if err := rows.Scan(&item.ID, &item.Slug, &item.Title, &item.State, &item.ClaimedBy); err != nil {
+				_ = rows.Close()
+				return nil, NewInternalError(err)
+			}
+			view.Subtasks = append(view.Subtasks, item)
+			if item.State != "completed" && item.State != "cancelled" && item.State != "archived" && item.State != "deleted" {
+				view.OpenSubtaskCount++
+			}
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, NewInternalError(err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, NewInternalError(err)
 	}
@@ -198,6 +229,13 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		return nil, err
 	}
 	view.Promises = promises
+	if subtaskOwnerUUID != nil {
+		room, err := a.roomOrDerivedForTask(ctx, taskUUID)
+		if err != nil {
+			return nil, err
+		}
+		view.RoomLocator = room.key
+	}
 	return view, nil
 }
 

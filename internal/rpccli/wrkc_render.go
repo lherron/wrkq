@@ -161,6 +161,9 @@ func wrkcRoomDetailLines(room roomWire, identity *wrkcAdhocIdentity) []string {
 	if room.Kind != "adhoc" || identity == nil {
 		lines = append(lines, fmt.Sprintf("members: %d", room.MemberCount))
 	}
+	if room.OpenSubtaskCount > 0 {
+		lines = append(lines, fmt.Sprintf("subtasks open: %d", room.OpenSubtaskCount))
+	}
 	lines = append(lines,
 		fmt.Sprintf("messages: %d", room.MessageCount),
 		"last_activity: "+style.FormatLocalTimestamp(room.LastActivityAt),
@@ -220,8 +223,12 @@ func wrkcRoomTable(rooms []roomWire, identities map[string]wrkcAdhocIdentity, lo
 		if localTimes {
 			lastActivityAt = style.FormatLocalTimestamp(lastActivityAt)
 		}
+		work := room.Work
+		if room.OpenSubtaskCount > 0 {
+			work += fmt.Sprintf("; %d subtasks open", room.OpenSubtaskCount)
+		}
 		rows = append(rows, []string{
-			room.Key, room.Kind, room.Work, room.Activity, members,
+			room.Key, room.Kind, work, room.Activity, members,
 			fmt.Sprint(room.MessageCount), lastActivityAt, last,
 		})
 	}

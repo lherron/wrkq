@@ -10,6 +10,7 @@ import (
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/store"
 )
 
 const nsRelationAdd = "wrkq.relation.add"
@@ -75,7 +76,12 @@ func (a *API) RelationAdd(ctx context.Context, p RelationAddParams) (*WrkqRelati
 		return nil, mapStoreError(ierr, p.FromTask)
 	}
 
-	payload := `{"from_task_uuid":"` + fromUUID + `","to_task_uuid":"` + toUUID + `","kind":"` + p.Kind + `"}`
+	payloadData := map[string]any{"from_task_uuid": fromUUID, "to_task_uuid": toUUID, "kind": p.Kind}
+	if err := store.StampTaskCampaignContext(tx, fromUUID, payloadData); err != nil {
+		return nil, NewInternalError(err)
+	}
+	payloadJSON, _ := json.Marshal(payloadData)
+	payload := string(payloadJSON)
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,
@@ -222,7 +228,12 @@ func (a *API) RelationRemove(ctx context.Context, p RelationRemoveParams) (*Wrkq
 		return nil, NewNotFoundError(fromID+" "+p.Kind+" "+toID, "relation")
 	}
 
-	payload := `{"from_task_uuid":"` + fromUUID + `","to_task_uuid":"` + toUUID + `","kind":"` + p.Kind + `"}`
+	payloadData := map[string]any{"from_task_uuid": fromUUID, "to_task_uuid": toUUID, "kind": p.Kind}
+	if err := store.StampTaskCampaignContext(tx, fromUUID, payloadData); err != nil {
+		return nil, NewInternalError(err)
+	}
+	payloadJSON, _ := json.Marshal(payloadData)
+	payload := string(payloadJSON)
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,

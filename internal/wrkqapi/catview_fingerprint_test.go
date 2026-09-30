@@ -57,7 +57,7 @@ func TestCatViewDTOFingerprint(t *testing.T) {
 		dtoFingerprint(reflect.TypeOf(CatViewBlocker{})),
 	}, "\n")
 
-	const want = "WrkqTaskCatView{id,uuid,path,artifact_dir,project_id,project_uuid,campaign,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,outcome,omitempty,acknowledged_at,omitempty,resolution,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty,promises}\n" +
+	const want = "WrkqTaskCatView{room_locator,omitempty,subtask_owner_id,omitempty,subtask_owner_uuid,omitempty,subtasks,omitempty,open_subtask_count,id,uuid,path,artifact_dir,project_id,project_uuid,campaign,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,slug,title,state,priority,kind,parent_task_id,omitempty,parent_task_uuid,omitempty,assignee,omitempty,assignee_uuid,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,start_at,omitempty,due_at,omitempty,labels,omitempty,meta,description,specification,outcome,omitempty,acknowledged_at,omitempty,resolution,omitempty,etag,created_at,updated_at,completed_at,omitempty,archived_at,omitempty,created_by,created_by_principal_ref,omitempty,created_by_scope_ref,omitempty,updated_by,updated_by_principal_ref,omitempty,caused_by,blocked_by,omitempty,comments,omitempty,relations,omitempty,promises}\n" +
 		"CatViewCampaign{id,path,membership}\n" +
 		"CatViewComment{id,created_at,body,principal_ref,omitempty}\n" +
 		"CatViewRelation{direction,kind,task_id,task_uuid,task_slug,task_title,created_at,created_by_id}\n" +
@@ -188,8 +188,8 @@ func TestFindListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(FindListViewParams{})) + "\n" +
 		dtoFingerprint(reflect.TypeOf(WrkqFindListView{})) + "\n" +
 		dtoFingerprint(reflect.TypeOf(WrkqFindEntry{}))
-	const want = "FindListViewParams{paths,omitempty,type,omitempty,slugGlob,omitempty,state,omitempty,dueBefore,omitempty,dueAfter,omitempty,kind,omitempty,labels,omitempty,assignee,omitempty,claimedBy,omitempty,claimedNode,omitempty,parentTask,omitempty,requestedBy,omitempty,assignedProject,omitempty,causedBy,omitempty,ackPending,omitempty,hasOutcome,omitempty,campaign,omitempty,limit,omitempty,cursor,omitempty,sort,omitempty,reverse,omitempty}\n" +
-		"WrkqFindListView{items,next_cursor,omitempty}\nWrkqFindEntry{type,uuid,id,slug,title,path,specification,omitempty,state,omitempty,priority,omitempty,kind,omitempty,assignee,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,parent_task_id,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,due_at,omitempty,caused_by,omitempty,created_at,updated_at,etag}"
+	const want = "FindListViewParams{subtasks,omitempty,ownerState,omitempty,paths,omitempty,type,omitempty,slugGlob,omitempty,state,omitempty,dueBefore,omitempty,dueAfter,omitempty,kind,omitempty,labels,omitempty,assignee,omitempty,claimedBy,omitempty,claimedNode,omitempty,parentTask,omitempty,requestedBy,omitempty,assignedProject,omitempty,causedBy,omitempty,ackPending,omitempty,hasOutcome,omitempty,campaign,omitempty,limit,omitempty,cursor,omitempty,sort,omitempty,reverse,omitempty}\n" +
+		"WrkqFindListView{items,next_cursor,omitempty}\nWrkqFindEntry{subtask_owner_id,omitempty,open_subtask_count,type,uuid,id,slug,title,path,specification,omitempty,state,omitempty,priority,omitempty,kind,omitempty,assignee,omitempty,assignee_principal_ref,omitempty,claimed_by,omitempty,claimed_scope,omitempty,claimed_node,omitempty,claimed_at,omitempty,claim_generation,omitempty,parent_task_id,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,due_at,omitempty,caused_by,omitempty,created_at,updated_at,etag}"
 	if got != want {
 		t.Errorf("find list view DTO shape drifted:\n got: %s\nwant: %s", got, want)
 	}
@@ -202,7 +202,7 @@ func TestFindListViewDTOFingerprint(t *testing.T) {
 func TestHistoryListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqHistoryListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqLogEvent{}))
 	const want = "WrkqHistoryListView{items,next_cursor,omitempty}\n" +
-		"WrkqLogEvent{id,timestamp,principal_ref,omitempty,scope_ref,omitempty,resource_type,resource_uuid,event_type,etag,omitempty,payload,omitempty}"
+		"WrkqLogEvent{resource_id,omitempty,task_id,omitempty,id,timestamp,principal_ref,omitempty,scope_ref,omitempty,resource_type,resource_uuid,event_type,etag,omitempty,payload,omitempty}"
 	if got != want {
 		t.Errorf("history list view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
 	}
@@ -216,7 +216,7 @@ func TestHistoryListViewDTOFingerprint(t *testing.T) {
 func TestHistoryTailViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqHistoryTailView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqWatchEvent{}))
 	const want = "WrkqHistoryTailView{items,high_water}\n" +
-		"WrkqWatchEvent{id,timestamp,principal_ref,omitempty,scope_ref,omitempty,resource_type,resource_uuid,omitempty,resource_id,omitempty,event_type,etag,omitempty,payload,omitempty}"
+		"WrkqWatchEvent{task_id,omitempty,id,timestamp,principal_ref,omitempty,scope_ref,omitempty,resource_type,resource_uuid,omitempty,resource_id,omitempty,event_type,etag,omitempty,payload,omitempty}"
 	if got != want {
 		t.Errorf("history tail view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
 	}
@@ -231,7 +231,7 @@ func TestMonitorViewDTOFingerprint(t *testing.T) {
 		dtoFingerprint(reflect.TypeOf(WrkqMonitorEvent{})) + "\n" +
 		dtoFingerprint(reflect.TypeOf(WrkqMonitorStateView{}))
 	const want = "WrkqMonitorEventsView{items,high_water}\n" +
-		"WrkqMonitorEvent{id,timestamp,resource_type,resource_uuid,omitempty,resource_id,omitempty,event_type,payload,omitempty}\n" +
+		"WrkqMonitorEvent{task_id,omitempty,id,timestamp,resource_type,resource_uuid,omitempty,resource_id,omitempty,event_type,payload,omitempty}\n" +
 		"WrkqMonitorStateView{met,unmet}"
 	if got != want {
 		t.Errorf("monitor view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
@@ -255,7 +255,7 @@ func TestProjectsListViewDTOFingerprint(t *testing.T) {
 func TestTreeViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqTreeView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqTreeNode{}))
 	const want = "WrkqTreeView{path,project_id,omitempty,children,promises,hidden_containers_not_displayed,wire_raw_path,omitempty}\n" +
-		"WrkqTreeNode{type,id,slug,title,state,omitempty,uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,is_archived,is_deleted,all_tasks_completed,omitempty,promises,children,omitempty,external_children,omitempty,external_backlink,omitempty,external_project_id,omitempty,external_path,omitempty,wire_created_at,omitempty,wire_parent_task_uuid,omitempty}"
+		"WrkqTreeNode{open_subtask_count,subtask_owner_id,omitempty,type,id,slug,title,state,omitempty,uuid,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty,is_archived,is_deleted,all_tasks_completed,omitempty,promises,children,omitempty,external_children,omitempty,external_backlink,omitempty,external_project_id,omitempty,external_path,omitempty,wire_created_at,omitempty,wire_parent_task_uuid,omitempty}"
 	if got != want {
 		t.Errorf("tree view DTO shape drifted (protocol contract change):\n got: %s\nwant: %s", got, want)
 	}
@@ -285,7 +285,7 @@ func TestSearchIndexViewDTOFingerprint(t *testing.T) {
 		dtoFingerprint(reflect.TypeOf(WrkqSearchListView{})) + "\n" +
 		dtoFingerprint(reflect.TypeOf(WrkqSearchResult{})) + "\n" +
 		dtoFingerprint(reflect.TypeOf(WrkqIndexStatus{}))
-	const want = "SearchListViewParams{query,paths,omitempty,state,omitempty,kind,omitempty,labels,omitempty,assigneePrincipalRef,omitempty,limit,omitempty,candidateLimit,omitempty,sort,omitempty,reverse,omitempty,fresh,omitempty,explain,omitempty}\n" +
+	const want = "SearchListViewParams{subtasks,omitempty,query,paths,omitempty,state,omitempty,kind,omitempty,labels,omitempty,assigneePrincipalRef,omitempty,limit,omitempty,candidateLimit,omitempty,sort,omitempty,reverse,omitempty,fresh,omitempty,explain,omitempty}\n" +
 		"WrkqSearchListView{query,stale,status,results,total_matches,offset}\n" +
 		"WrkqSearchResult{resource_type,resource_id,resource_uuid,task_id,omitempty,task_uuid,omitempty,comment_id,omitempty,scope_ref,omitempty,status,omitempty,path,title,state,omitempty,kind,omitempty,snippet,score,created_at,updated_at,stale,explain,omitempty}\n" +
 		"WrkqIndexStatus{path,enabled,status,last_indexed_event_id,canonical_max_event_id,stale_event_count,dense_model_id,omitempty,dense_dimension,omitempty,dense_vector_count,omitempty,last_error,omitempty,searchable_chunk_count}"
@@ -297,7 +297,7 @@ func TestSearchIndexViewDTOFingerprint(t *testing.T) {
 // TestLsListViewDTOFingerprint guards the ls projection shapes.
 func TestLsListViewDTOFingerprint(t *testing.T) {
 	got := dtoFingerprint(reflect.TypeOf(WrkqLsListView{})) + "\n" + dtoFingerprint(reflect.TypeOf(WrkqLsEntry{}))
-	const want = "WrkqLsListView{items,next_cursor,omitempty}\nWrkqLsEntry{type,id,slug,title,omitempty,path,created_at,updated_at,state,omitempty,kind,omitempty,task_count,omitempty,active_task_count,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty}"
+	const want = "WrkqLsListView{items,next_cursor,omitempty}\nWrkqLsEntry{open_subtask_count,type,id,slug,title,omitempty,path,created_at,updated_at,state,omitempty,kind,omitempty,task_count,omitempty,active_task_count,omitempty,requested_by_project_id,omitempty,assigned_project_id,omitempty,acknowledged_at,omitempty,resolution,omitempty}"
 	if got != want {
 		t.Errorf("ls list view DTO shape drifted:\n got: %s\nwant: %s", got, want)
 	}

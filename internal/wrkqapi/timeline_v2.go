@@ -14,6 +14,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/taskfamily"
 )
 
 type timelineQueryer interface {
@@ -93,6 +94,27 @@ func (a *API) containerTimelineViewV2(
 	taskUUID string,
 	limit int,
 ) (*WrkqContainerTimelineView, error) {
+	selectedTasks := map[string]bool{}
+	if taskUUID != "" {
+		rows, err := tx.QueryContext(ctx, "SELECT uuid FROM tasks WHERE "+taskfamily.Filter("uuid"), taskUUID, taskUUID)
+		if err != nil {
+			return nil, NewInternalError(err)
+		}
+		for rows.Next() {
+			var uuid string
+			if err := rows.Scan(&uuid); err != nil {
+				_ = rows.Close()
+				return nil, NewInternalError(err)
+			}
+			selectedTasks[uuid] = true
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, NewInternalError(err)
+		}
+	}
+
 	scope := strings.TrimSpace(p.Scope)
 	if scope == "" {
 		scope = "container"
@@ -327,7 +349,7 @@ func (a *API) containerTimelineViewV2(
 			eventIndex++
 			cur.AfterEventID = raw.entry.EventID
 			cur.BeforeEventID = raw.entry.EventID
-			entry, included, err := deliverTimelineEvent(raw, containerUUID, affiliation, p.Types, taskUUID, since)
+			entry, included, err := deliverTimelineEvent(raw, containerUUID, affiliation, p.Types, selectedTasks, since)
 			if err != nil {
 				return nil, err
 			}
@@ -340,7 +362,7 @@ func (a *API) containerTimelineViewV2(
 		projectIndex++
 		cur.AfterProjectEventID = raw.id
 		cur.BeforeProjectEventID = raw.id
-		if entry, included := deliverTimelineProjectEvent(raw, containerUUID, affiliation, p.Types, taskUUID, since); included {
+		if entry, included := deliverTimelineProjectEvent(raw, containerUUID, affiliation, p.Types, selectedTasks, since); included {
 			entries = append(entries, entry)
 		}
 	}
@@ -961,7 +983,7 @@ func timelineHeadFirst(event timelineRawEvent, project timelineRawProjectEvent, 
 	return !desc
 }
 
-func deliverTimelineEvent(raw timelineRawEvent, root string, affiliation map[string]bool, filters []string, taskUUID string, since *time.Time) (WrkqTimelineEntry, bool, error) {
+func deliverTimelineEvent(raw timelineRawEvent, root string, affiliation map[string]bool, filters []string, selectedTasks map[string]bool, since *time.Time) (WrkqTimelineEntry, bool, error) {
 	if !timelineEventTypeSupported(raw.eventType, raw.payload) {
 		return WrkqTimelineEntry{}, false, nil
 	}
@@ -986,7 +1008,7 @@ func deliverTimelineEvent(raw timelineRawEvent, root string, affiliation map[str
 	}
 	applyTimelineMembership(&entry, root, affiliation)
 	if entry.Membership == "" || !timelineTypeMatches(filters, entry.Type) ||
-		(taskUUID != "" && entry.TaskUUID != taskUUID) || !timelineSinceMatches(entry.Timestamp, since) {
+		(len(selectedTasks) > 0 && !selectedTasks[entry.TaskUUID]) || !timelineSinceMatches(entry.Timestamp, since) {
 		return WrkqTimelineEntry{}, false, nil
 	}
 	if entry.Type == "comment" {
@@ -1003,10 +1025,10 @@ func deliverTimelineEvent(raw timelineRawEvent, root string, affiliation map[str
 	return entry, true, nil
 }
 
-func deliverTimelineProjectEvent(raw timelineRawProjectEvent, root string, affiliation map[string]bool, filters []string, taskUUID string, since *time.Time) (WrkqTimelineEntry, bool) {
+func deliverTimelineProjectEvent(raw timelineRawProjectEvent, root string, affiliation map[string]bool, filters []string, selectedTasks map[string]bool, since *time.Time) (WrkqTimelineEntry, bool) {
 	applyTimelineMembership(&raw.entry, root, affiliation)
 	if raw.entry.Membership == "" || !timelineTypeMatches(filters, raw.semantic) ||
-		(taskUUID != "" && raw.entry.TaskUUID != taskUUID) || !timelineSinceMatches(raw.entry.Timestamp, since) {
+		(len(selectedTasks) > 0 && !selectedTasks[raw.entry.TaskUUID]) || !timelineSinceMatches(raw.entry.Timestamp, since) {
 		return WrkqTimelineEntry{}, false
 	}
 	return raw.entry, true

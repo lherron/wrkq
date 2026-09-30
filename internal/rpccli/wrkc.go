@@ -27,6 +27,7 @@ const wrkcSessionEnv = "HRC_SESSION_REF"
 // ─── wire DTOs ────────────────────────────────────────────────────────────────
 
 type roomWire struct {
+	OpenSubtaskCount     int            `json:"openSubtaskCount"`
 	UUID                 string         `json:"uuid"`
 	ID                   *string        `json:"id,omitempty"`
 	Key                  string         `json:"key"`

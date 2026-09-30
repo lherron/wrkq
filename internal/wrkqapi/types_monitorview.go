@@ -7,6 +7,7 @@ package wrkqapi
 // Field order is the legacy monitorEventLine struct order MINUS the type field:
 // id, timestamp, resource_type, resource_uuid?, resource_id?, event_type, payload?.
 type WrkqMonitorEvent struct {
+	TaskID       string  `json:"task_id,omitempty"`
 	ID           int64   `json:"id"`
 	Timestamp    string  `json:"timestamp"`
 	ResourceType string  `json:"resource_type"`
@@ -48,6 +49,7 @@ type WrkqMonitorStateView struct {
 // id, timestamp, principal_ref?, scope_ref?,
 // resource_type, resource_uuid?, resource_id?, event_type, etag?, payload?.
 type WrkqWatchEvent struct {
+	TaskID       string  `json:"task_id,omitempty"`
 	ID           int64   `json:"id"`
 	Timestamp    string  `json:"timestamp"`
 	PrincipalRef *string `json:"principal_ref,omitempty"`
@@ -104,13 +106,15 @@ type MonitorStateViewParams struct {
 // HistoryTailViewParams carries the monotonic cursor + bounded limit for the raw
 // ASCENDING event_log tail.
 type HistoryTailViewParams struct {
-	Cursor int64 `json:"cursor"`
-	Limit  int   `json:"limit,omitempty"`
+	Tasks  []string `json:"tasks,omitempty"`
+	Cursor int64    `json:"cursor"`
+	Limit  int      `json:"limit,omitempty"`
 }
 
 // monitorRow is the server-side decoded event used by the filter. It mirrors the
 // fields of the legacy watchEvent the filter inspects.
 type monitorRow struct {
+	TaskID       string `json:"task_id,omitempty"`
 	ID           int64
 	Timestamp    string
 	ResourceType string

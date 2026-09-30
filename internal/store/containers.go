@@ -9,6 +9,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/taskmember"
 	"github.com/lherron/wrkq/internal/webhooks"
 )
 
@@ -645,7 +646,7 @@ func containerArchiveLiveTasks(tx *sql.Tx, containerUUID string) ([]containerArc
 		)
 		SELECT t.uuid, t.state, t.meta, t.etag
 		FROM tasks t JOIN subtree s ON s.uuid = t.project_uuid
-		WHERE t.state IN ('idea','draft','open','in_progress','blocked')
+		WHERE `+taskmember.Filter("t", false)+` AND t.state IN ('idea','draft','open','in_progress','blocked')
 		  AND t.archived_at IS NULL AND t.deleted_at IS NULL
 		ORDER BY t.uuid`, containerUUID)
 	if err != nil {
@@ -675,7 +676,7 @@ func containerArchiveMarkedTasks(tx *sql.Tx, containerUUID string) ([]containerA
 		)
 		SELECT t.uuid, t.state, t.meta, t.etag
 		FROM tasks t JOIN subtree s ON s.uuid = t.project_uuid
-		WHERE json_valid(t.meta)
+		WHERE `+taskmember.Filter("t", false)+` AND json_valid(t.meta)
 		  AND json_extract(t.meta, '$._wrkq_archive_cascade.container_uuid') = ?
 		ORDER BY t.uuid`, containerUUID, containerUUID)
 	if err != nil {
@@ -874,7 +875,7 @@ func (cs *ContainerStore) DeleteWithAttribution(attr attribution.Attribution, co
 		var childCount int
 		err = tx.QueryRow(`
 			SELECT (
-				(SELECT COUNT(*) FROM tasks WHERE project_uuid = ?) +
+				(SELECT COUNT(*) FROM tasks WHERE `+taskmember.Filter("", false)+` AND project_uuid = ?) +
 				(SELECT COUNT(*) FROM containers WHERE parent_uuid = ?)
 			)
 		`, containerUUID, containerUUID).Scan(&childCount)
@@ -963,6 +964,17 @@ func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attrib
 			return &ContainerDeleteImpactMismatchError{Expected: expected, Current: *current}
 		}
 
+		// Ownership survives logical deletion; physical container purge cannot
+		// remove an owner while its named assignments still exist.
+		for _, task := range tasks {
+			var owns int
+			if err := tx.QueryRow("SELECT COUNT(*) FROM tasks WHERE subtask_owner_uuid = ?", task.UUID).Scan(&owns); err != nil {
+				return err
+			}
+			if owns > 0 {
+				return fmt.Errorf("cannot purge container containing an owner with subtasks; archive instead")
+			}
+		}
 		attachments, err := recursiveDeleteAttachmentsTx(tx, containerUUID)
 		if err != nil {
 			return err
@@ -1129,7 +1141,8 @@ func recursiveDeleteTasksTx(tx *sql.Tx, containerUUID string) ([]recursiveTaskRo
 		  FROM tasks t
 		  JOIN subtree ON t.project_uuid = subtree.uuid
 		  LEFT JOIN attachments a ON a.task_uuid = t.uuid
-	 GROUP BY t.uuid, t.id, t.slug
+	 WHERE `+taskmember.Filter("t", false)+`
+ GROUP BY t.uuid, t.id, t.slug
 		 ORDER BY t.id ASC
 	`, containerUUID)
 	if err != nil {
@@ -1162,6 +1175,7 @@ func recursiveDeleteAttachmentsTx(tx *sql.Tx, containerUUID string) ([]Attachmen
 		  FROM attachments a
 		  JOIN tasks t ON t.uuid = a.task_uuid
 		  JOIN subtree ON t.project_uuid = subtree.uuid
+		 WHERE `+taskmember.Filter("t", false)+`
 		 ORDER BY a.id ASC
 	`, containerUUID)
 	if err != nil {

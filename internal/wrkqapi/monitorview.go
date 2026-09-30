@@ -53,6 +53,12 @@ func (a *API) MonitorEventsView(ctx context.Context, p MonitorEventsViewParams) 
 		return nil, err
 	}
 
+	if !p.StateOnly {
+		if err := a.expandTaskEventSelectors(&selected); err != nil {
+			return nil, err
+		}
+	}
+
 	filter := monitorEventFilter{
 		taskUUIDs:       selected.taskUUIDs,
 		taskFriendlyIDs: selected.taskFriendlyIDs,
@@ -196,6 +202,14 @@ func (a *API) HistoryTailView(ctx context.Context, p HistoryTailViewParams) (*Wr
 		return nil, err
 	}
 
+	selected, err := a.resolveMonitorSelectors(p.Tasks)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.expandTaskEventSelectors(&selected); err != nil {
+		return nil, err
+	}
+
 	limit := p.Limit
 	if limit <= 0 || limit > monitorMaxPageLimit {
 		limit = monitorMaxPageLimit
@@ -210,7 +224,7 @@ func (a *API) HistoryTailView(ctx context.Context, p HistoryTailViewParams) (*Wr
 	view := &WrkqHistoryTailView{Items: []WrkqWatchEvent{}, HighWater: p.Cursor}
 	for rows.Next() {
 		var e WrkqWatchEvent
-		var resourceID sql.NullString
+		var resourceID, taskID sql.NullString
 		if err := rows.Scan(
 			&e.ID,
 			&e.Timestamp,
@@ -222,13 +236,18 @@ func (a *API) HistoryTailView(ctx context.Context, p HistoryTailViewParams) (*Wr
 			&e.ETag,
 			&e.Payload,
 			&resourceID,
+			&taskID,
 		); err != nil {
 			return nil, NewInternalError(fmt.Errorf("scan failed: %w", err))
 		}
+		e.TaskID = taskID.String
 		if resourceID.Valid {
 			e.ResourceID = &resourceID.String
 		}
 		view.HighWater = e.ID
+		if len(p.Tasks) > 0 && (e.ResourceUUID == nil || !containsMonitorString(selected.taskUUIDs, *e.ResourceUUID)) && !containsMonitorString(selected.taskFriendlyIDs, e.TaskID) {
+			continue
+		}
 		view.Items = append(view.Items, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -639,11 +658,11 @@ const monitorEventScanQuery = `
 	           ELSE NULL
 	       END as resource_id,
 	       CASE e.resource_type
-	           WHEN 'comment' THEN (SELECT task_uuid FROM comments WHERE uuid = e.resource_uuid)
+	           WHEN 'comment' THEN COALESCE((SELECT task_uuid FROM comments WHERE uuid = e.resource_uuid),(SELECT uuid FROM tasks WHERE uuid=json_extract(e.payload,'$.task_id') OR id=json_extract(e.payload,'$.task_id')))
 	           ELSE NULL
 	       END as comment_task_uuid,
 	       CASE e.resource_type
-	           WHEN 'comment' THEN (SELECT t.id FROM comments c JOIN tasks t ON t.uuid = c.task_uuid WHERE c.uuid = e.resource_uuid)
+	           WHEN 'comment' THEN (SELECT id FROM tasks WHERE uuid=COALESCE((SELECT task_uuid FROM comments WHERE uuid=e.resource_uuid),json_extract(e.payload,'$.task_id')) OR id=json_extract(e.payload,'$.task_id'))
 	           ELSE NULL
 	       END as comment_task_id,
 	       CASE e.resource_type
@@ -653,7 +672,12 @@ const monitorEventScanQuery = `
 	       CASE e.resource_type
 	           WHEN 'envelope' THEN (SELECT task_uuid FROM envelopes WHERE uuid = e.resource_uuid)
 	           ELSE NULL
-	       END as envelope_task_uuid
+	       END as envelope_task_uuid,
+       CASE e.resource_type
+           WHEN 'envelope' THEN (SELECT t.id FROM envelopes en JOIN tasks t ON t.uuid=en.task_uuid WHERE en.uuid=e.resource_uuid)
+           WHEN 'room' THEN (SELECT t.id FROM rooms r JOIN tasks t ON t.uuid=r.task_uuid WHERE r.uuid=e.resource_uuid)
+           ELSE NULL
+       END as envelope_task_id
 	FROM event_log e
 	WHERE e.id > ?
 	ORDER BY e.id ASC
@@ -667,10 +691,16 @@ const watchTailScanQuery = `
 	       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
 	       CASE e.resource_type
 	           WHEN 'task' THEN (SELECT id FROM tasks WHERE uuid = e.resource_uuid)
+	           WHEN 'comment' THEN (SELECT id FROM comments WHERE uuid=e.resource_uuid)
+	           WHEN 'envelope' THEN (SELECT id FROM envelopes WHERE uuid=e.resource_uuid)
 	           WHEN 'container' THEN (SELECT id FROM containers WHERE uuid = e.resource_uuid)
 	           ELSE NULL
 	       END as resource_id
-	FROM event_log e
+	 , CASE WHEN e.resource_type='task' THEN (SELECT id FROM tasks WHERE uuid=e.resource_uuid)
+        WHEN e.resource_type='comment' THEN (SELECT id FROM tasks WHERE uuid=COALESCE((SELECT task_uuid FROM comments WHERE uuid=e.resource_uuid),json_extract(e.payload,'$.task_id')) OR id=json_extract(e.payload,'$.task_id'))
+        WHEN e.resource_type='envelope' THEN (SELECT t.id FROM envelopes en JOIN tasks t ON t.uuid=en.task_uuid WHERE en.uuid=e.resource_uuid)
+        ELSE '' END
+    FROM event_log e
 	WHERE e.id > ?
 	ORDER BY e.id ASC
 	LIMIT ?
@@ -679,7 +709,7 @@ const watchTailScanQuery = `
 func scanMonitorRow(rows *sql.Rows) (monitorRow, string, string, monitorCollabRefs, error) {
 	var event monitorRow
 	var resourceID, commentTaskUUID, commentTaskID sql.NullString
-	var envelopeRoomUUID, envelopeTaskUUID sql.NullString
+	var envelopeRoomUUID, envelopeTaskUUID, envelopeTaskID sql.NullString
 	if err := rows.Scan(
 		&event.ID,
 		&event.Timestamp,
@@ -692,11 +722,21 @@ func scanMonitorRow(rows *sql.Rows) (monitorRow, string, string, monitorCollabRe
 		&commentTaskID,
 		&envelopeRoomUUID,
 		&envelopeTaskUUID,
+		&envelopeTaskID,
 	); err != nil {
 		return monitorRow{}, "", "", monitorCollabRefs{}, fmt.Errorf("scan monitor event: %w", err)
 	}
 	if resourceID.Valid {
 		event.ResourceID = &resourceID.String
+	}
+	if event.ResourceType == "task" && event.ResourceID != nil {
+		event.TaskID = *event.ResourceID
+	}
+	if envelopeTaskID.Valid {
+		event.TaskID = envelopeTaskID.String
+	}
+	if commentTaskID.Valid {
+		event.TaskID = commentTaskID.String
 	}
 	collab := monitorCollabRefs{
 		roomUUID: valueOrEmptyString(envelopeRoomUUID),
@@ -754,4 +794,26 @@ func valueOrEmptyString(v sql.NullString) string {
 		return v.String
 	}
 	return ""
+}
+
+// expandTaskEventSelectors widens only event reads. State and stateOnly callers
+// retain the exact selectors, so subtask completion cannot satisfy owner waits.
+func (a *API) expandTaskEventSelectors(selected *monitorSelectorSet) error {
+	if len(selected.taskUUIDs) == 0 {
+		return nil
+	}
+	rows, err := a.db.Query("SELECT uuid,id FROM tasks WHERE subtask_owner_uuid IN ("+monitorQuestionMarks(len(selected.taskUUIDs))+")", monitorStringsToInterfaces(selected.taskUUIDs)...)
+	if err != nil {
+		return NewInternalError(err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var uuid, taskID string
+		if err := rows.Scan(&uuid, &taskID); err != nil {
+			return NewInternalError(err)
+		}
+		selected.taskUUIDs = appendMonitorUnique(selected.taskUUIDs, uuid)
+		selected.taskFriendlyIDs = appendMonitorUnique(selected.taskFriendlyIDs, taskID)
+	}
+	return rows.Err()
 }

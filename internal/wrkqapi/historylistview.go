@@ -4,12 +4,14 @@ package wrkqapi
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/id"
+	"github.com/lherron/wrkq/internal/taskfamily"
 )
 
 // HistoryListView reproduces legacy `wrkq log` byte-for-byte: the same resource
@@ -60,7 +62,7 @@ func (a *API) resolveLogResource(ctx context.Context, target string) (string, st
 		}
 		return uuid, "promise", nil
 	}
-	if id.IsFriendlyID(target) {
+	if id.IsFriendlyID(target) || id.IsTask(target) {
 		prefix := target[:1]
 		switch prefix {
 		case "T":
@@ -116,11 +118,17 @@ func (a *API) queryLogEventLog(ctx context.Context, resourceUUID, resourceType s
 
 	query := `
 		SELECT e.id, e.timestamp, e.principal_ref, e.scope_ref,
-		       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload
+		       e.resource_type, e.resource_uuid, e.event_type, e.etag, e.payload,
+        CASE e.resource_type WHEN 'task' THEN (SELECT id FROM tasks WHERE uuid=e.resource_uuid) WHEN 'comment' THEN (SELECT id FROM comments WHERE uuid=e.resource_uuid) WHEN 'envelope' THEN (SELECT id FROM envelopes WHERE uuid=e.resource_uuid) ELSE NULL END,
+        CASE e.resource_type WHEN 'task' THEN (SELECT id FROM tasks WHERE uuid=e.resource_uuid) WHEN 'comment' THEN (SELECT id FROM tasks WHERE uuid=COALESCE((SELECT task_uuid FROM comments WHERE uuid=e.resource_uuid),json_extract(e.payload,'$.task_id')) OR id=json_extract(e.payload,'$.task_id')) WHEN 'envelope' THEN (SELECT t.id FROM envelopes en JOIN tasks t ON t.uuid=en.task_uuid WHERE en.uuid=e.resource_uuid) ELSE '' END
 		FROM event_log e
 		WHERE e.resource_uuid = ? AND e.resource_type = ?
 	`
 	args := []any{resourceUUID, resourceType}
+	if resourceType == "task" {
+		query = query[:strings.Index(query, "WHERE e.resource_uuid")] + "WHERE ((e.resource_type='task' AND " + taskfamily.Filter("e.resource_uuid") + ") OR (e.resource_type='comment' AND " + taskfamily.Filter("COALESCE((SELECT task_uuid FROM comments WHERE uuid=e.resource_uuid),(SELECT uuid FROM tasks WHERE uuid=json_extract(e.payload,'$.task_id') OR id=json_extract(e.payload,'$.task_id')))") + ") OR (e.resource_type='envelope' AND " + taskfamily.Filter("(SELECT task_uuid FROM envelopes WHERE uuid=e.resource_uuid)") + "))"
+		args = []any{resourceUUID, resourceUUID, resourceUUID, resourceUUID, resourceUUID, resourceUUID}
+	}
 
 	if p.Since != "" {
 		sinceTime, perr := parseLogTimeFilter(p.Since)
@@ -162,6 +170,7 @@ func (a *API) queryLogEventLog(ctx context.Context, resourceUUID, resourceType s
 	for rows.Next() {
 		var e WrkqLogEvent
 		var timestampStr string
+		var taskID sql.NullString
 
 		if err := rows.Scan(
 			&e.ID,
@@ -173,10 +182,13 @@ func (a *API) queryLogEventLog(ctx context.Context, resourceUUID, resourceType s
 			&e.EventType,
 			&e.ETag,
 			&e.Payload,
+			&e.ResourceID,
+			&taskID,
 		); err != nil {
 			return nil, false, NewInternalError(err)
 		}
 
+		e.TaskID = taskID.String
 		e.Timestamp, err = time.Parse(time.RFC3339, timestampStr)
 		if err != nil {
 			e.Timestamp, _ = time.Parse("2006-01-02T15:04:05Z", timestampStr)

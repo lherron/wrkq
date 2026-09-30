@@ -67,6 +67,11 @@ predicate: >
   Cross-node collaboration travels through the shared canonical wrkqd ledger.
   After the fleet-complete cutover, HRC federation retains birth, placement, and
   summon authority but no durable message transport or message outbox authority.
+  Named subtasks route through their owner's effective room, preserving the
+  exact subtask subject and caller/recipient scopes. Campaign coalescing,
+  per-scope obligations, historical-envelope rooms and post-completion replies
+  retain their existing semantics.
+
 authority:
   repo: wrkq
   surface: room/envelope/member store transactions, wrkq workrpc methods, @wrkq/client, and wrkc
@@ -96,8 +101,13 @@ required_tests:
   - TestConcurrentObservationsWriteExactlyOneFailure
   - T-08401 virgin and ongoing event-cursor gates prove expiry failures remain beyond the returned high-water and reach sender-notice and cleanup consumers exactly once
 last_verified:
-  date: 2026-09-02
-  evidence: T-07871 durability implementation passed Daedalus review and just verify; installed daemon-down ledger and HRC-up presentation evidence remains the completion gate. T-08401 revision 3 was source-reviewed and approved on 2026-09-11; its implementation and named gates remain pending, so this date is not refreshed.
+  date: 2026-09-30
+  evidence: >
+    T-09897 focused API/store checks and isolated built-binary acceptance cover
+    named-subtask residency, membership exclusion, owner-room routing, campaign
+    context/activity, historical snapshot restore and event-family selectors.
+    Artifacts: var/wrkq-artifacts/T-09897/VALIDATION.md. Live activation and fleet
+    client pins remain Mable-owned.
 reopen_when:
   - any non-wrkq store becomes a durable room, envelope, obligation, membership, attendance, or presentation-receipt authority
   - wrkq or wrkc acquires an HRC runtime dependency

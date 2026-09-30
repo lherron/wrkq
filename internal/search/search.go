@@ -15,6 +15,7 @@ import (
 	"github.com/lherron/wrkq/internal/search/indexdb"
 	"github.com/lherron/wrkq/internal/search/indexer"
 	"github.com/lherron/wrkq/internal/search/rank"
+	"github.com/lherron/wrkq/internal/taskmember"
 )
 
 type Service struct {
@@ -24,6 +25,7 @@ type Service struct {
 }
 
 type Options struct {
+	Subtasks             bool
 	Query                string
 	Paths                []string
 	State                string
@@ -480,7 +482,7 @@ func handoffMatches(scopeRef, status string, opts Options) bool {
 func (s *Service) canonicalTaskMatches(taskUUID string, opts Options) bool {
 	var state, kind string
 	var assignee, labelsJSON sql.NullString
-	err := s.Canonical.QueryRow(`SELECT state, kind, assignee_principal_ref, labels FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state, &kind, &assignee, &labelsJSON)
+	err := s.Canonical.QueryRow(`SELECT state, kind, assignee_principal_ref, labels FROM tasks WHERE uuid = ? AND `+taskmember.Filter("", opts.Subtasks), taskUUID).Scan(&state, &kind, &assignee, &labelsJSON)
 	if err != nil {
 		return false
 	}

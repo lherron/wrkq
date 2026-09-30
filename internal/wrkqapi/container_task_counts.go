@@ -5,6 +5,7 @@ package wrkqapi
 import (
 	"context"
 	"database/sql"
+	"github.com/lherron/wrkq/internal/taskmember"
 )
 
 // ContainerTaskCounts returns every selected non-root container's subtree task
@@ -73,7 +74,7 @@ func (a *API) ContainerTaskCounts(
 		  FROM containers c
 		  LEFT JOIN v_container_paths paths ON paths.uuid = c.uuid
 		  LEFT JOIN descendants d ON d.ancestor_uuid = c.uuid
-		  LEFT JOIN tasks t ON t.project_uuid = d.descendant_uuid
+		  LEFT JOIN tasks t ON t.project_uuid = d.descendant_uuid AND `+taskmember.Filter("t", false)+`
 		  LEFT JOIN project_for pf ON pf.container_uuid = c.uuid
 		  LEFT JOIN containers project ON project.uuid = pf.project_uuid
 		 WHERE c.kind != 'root'`+archivedFilter+`

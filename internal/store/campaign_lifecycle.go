@@ -9,6 +9,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/taskmember"
 	"github.com/lherron/wrkq/internal/webhooks"
 )
 
@@ -292,7 +293,7 @@ func campaignMemberDiagnosticsTx(tx *sql.Tx, campaignUUID string) ([]campaignMem
 		       CASE WHEN t.project_uuid = ? THEN 'resident' ELSE 'enrolled' END
 		  FROM tasks t
 		  LEFT JOIN v_task_paths tp ON tp.uuid = t.uuid
-		 WHERE t.project_uuid = ? OR t.campaign_uuid = ?
+		 WHERE (t.project_uuid = ? OR t.campaign_uuid = ?) AND `+taskmember.Filter("t", false)+`
 		 ORDER BY t.id
 	`, campaignUUID, campaignUUID, campaignUUID)
 	if err != nil {
@@ -399,10 +400,11 @@ func campaignUUIDForTaskTx(tx *sql.Tx, taskUUID string) (string, error) {
 	var enrolledUUID, residentState, enrolledState sql.NullString
 	if err := tx.QueryRow(`
 		SELECT t.project_uuid, t.campaign_uuid, resident.campaign_state, enrolled.campaign_state
-		  FROM tasks t
+		  FROM tasks subject
+		  JOIN tasks t ON t.uuid = COALESCE(subject.subtask_owner_uuid, subject.uuid)
 		  LEFT JOIN containers resident ON resident.uuid = t.project_uuid
 		  LEFT JOIN containers enrolled ON enrolled.uuid = t.campaign_uuid
-		 WHERE t.uuid = ?
+		 WHERE subject.uuid = ?
 	`, taskUUID).Scan(&residentUUID, &enrolledUUID, &residentState, &enrolledState); err != nil {
 		return "", fmt.Errorf("failed to load task campaign for close nudge: %w", err)
 	}
@@ -458,7 +460,7 @@ func maybeLogCampaignCloseNudge(
 		SELECT COUNT(*)
 		  FROM tasks
 		 WHERE (project_uuid = ? OR campaign_uuid = ?)
-		   AND state NOT IN ('completed','cancelled','archived','deleted')
+		   AND state NOT IN ('completed','cancelled','archived','deleted') AND `+taskmember.Filter("", false)+`
 	`, campaignUUID, campaignUUID).Scan(&openMembers); err != nil {
 		return fmt.Errorf("failed to count open campaign members: %w", err)
 	}

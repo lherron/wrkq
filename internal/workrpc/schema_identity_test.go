@@ -77,7 +77,8 @@ import (
 // envelope.failed event. Additive; cardinality unchanged.
 // T-09634 adds the optional timeline before bound; old requests keep their shape.
 // T-09886 adds optional session attribution to comment.add and comment read DTOs.
-const pinnedProtocolSchemaHash = "sha256:129936e0fecaa34f8bcbf9d7c2a2647cbba64eff8f779cb64e5beacb9c128d74"
+// T-09897 catalogs task create/list requests and named-subtask read/write fields.
+const pinnedProtocolSchemaHash = "sha256:5f54bf7e2d246610f37a2fb22ef875dfca0f5e4eb3155010d0ed2dd02b4e0999"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -98,7 +99,7 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 	}{
 		{"methods", len(MethodCatalog()), 184},
 		{"errorCodes", len(ErrorCodeCatalog()), 27},
-		{"dtos", len(dtoCatalog), 155},
+		{"dtos", len(dtoCatalog), 158},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

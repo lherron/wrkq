@@ -12,6 +12,7 @@ import (
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
+	"github.com/lherron/wrkq/internal/taskmember"
 )
 
 // TreeView walks the container/task hierarchy under p.Path and returns the legacy
@@ -223,9 +224,9 @@ func (a *API) loadCampaignEnrollments(ctx context.Context, campaignUUID, campaig
 		SELECT t.uuid, t.id, t.slug, t.title, t.state, t.created_at, t.archived_at, t.deleted_at,
 		       t.requested_by_project_id, t.assigned_project_id, t.acknowledged_at, t.resolution,
 		       COALESCE((SELECT slug FROM container_ancestors ca
-		                  WHERE ca.task_uuid = t.uuid AND ca.kind = 'project' LIMIT 1), '')
+		                  WHERE ca.task_uuid = t.uuid AND ca.kind = 'project' LIMIT 1), ''), (SELECT COUNT(*) FROM tasks st WHERE st.subtask_owner_uuid=t.uuid AND st.state NOT IN ('completed','cancelled','archived','deleted'))
 		  FROM tasks t
-		 WHERE t.campaign_uuid = ? AND t.project_uuid != ?
+		 WHERE t.campaign_uuid = ? AND t.project_uuid != ? AND `+taskmember.Filter("t", false)+`
 		 ORDER BY t.created_at, t.id
 	`, campaignUUID, campaignUUID)
 	if err != nil {
@@ -238,7 +239,7 @@ func (a *API) loadCampaignEnrollments(ctx context.Context, campaignUUID, campaig
 		var archivedAt, deletedAt, requestedBy, assigned, acknowledged, resolution *string
 		var residentProject string
 		if err := rows.Scan(&member.UUID, &member.ID, &member.Slug, &member.Title, &member.State, &member.WireCreatedAt,
-			&archivedAt, &deletedAt, &requestedBy, &assigned, &acknowledged, &resolution, &residentProject); err != nil {
+			&archivedAt, &deletedAt, &requestedBy, &assigned, &acknowledged, &resolution, &residentProject, &member.OpenSubtaskCount); err != nil {
 			return nil, NewInternalError(err)
 		}
 		member.Type = "task"
@@ -268,7 +269,7 @@ func (a *API) campaignHasUnclosedEnrollment(ctx context.Context, campaignUUID st
 	var exists bool
 	err := a.db.QueryRowContext(ctx, `
 		SELECT EXISTS(SELECT 1 FROM tasks
-		 WHERE campaign_uuid = ? AND project_uuid != ?
+		 WHERE campaign_uuid = ? AND project_uuid != ? AND `+taskmember.Filter("", false)+`
 		   AND archived_at IS NULL AND deleted_at IS NULL AND state != 'completed')
 	`, campaignUUID, campaignUUID).Scan(&exists)
 	if err != nil {
@@ -420,9 +421,9 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filt
 		taskQuery := `
 			SELECT uuid, id, slug, title, state, created_at, archived_at, deleted_at,
 			       requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
-			       parent_task_uuid
+			       parent_task_uuid, subtask_owner_uuid, (SELECT COUNT(*) FROM tasks st WHERE st.subtask_owner_uuid=tasks.uuid AND st.state NOT IN ('completed','cancelled','archived','deleted'))
 			FROM tasks
-			WHERE project_uuid = ?`
+			WHERE project_uuid = ? AND ` + taskmember.Filter("", true)
 		taskArgs := []any{*parentUUID}
 		taskQuery += ` ORDER BY created_at ASC, id ASC`
 
@@ -438,9 +439,9 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filt
 		for taskRows.Next() {
 			var node WrkqTreeNode
 			var archivedAt, deletedAt *string
-			var requestedBy, assignedProject, acknowledgedAt, resolution, parentTaskUUID *string
+			var requestedBy, assignedProject, acknowledgedAt, resolution, parentTaskUUID, subtaskOwnerUUID *string
 			if err := taskRows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &node.WireCreatedAt, &archivedAt, &deletedAt,
-				&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &parentTaskUUID); err != nil {
+				&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &parentTaskUUID, &subtaskOwnerUUID, &node.OpenSubtaskCount); err != nil {
 				_ = taskRows.Close()
 				return nil, NewInternalError(err)
 			}
@@ -456,10 +457,16 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filt
 			node.IsDeleted = deletedAt != nil
 			node.Children = make([]*WrkqTreeNode, 0)
 
-			totalTasks++
-			isClosed := node.IsArchived || node.IsDeleted || node.State == "completed"
-			if isClosed {
-				closedTasks++
+			if subtaskOwnerUUID != nil {
+				node.WireParentTaskUUID = *subtaskOwnerUUID
+				node.SubtaskOwnerID = strings.Split(node.ID, ".")[0]
+			}
+			if subtaskOwnerUUID == nil {
+				totalTasks++
+				isClosed := node.IsArchived || node.IsDeleted || node.State == "completed"
+				if isClosed {
+					closedTasks++
+				}
 			}
 
 			if showTask := filter.admits(node.State, node.IsArchived, node.IsDeleted); showTask {
@@ -486,7 +493,9 @@ func (a *API) buildTreeNode(ctx context.Context, path string, maxDepth int, filt
 				parent.Children = append(parent.Children, t)
 				continue
 			}
-			topTasks = append(topTasks, t)
+			if t.SubtaskOwnerID == "" {
+				topTasks = append(topTasks, t)
+			}
 		}
 
 		// T-08216 F4(b): the selector decides which TASKS are visible; pruneEmpty
@@ -545,13 +554,13 @@ func (a *API) loadExternalTreeBacklinks(ctx context.Context, parentUUID string, 
 	rows, err := a.db.QueryContext(ctx, `
 		SELECT c.uuid, c.id, c.slug, c.title, c.state, c.created_at, c.archived_at, c.deleted_at,
 		       c.requested_by_project_id, c.assigned_project_id, c.acknowledged_at, c.resolution,
-		       COALESCE(cp.id, ''), COALESCE(vcp.path, '')
+		       COALESCE(cp.id, ''), COALESCE(vcp.path, ''), (SELECT COUNT(*) FROM tasks st WHERE st.subtask_owner_uuid=c.uuid AND st.state NOT IN ('completed','cancelled','archived','deleted'))
 		  FROM tasks c
 		  JOIN tasks p ON p.uuid = c.parent_task_uuid
 		  LEFT JOIN containers cp ON cp.uuid = c.project_uuid
 		  LEFT JOIN v_container_paths vcp ON vcp.uuid = c.project_uuid
 		 WHERE c.parent_task_uuid = ?
-		   AND c.project_uuid != p.project_uuid
+		   AND c.project_uuid != p.project_uuid AND `+taskmember.Filter("c", false)+`
 		 ORDER BY c.created_at ASC, c.id ASC
 	`, parentUUID)
 	if err != nil {
@@ -565,7 +574,7 @@ func (a *API) loadExternalTreeBacklinks(ctx context.Context, parentUUID string, 
 		var archivedAt, deletedAt *string
 		var requestedBy, assignedProject, acknowledgedAt, resolution *string
 		if err := rows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &node.WireCreatedAt, &archivedAt, &deletedAt,
-			&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &node.ExternalProjectID, &node.ExternalPath); err != nil {
+			&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &node.ExternalProjectID, &node.ExternalPath, &node.OpenSubtaskCount); err != nil {
 			return nil, NewInternalError(err)
 		}
 		node.Type = "task"

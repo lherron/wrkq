@@ -83,8 +83,13 @@ wrkq touch myproject/implement-feature \
   -d "Description here" \
   --priority 2 --kind bug
 
-# Create a subtask
+# Create an independent child task
 wrkq touch myproject/sub-piece --parent-task T-00001
+
+# Create a named assignment in the owner context
+wrkq touch T-00001.render --subtask -t "Render preview"
+wrkq ls T-00001 --subtasks
+wrkq find --subtasks --owner-state terminal
 
 # Read a task, container, or promise (TTY: human/raw detail; piped: JSON)
 wrkq cat myproject/implement-feature
@@ -351,3 +356,15 @@ config doctor
 
 Command-specific structured errors may refine these; prefer machine output
 plus the command's own `--help` for automation.
+
+### Named-subtask identity and reads
+
+A composite task token such as `T-12345.render` fits the existing scope grammar:
+`arris@demo:T-12345.render` is a distinct task scope and `AGENT_TASK` is the full
+composite ID. `arris@demo:T-12345/reviewer` retains its existing role meaning.
+Ownership and slug are immutable; owner relocation carries subtask residency.
+Default container lists and rollups exclude named subtasks. Owner detail includes
+summaries, list/tree rows include open-subtask counts, and `search --subtasks`
+includes assignments explicitly. Owner completion reports open assignments
+without changing them. Archived/deleted owners refuse creation and claims;
+physical purge of assignments or owners with assignments is refused.

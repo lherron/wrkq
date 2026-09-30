@@ -11,6 +11,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/taskfamily"
 	"github.com/lherron/wrkq/internal/webhooks"
 )
 
@@ -901,8 +902,8 @@ func (rs *RoomStore) ListEnvelopes(params EnvelopeListParams) ([]domain.Envelope
 		args = append(args, params.ToPrincipalRef)
 	}
 	if params.TaskUUID != "" {
-		clauses = append(clauses, "task_uuid = ?")
-		args = append(args, params.TaskUUID)
+		clauses = append(clauses, taskfamily.Filter("task_uuid"))
+		args = append(args, params.TaskUUID, params.TaskUUID)
 	}
 	if len(params.States) > 0 {
 		placeholders := make([]string, 0, len(params.States))

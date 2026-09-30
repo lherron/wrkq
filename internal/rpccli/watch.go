@@ -29,6 +29,7 @@ const watchPollInterval = 1 * time.Second
 // legacy. It INCLUDES resource_id and uses a STRING timestamp (distinct from
 // logEvent). The mirror NEVER reuses logEvent for the raw tail.
 type watchEvent struct {
+	TaskID       string  `json:"task_id,omitempty"`
 	ID           int64   `json:"id"`
 	Timestamp    string  `json:"timestamp"`
 	PrincipalRef *string `json:"principal_ref,omitempty"`
@@ -57,7 +58,7 @@ Examples:
   wrkq watch portal/**           # Watch events under portal (future)
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tr, _, closeFn, err := openMirror(cmd)
+			tr, sc, closeFn, err := openMirror(cmd)
 			if err != nil {
 				return err
 			}
@@ -69,7 +70,10 @@ Examples:
 			// Legacy: ndjson = watchNDJSON || !isStdoutTTY(stdout). Non-TTY defaults
 			// to NDJSON; a TTY without --ndjson renders the human format.
 			ndjsonMode := ndjson || !isStdoutTTY(out)
-			return watchTailLoop(cmd.Context(), tr, out, since, ndjsonMode, follow)
+			for i := range args {
+				args[i] = sc.selector(args[i], false)
+			}
+			return watchTailLoop(cmd.Context(), tr, out, since, ndjsonMode, follow, args...)
 		},
 	}
 	cmd.Flags().Int64Var(&since, "since", 0, "Start from event ID (0 = all events)")
@@ -83,12 +87,12 @@ Examples:
 // the server's high-water, renders each row (NDJSON or human), and (when following)
 // sleeps watchPollInterval between polls. Without --follow it drains the current
 // backlog and returns. Shared by `wrkq watch` and `monitor watch --raw`.
-func watchTailLoop(ctx context.Context, tr Transport, out io.Writer, sinceID int64, ndjson bool, follow bool) error {
+func watchTailLoop(ctx context.Context, tr Transport, out io.Writer, sinceID int64, ndjson bool, follow bool, tasks ...string) error {
 	currentID := sinceID
 	encoder := json.NewEncoder(out)
 
 	for {
-		raw, err := tr.Call(ctx, "wrkq.history.tailView", map[string]any{"cursor": currentID})
+		raw, err := tr.Call(ctx, "wrkq.history.tailView", map[string]any{"cursor": currentID, "tasks": tasks})
 		if err != nil {
 			return monitorStripError(err)
 		}

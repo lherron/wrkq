@@ -181,7 +181,7 @@ func (a *API) resolveProjectEventAffiliation(ctx context.Context, project, task 
 	}
 	var containerUUID string
 	var enrolled, residentCampaign sql.NullString
-	if err := a.db.QueryRowContext(ctx, `SELECT t.project_uuid, t.campaign_uuid, c.campaign_state FROM tasks t JOIN containers c ON c.uuid = t.project_uuid WHERE t.uuid = ?`, taskUUID).Scan(&containerUUID, &enrolled, &residentCampaign); err != nil {
+	if err := a.db.QueryRowContext(ctx, `SELECT t.project_uuid, t.campaign_uuid, c.campaign_state FROM tasks subject JOIN tasks t ON t.uuid = COALESCE(subject.subtask_owner_uuid, subject.uuid) JOIN containers c ON c.uuid = t.project_uuid WHERE subject.uuid = ?`, taskUUID).Scan(&containerUUID, &enrolled, &residentCampaign); err != nil {
 		return "", "", nil, nil, NewInternalError(err)
 	}
 	var projectUUID string

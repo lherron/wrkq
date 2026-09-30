@@ -17,6 +17,7 @@ import (
 // same internal/render code path. Human tables localize timestamps; structured
 // modes preserve the wire values and field order.
 type lsEntry struct {
+	OpenSubtaskCount     int     `json:"open_subtask_count"`
 	Type                 string  `json:"type"`
 	ID                   string  `json:"id"`
 	Slug                 string  `json:"slug"`
@@ -49,6 +50,7 @@ type lsEntry struct {
 func newLsCmd() *cobra.Command {
 	var asJSON, ndjson, porcelain, pretty, recursive, one, nul, all, reverse bool
 	var limit int
+	var subtasks bool
 	var cursorTok, typeFilter, sort, statesFlag string
 	cmd := &cobra.Command{
 		Use:     "ls [path...]",
@@ -75,6 +77,9 @@ func newLsCmd() *cobra.Command {
 			scoped := sc.paths(args, true)
 
 			params := map[string]any{}
+			if subtasks {
+				params["subtasks"] = true
+			}
 			if len(scoped) == 1 {
 				params["path"] = scoped[0]
 			} else if len(scoped) > 1 {
@@ -195,6 +200,7 @@ func newLsCmd() *cobra.Command {
 			}
 		},
 	}
+	cmd.Flags().BoolVar(&subtasks, "subtasks", false, "List named subtasks of an owner")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as newline-delimited JSON")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")

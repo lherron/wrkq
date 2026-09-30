@@ -125,3 +125,15 @@ func TestTransform(t *testing.T) {
 		}
 	})
 }
+
+func TestNamedSubtaskIDNeverGetsProjectPrefix(t *testing.T) {
+	cfg := &config.Config{ProjectRoot: "wrkq"}
+	for _, token := range []string{"T-12345.diagram", "t:T-12345.diagram"} {
+		if got := ApplyToSelector(cfg, token, false); got != token {
+			t.Fatalf("selector %q became %q", token, got)
+		}
+	}
+	if got := ApplyToPath(cfg, "T-12345.diagram", false); got != "T-12345.diagram" {
+		t.Fatal(got)
+	}
+}

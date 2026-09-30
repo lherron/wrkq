@@ -1067,6 +1067,14 @@ func (s *Service) AttachTask(taskSelector, templateRef, actor string, opts ...At
 	var dispatchAttachedWebhook bool
 	var initial State
 	err = withImmediateTx(s.db, func(tx *sql.Tx) error {
+		var subtaskOwner sql.NullString
+		if err := tx.QueryRow("SELECT subtask_owner_uuid FROM tasks WHERE uuid=?", taskUUID).Scan(&subtaskOwner); err != nil {
+			return err
+		}
+		if subtaskOwner.Valid {
+			return validationError("task", "named subtasks cannot attach workflows", "ordinary task", nil, "attach the workflow to the owner")
+		}
+
 		var definition, templateHash string
 		var discontinuedAt sql.NullString
 		if err := tx.QueryRow(`

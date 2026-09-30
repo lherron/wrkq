@@ -8,43 +8,56 @@ import (
 )
 
 // WrkqTask is the stable task resource DTO (docs/wrkq-wrkf-rpc.md §6.2).
+type SubtaskSummary struct {
+	ID        string `json:"id"`
+	Slug      string `json:"slug"`
+	Title     string `json:"title"`
+	State     string `json:"state"`
+	ClaimedBy string `json:"claimedBy,omitempty"`
+}
+
 type WrkqTask struct {
-	UUID                  string         `json:"uuid"`
-	ID                    string         `json:"id"`
-	Slug                  string         `json:"slug"`
-	Title                 string         `json:"title"`
-	ProjectUUID           string         `json:"projectUuid"`
-	CampaignUUID          string         `json:"campaignUuid,omitempty"`
-	Path                  string         `json:"path"`
-	State                 string         `json:"state"`
-	Priority              int            `json:"priority"`
-	Kind                  string         `json:"kind"`
-	RiskClass             string         `json:"riskClass,omitempty"`
-	Description           string         `json:"description"`
-	Specification         string         `json:"specification"`
-	Outcome               *string        `json:"outcome,omitempty"`
-	HasDescription        bool           `json:"hasDescription"`
-	HasSpecification      bool           `json:"hasSpecification"`
-	Labels                []string       `json:"labels"`
-	Meta                  map[string]any `json:"meta"`
-	ETag                  int64          `json:"etag"`
-	StartAt               string         `json:"startAt,omitempty"`
-	DueAt                 string         `json:"dueAt,omitempty"`
-	CausedBy              []string       `json:"causedBy,omitempty"`
-	CreatedAt             string         `json:"createdAt"`
-	UpdatedAt             string         `json:"updatedAt"`
-	CompletedAt           string         `json:"completedAt,omitempty"`
-	ArchivedAt            string         `json:"archivedAt,omitempty"`
-	DeletedAt             string         `json:"deletedAt,omitempty"`
-	AcknowledgedAt        string         `json:"acknowledgedAt,omitempty"`
-	AssigneePrincipalRef  string         `json:"assigneePrincipalRef,omitempty"`
-	ClaimedBy             string         `json:"claimedBy,omitempty"`
-	ClaimedScope          string         `json:"claimedScope,omitempty"`
-	ClaimedNode           string         `json:"claimedNode,omitempty"`
-	ClaimedAt             string         `json:"claimedAt,omitempty"`
-	ClaimGeneration       int64          `json:"claimGeneration,omitempty"`
-	CreatedByPrincipalRef string         `json:"createdByPrincipalRef,omitempty"`
-	UpdatedByPrincipalRef string         `json:"updatedByPrincipalRef,omitempty"`
+	RoomLocator           string           `json:"roomLocator,omitempty"`
+	SubtaskOwner          string           `json:"subtaskOwner,omitempty"`
+	SubtaskOwnerUUID      string           `json:"subtaskOwnerUuid,omitempty"`
+	OpenSubtaskCount      int              `json:"openSubtaskCount"`
+	Subtasks              []SubtaskSummary `json:"subtasks,omitempty"`
+	UUID                  string           `json:"uuid"`
+	ID                    string           `json:"id"`
+	Slug                  string           `json:"slug"`
+	Title                 string           `json:"title"`
+	ProjectUUID           string           `json:"projectUuid"`
+	CampaignUUID          string           `json:"campaignUuid,omitempty"`
+	Path                  string           `json:"path"`
+	State                 string           `json:"state"`
+	Priority              int              `json:"priority"`
+	Kind                  string           `json:"kind"`
+	RiskClass             string           `json:"riskClass,omitempty"`
+	Description           string           `json:"description"`
+	Specification         string           `json:"specification"`
+	Outcome               *string          `json:"outcome,omitempty"`
+	HasDescription        bool             `json:"hasDescription"`
+	HasSpecification      bool             `json:"hasSpecification"`
+	Labels                []string         `json:"labels"`
+	Meta                  map[string]any   `json:"meta"`
+	ETag                  int64            `json:"etag"`
+	StartAt               string           `json:"startAt,omitempty"`
+	DueAt                 string           `json:"dueAt,omitempty"`
+	CausedBy              []string         `json:"causedBy,omitempty"`
+	CreatedAt             string           `json:"createdAt"`
+	UpdatedAt             string           `json:"updatedAt"`
+	CompletedAt           string           `json:"completedAt,omitempty"`
+	ArchivedAt            string           `json:"archivedAt,omitempty"`
+	DeletedAt             string           `json:"deletedAt,omitempty"`
+	AcknowledgedAt        string           `json:"acknowledgedAt,omitempty"`
+	AssigneePrincipalRef  string           `json:"assigneePrincipalRef,omitempty"`
+	ClaimedBy             string           `json:"claimedBy,omitempty"`
+	ClaimedScope          string           `json:"claimedScope,omitempty"`
+	ClaimedNode           string           `json:"claimedNode,omitempty"`
+	ClaimedAt             string           `json:"claimedAt,omitempty"`
+	ClaimGeneration       int64            `json:"claimGeneration,omitempty"`
+	CreatedByPrincipalRef string           `json:"createdByPrincipalRef,omitempty"`
+	UpdatedByPrincipalRef string           `json:"updatedByPrincipalRef,omitempty"`
 
 	// createdAtRaw / updatedAtRaw hold the un-normalized timestamps for cursor
 	// anchoring; they are unexported and never serialized.
@@ -112,6 +125,8 @@ type WrkqWorkflowTimelineResult struct {
 
 // TaskCreateParams mirrors WrkqTaskCreateParams (§6.2).
 type TaskCreateParams struct {
+	SubtaskOwner         string         `json:"subtaskOwner,omitempty"`
+	Slug                 string         `json:"slug,omitempty"`
 	Path                 string         `json:"path,omitempty"`
 	Project              string         `json:"project,omitempty"`
 	Title                string         `json:"title"`
@@ -147,6 +162,9 @@ type TaskShowParams struct {
 // TaskListParams mirrors WrkqTaskListParams. state/kind accept a string or an
 // array of strings.
 type TaskListParams struct {
+	Subtasks       bool       `json:"subtasks,omitempty"`
+	SubtaskOwner   string     `json:"subtaskOwner,omitempty"`
+	OwnerState     string     `json:"ownerState,omitempty"`
 	Path           string     `json:"path,omitempty"`
 	State          flexString `json:"state,omitempty"`
 	Kind           flexString `json:"kind,omitempty"`

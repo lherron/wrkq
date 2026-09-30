@@ -13,6 +13,7 @@ import (
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/store"
 )
 
 const nsAttachmentAdd = "wrkq.attachment.add"
@@ -142,11 +143,12 @@ func (a *API) AttachmentAdd(ctx context.Context, p AttachmentAddParams) (*WrkqAt
 		return nil, NewInternalError(scanErr)
 	}
 
-	payload, _ := json.Marshal(map[string]any{
-		"filename":   filename,
-		"size_bytes": size,
-		"mime_type":  mimeType,
-	})
+	payloadData := map[string]any{"filename": filename, "size_bytes": size, "mime_type": mimeType, "task_id": taskUUID}
+	if err := store.StampTaskCampaignContext(tx, taskUUID, payloadData); err != nil {
+		_ = os.Remove(absPath)
+		return nil, NewInternalError(err)
+	}
+	payload, _ := json.Marshal(payloadData)
 	payloadStr := string(payload)
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
 		PrincipalRef: attr.PrincipalRef,
@@ -310,7 +312,11 @@ func (a *API) AttachmentRemove(ctx context.Context, p AttachmentRemoveParams) (*
 		return nil, NewInternalError(derr)
 	}
 
-	payload, _ := json.Marshal(map[string]any{"filename": filename})
+	payloadData := map[string]any{"filename": filename, "task_id": dto.TaskUUID}
+	if err := store.StampTaskCampaignContext(tx, dto.TaskUUID, payloadData); err != nil {
+		return nil, NewInternalError(err)
+	}
+	payload, _ := json.Marshal(payloadData)
 	payloadStr := string(payload)
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
 		PrincipalRef: attr.PrincipalRef,

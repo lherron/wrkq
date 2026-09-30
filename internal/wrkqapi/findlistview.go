@@ -17,6 +17,7 @@ import (
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
+	"github.com/lherron/wrkq/internal/taskmember"
 )
 
 func (e WrkqFindEntry) MarshalJSON() ([]byte, error) {
@@ -91,6 +92,7 @@ func (a *API) FindListView(ctx context.Context, p FindListViewParams) (*WrkqFind
 	}
 
 	opts := findQueryOptions{
+		subtasks: p.Subtasks, ownerState: p.OwnerState,
 		paths:                p.Paths,
 		typeFilter:           p.Type,
 		slugGlob:             p.SlugGlob,
@@ -138,7 +140,7 @@ func (a *API) executeFindQuery(ctx context.Context, opts findQueryOptions) ([]Wr
 	searchTasks := opts.typeFilter == "" || opts.typeFilter == "t"
 	searchContainers := opts.typeFilter == "" || opts.typeFilter == "p"
 
-	if len(opts.labels) > 0 || opts.claimedBy != "" || opts.claimedNode != "" || opts.hasOutcome {
+	if opts.subtasks || len(opts.labels) > 0 || opts.claimedBy != "" || opts.claimedNode != "" || opts.hasOutcome {
 		searchContainers = false
 	}
 	if opts.campaignUUID != "" {
@@ -208,14 +210,23 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 		       t.claimed_node, t.claimed_at, t.claim_generation,
 		       t.parent_task_uuid, t.requested_by_project_id,
 		       t.assigned_project_id, t.acknowledged_at, t.resolution, t.due_at, t.etag,
-		       cp.path || '/' || t.slug AS path, t.created_at, t.updated_at,
+		       cp.path || '/' || CASE WHEN owner.uuid IS NULL THEN t.slug ELSE owner.slug || '/' || t.slug END AS path, t.created_at, t.updated_at,
 		       CASE WHEN ? != '' AND t.project_uuid = ? THEN 'resident'
-		            WHEN ? != '' AND t.campaign_uuid = ? THEN 'enrolled' ELSE '' END AS membership
+		            WHEN ? != '' AND t.campaign_uuid = ? THEN 'enrolled' ELSE '' END AS membership, owner.id, (SELECT COUNT(*) FROM tasks st WHERE st.subtask_owner_uuid=t.uuid AND st.state NOT IN ('completed','cancelled','archived','deleted'))
 		FROM tasks t
 		JOIN v_container_paths cp ON cp.uuid = t.project_uuid
+ LEFT JOIN tasks owner ON owner.uuid = t.subtask_owner_uuid
 		WHERE 1=1
 	`
 	args := []any{opts.campaignUUID, opts.campaignUUID, opts.campaignUUID, opts.campaignUUID}
+	query += " AND " + taskmember.Filter("t", opts.subtasks)
+	if opts.ownerState != "" {
+		clause, err := subtaskOwnerStateClause(opts.ownerState, opts.subtasks)
+		if err != nil {
+			return nil, false, err
+		}
+		query += " AND " + clause
+	}
 	if opts.campaignUUID != "" {
 		query += " AND (t.project_uuid = ? OR t.campaign_uuid = ?)"
 		args = append(args, opts.campaignUUID, opts.campaignUUID)
@@ -374,7 +385,7 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 		if err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &specification, &state, &priority, &kind,
 			&assigneePrincipalRef, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
 			&parentTaskUUID, &requestedBy, &assignedProject,
-			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.CreatedAt, &r.UpdatedAt, &r.membership); err != nil {
+			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.CreatedAt, &r.UpdatedAt, &r.membership, &r.SubtaskOwnerID, &r.OpenSubtaskCount); err != nil {
 			return nil, false, NewInternalError(err)
 		}
 

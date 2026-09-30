@@ -123,6 +123,7 @@ type TaskEntry struct {
 	UpdatedByPrincipalRef string   `json:"updated_by_principal_ref,omitempty"`
 
 	Kind                  string  `json:"kind"`
+	SubtaskOwnerUUID      *string `json:"subtask_owner_uuid,omitempty"`
 	ParentTaskUUID        *string `json:"parent_task_uuid,omitempty"`
 	AssigneePrincipalRef  *string `json:"assignee_principal_ref,omitempty"`
 	Meta                  *string `json:"meta,omitempty"`

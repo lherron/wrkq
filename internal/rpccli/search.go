@@ -29,7 +29,7 @@ func newSearchCmd() *cobra.Command {
 	var state, kind, assignee, sort string
 	var labels []string
 	var limit, candidateLimit int
-	var reverse, asJSON, ndjson, porcelain, human, pretty, explain, fresh bool
+	var reverse, asJSON, ndjson, porcelain, human, pretty, explain, fresh, subtasks bool
 	cmd := &cobra.Command{
 		Use:   "search <query> [PATH...]",
 		Short: "Search task and comment text",
@@ -76,6 +76,9 @@ func newSearchCmd() *cobra.Command {
 			}
 			if explain {
 				params["explain"] = true
+			}
+			if subtasks {
+				params["subtasks"] = true
 			}
 			if fresh {
 				params["fresh"] = true
@@ -125,6 +128,7 @@ func newSearchCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&human, "human", false, "Force human-readable output")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force human-readable output even when not a TTY")
 	cmd.Flags().BoolVar(&explain, "explain", false, "Include ranking diagnostics in JSON output")
+	cmd.Flags().BoolVar(&subtasks, "subtasks", false, "Include named subtasks in search results")
 	cmd.Flags().BoolVar(&fresh, "fresh", false, "Fail if the search index is stale")
 	return cmd
 }

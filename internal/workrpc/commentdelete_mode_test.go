@@ -17,6 +17,7 @@ package workrpc_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
@@ -309,9 +310,18 @@ func TestCommentDelete_SoftEventParity(t *testing.T) {
 		t.Errorf("comment.deleted event etag: want 2 (new comment etag), got %d", evtEtag)
 	}
 
-	// Legacy payload is a fixed key order: task_id, comment_id, deleted_by_principal_ref, soft_delete.
-	want := `{"task_id":"` + taskUUID + `","comment_id":"` + commentID +
-		`","deleted_by_principal_ref":"agent:smokey","soft_delete":true}`
+	// Comment events preserve their fields and stamp production-time task context.
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	var containerUUID string
+	if err := database.QueryRow("SELECT project_uuid FROM tasks WHERE uuid = ?", taskUUID).Scan(&containerUUID); err != nil {
+		t.Fatal(err)
+	}
+	expected, _ := json.Marshal(map[string]any{"task_id": taskUUID, "comment_id": commentID, "deleted_by_principal_ref": "agent:smokey", "soft_delete": true, "campaign_uuid": nil, "container_uuid": containerUUID})
+	want := string(expected)
 	if payload != want {
 		t.Errorf("comment.deleted payload mismatch:\n want: %s\n got:  %s", want, payload)
 	}
@@ -338,7 +348,17 @@ func TestCommentDelete_PurgeEventParity(t *testing.T) {
 	if hasEtag {
 		t.Error("comment.purged event must NOT carry an etag (legacy omits it for purge)")
 	}
-	want := `{"task_id":"` + taskUUID + `","comment_id":"` + commentID + `","hard_delete":true}`
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	var containerUUID string
+	if err := database.QueryRow("SELECT project_uuid FROM tasks WHERE uuid = ?", taskUUID).Scan(&containerUUID); err != nil {
+		t.Fatal(err)
+	}
+	expected, _ := json.Marshal(map[string]any{"task_id": taskUUID, "comment_id": commentID, "hard_delete": true, "campaign_uuid": nil, "container_uuid": containerUUID})
+	want := string(expected)
 	if payload != want {
 		t.Errorf("comment.purged payload mismatch:\n want: %s\n got:  %s", want, payload)
 	}

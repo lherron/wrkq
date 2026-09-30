@@ -6,6 +6,8 @@ package wrkqapi
 // normalization and parent-task resolution are durable read behavior and so are
 // owned here on the server side.
 type FindListViewParams struct {
+	Subtasks             bool     `json:"subtasks,omitempty"`
+	OwnerState           string   `json:"ownerState,omitempty"`
 	Paths                []string `json:"paths,omitempty"`
 	Type                 string   `json:"type,omitempty"` // "t" (task) or "p" (project/container)
 	SlugGlob             string   `json:"slugGlob,omitempty"`
@@ -34,6 +36,8 @@ type FindListViewParams struct {
 // tags). Marshaled by encoding/json — NOT alphabetical (legacy uses a struct, not
 // a map), so field order here is the wire order.
 type WrkqFindEntry struct {
+	SubtaskOwnerID       *string  `json:"subtask_owner_id,omitempty"`
+	OpenSubtaskCount     int      `json:"open_subtask_count"`
 	Type                 string   `json:"type"`
 	UUID                 string   `json:"uuid"`
 	ID                   string   `json:"id"`
@@ -74,6 +78,8 @@ type WrkqFindListView struct {
 }
 
 type findQueryOptions struct {
+	subtasks             bool
+	ownerState           string
 	paths                []string
 	typeFilter           string
 	slugGlob             string

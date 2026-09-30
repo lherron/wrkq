@@ -5,11 +5,13 @@ import (
 
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/taskmember"
 )
 
 // treeNode is the historical /v1/containers/tree response model. It remains
 // daemon-owned while day-to-day command rendering lives only in rpccli.
 type treeNode struct {
+	OpenSubtaskCount     int         `json:"open_subtask_count"`
 	Type                 string      `json:"type"`
 	ID                   string      `json:"id"`
 	Slug                 string      `json:"slug"`
@@ -104,8 +106,8 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 	taskRows, err := database.Query(`
 		SELECT uuid, id, slug, title, state, created_at, archived_at, deleted_at,
 		       requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
-		       parent_task_uuid
-		FROM tasks WHERE project_uuid = ? ORDER BY created_at ASC, id ASC
+		       parent_task_uuid, (SELECT COUNT(*) FROM tasks st WHERE st.subtask_owner_uuid=tasks.uuid AND st.state NOT IN ('completed','cancelled','archived','deleted'))
+		FROM tasks WHERE project_uuid = ? AND `+taskmember.Filter("", false)+` ORDER BY created_at ASC, id ASC
 	`, *parentUUID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tasks: %w", err)
@@ -117,7 +119,7 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 		var archivedAt, deletedAt *string
 		var requestedBy, assignedProject, acknowledgedAt, resolution, parentTaskUUID *string
 		if err := taskRows.Scan(&node.UUID, &node.ID, &node.Slug, &node.Title, &node.State, &node.CreatedAt, &archivedAt, &deletedAt,
-			&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &parentTaskUUID); err != nil {
+			&requestedBy, &assignedProject, &acknowledgedAt, &resolution, &parentTaskUUID, &node.OpenSubtaskCount); err != nil {
 			_ = taskRows.Close()
 			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}

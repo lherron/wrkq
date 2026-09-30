@@ -9,6 +9,7 @@
  */
 
 import type {
+ WrkqLsListViewParams, WrkqLsListView, WrkqTreeViewParams, WrkqTreeView,
   WrkqAttachment,
   WrkqAttachmentAddParams,
   WrkqAttachmentListParams,
@@ -147,6 +148,8 @@ import type {
 } from "./types.js";
 
 export interface WrkqTaskFacade {
+ lsView(params: WrkqLsListViewParams): Promise<WrkqLsListView>;
+ treeView(params: WrkqTreeViewParams): Promise<WrkqTreeView>;
   create(params: WrkqTaskCreateParams): Promise<WrkqTask>;
   show(params: WrkqTaskShowParams): Promise<WrkqTask>;
   list(params?: WrkqTaskListParams): Promise<WrkqTaskListResult>;

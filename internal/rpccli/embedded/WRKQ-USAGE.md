@@ -114,3 +114,23 @@ For `add` and `renew`, use either `--in <duration>` or `--review-at <timestamp>`
 
 `wrkc info` covers durable rooms, addressed messages, and reply obligations. `wrkp info` covers project facts and timelines. Installation and daemon operation belong to the wrkq repository's `AGENTS.md` and operations documentation.
 </task_tracking_rules>
+
+## Named subtasks and child tasks
+
+Create a named assignment with `wrkq touch T-12345.render --subtask -t 'Render preview'`.
+Its immutable ID is `T-12345.render`; it consumes no global task number and shares
+its owner's residency and effective room. ID, UUID, and full owner path select
+it; bare slugs do not. Claims, completion, scopes and obligations remain distinct.
+
+`wrkq cat T-12345` lists the owner's subtask summaries. `wrkq ls T-12345 --subtasks`
+lists its assignments. Default container views exclude named subtasks; opt in
+with `find --subtasks` or `search <query> --subtasks`. Use
+`find --subtasks --owner-state terminal` to find actionable assignments under
+terminal owners. Completing an owner reports unfinished subtasks without
+changing them. Archived/deleted owners refuse creation and claims; purge is
+refused for subtasks and owners with subtasks.
+
+`--parent-task` creates an independent child task with a global ID, rather than a
+named subtask. Named subtasks cannot own tasks, enroll in campaigns, or attach a
+workflow directly. RPC create uses `subtaskOwner` and required `slug`, refusing
+`path`, `project`, `parentTask`, and `campaign` with them. `slug` alone is refused.

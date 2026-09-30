@@ -257,10 +257,56 @@ HRC and slow-but-live work must never be auto-stolen.
 
 ### Subtasks
 
-A task with `--parent-task` is stored as kind `subtask` unless `--kind` is
-explicitly provided. Parent links are task-graph edges and may cross
-project/container boundaries; the child keeps its own resident container.
-Subtasks cannot have subtasks.
+Named subtasks are assignments owned by an ordinary task, created with
+`wrkq touch T-12345.render --subtask`. Their server-built ID is the owner's ID
+plus `.` plus an immutable local slug (a letter first, no trailing hyphen,
+maximum 56 characters). They consume no task sequence number. Their owner,
+slug and ID cannot change; titles and normal task state remain editable.
+`subtask_owner_uuid` is distinct from the child-task edge `parent_task_uuid`.
+Named subtasks cannot own subtasks or child tasks, enroll in campaigns, or
+attach a wrkf instance directly.
+
+Residency follows the owner through a database cascade, including cross-project
+moves; direct divergent writes are refused. ID, UUID and full owner path select
+the same subtask. A bare slug never selects a named subtask. Ordinary task and
+container sibling slugs are disjoint.
+
+Default container lists, find, search, counts, rollups and campaign member
+projections exclude named subtasks. Use `ls T-12345 --subtasks`,
+`find --subtasks`, or `search <query> --subtasks` for explicit inclusion. Owner
+detail lists summaries and list/tree rows expose `open_subtask_count` (camelCase
+in the task RPC view). A completed owner with unfinished assignments displays
+`complete; N subtasks open`; completing it reports the open subtasks and leaves
+their states and claims untouched. `find --subtasks --owner-state terminal`
+finds actionable subtasks under completed, cancelled, archived or deleted owners.
+Archived or deleted owners refuse new subtask creation and claims; existing
+conversation remains replyable. Physical purge of a subtask, its owner, or a
+container holding such an owner is refused.
+
+Subtask messages use the owner's effective room, retaining the exact subtask
+subject and scopes. Claims and obligations are independent per composite ID.
+Subtasks inherit the owner's campaign as event context; their activity advances
+the owner's campaign member activity without adding members or admission.
+Snapshot export preserves ownership and import restores owners before subtasks,
+including an open subtask under a deleted owner.
+
+`--parent-task` creates an ordinary **child task**, default kind `task`, with a
+global task ID and independent residency. Parent links remain bounded task-graph
+edges and may cross project/container boundaries. Existing legacy `kind=subtask`
+labels remain valid. See [the approved named-subtask design](docs/named-subtasks-proposal.md)
+and contract `wrkq.named-subtasks.v1` for the complete behavior.
+
+### Task event selectors
+
+An ordinary task selector in event reads and subscriptions includes that task
+and its named subtasks. A composite subtask selector matches only itself. Every
+event retains its own task identity. This applies to monitor events, history
+list/tail, room logs with a task filter, timeline/project-event filters and
+webhook delivery. State predicates and state-only monitoring remain exact to
+the selected task. The membership predicate never filters these event streams.
+Webhook v2 payloads preserve the subtask's `ticket_id`/`ticket_uuid` and add
+`subtask_owner_id`/`subtask_owner_uuid`; inherited container subscriptions receive
+subtask events.
 
 ### Comments
 
@@ -371,7 +417,7 @@ Therefore `draft`, `open`, `in_progress`, and `blocked` tasks still block.
 task(s) whose delivered work caused this task to exist as defect/rework. It is
 DISTINCT from task relations: it is causal/outcome-quality lineage, stored in a
 dedicated normalized edge table (`task_causes`), and does NOT participate in
-blocker checks, `relation` output, parent/subtask nesting, moves, archives,
+blocker checks, `relation` output, parent/child-task nesting, moves, archives,
 restores, recursive tree behavior, or residency.
 
 - Accepted input is comma-separated friendly task IDs matching `^T-[0-9]{5}$`

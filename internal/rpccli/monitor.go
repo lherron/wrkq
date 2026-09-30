@@ -62,6 +62,7 @@ type monitorTerminalLine struct {
 // data fields come from the server's WrkqMonitorEvent; the `type` discriminator is
 // stamped here (client-owned), matching legacy monitorEventLine byte-for-byte.
 type monitorEventLine struct {
+	TaskID       string  `json:"task_id,omitempty"`
 	Type         string  `json:"type"`
 	ID           int64   `json:"id"`
 	Timestamp    string  `json:"timestamp"`
@@ -74,6 +75,7 @@ type monitorEventLine struct {
 
 // serverMonitorEvent decodes one WrkqMonitorEvent row from the server projection.
 type serverMonitorEvent struct {
+	TaskID       string  `json:"task_id,omitempty"`
 	ID           int64   `json:"id"`
 	Timestamp    string  `json:"timestamp"`
 	ResourceType string  `json:"resource_type"`
@@ -451,6 +453,7 @@ func monitorFollowLoop(ctx context.Context, tr Transport, encoder *json.Encoder,
 				ResourceType: e.ResourceType,
 				ResourceUUID: e.ResourceUUID,
 				ResourceID:   e.ResourceID,
+				TaskID:       e.TaskID,
 				EventType:    e.EventType,
 				Payload:      e.Payload,
 			}); encErr != nil {

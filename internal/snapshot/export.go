@@ -330,7 +330,7 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 
 func exportTasks(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
-		SELECT uuid, id, slug, title, kind, project_uuid, campaign_uuid, parent_task_uuid,
+		SELECT uuid, id, slug, title, kind, project_uuid, campaign_uuid, parent_task_uuid, subtask_owner_uuid,
 		       requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
 		       workflow_preset, preset_version, phase, risk_class,
 		       state, priority, assignee_principal_ref,
@@ -355,7 +355,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		var uuid string
 		var entry TaskEntry
 		var startAt, dueAt, labels, completedAt, archivedAt sql.NullString
-		var campaignUUID, parentTaskUUID sql.NullString
+		var campaignUUID, parentTaskUUID, subtaskOwnerUUID sql.NullString
 		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var workflowPreset, phase, riskClass sql.NullString
 		var presetVersion sql.NullInt64
@@ -366,7 +366,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		var claimedBy, claimedScope, claimedNode, claimedAt, claimTokenHash sql.NullString
 
 		if err := rows.Scan(&uuid, &entry.ID, &entry.Slug, &entry.Title, &entry.Kind,
-			&entry.ProjectUUID, &campaignUUID, &parentTaskUUID,
+			&entry.ProjectUUID, &campaignUUID, &parentTaskUUID, &subtaskOwnerUUID,
 			&requestedBy, &assignedProject, &acknowledgedAt, &resolution,
 			&workflowPreset, &presetVersion, &phase, &riskClass,
 			&entry.State, &entry.Priority, &assignee,
@@ -411,6 +411,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		}
 
 		entry.ParentTaskUUID = snapshotNullString(parentTaskUUID)
+		entry.SubtaskOwnerUUID = snapshotNullString(subtaskOwnerUUID)
 		entry.AssigneePrincipalRef = snapshotNullString(assignee)
 		entry.Meta = snapshotNullString(meta)
 		entry.Outcome = snapshotNullString(outcome)

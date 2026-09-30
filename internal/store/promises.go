@@ -11,6 +11,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/taskmember"
 	"github.com/lherron/wrkq/internal/webhooks"
 )
 
@@ -230,7 +231,7 @@ func (ps *PromiseStore) ReadyScoped(ownerPrincipalRef, projectUUID string, inclu
 			SELECT t.uuid
 			  FROM tasks t
 			  JOIN container_projects cp ON cp.container_uuid = t.project_uuid
-			 WHERE cp.project_uuid = ?
+			 WHERE cp.project_uuid = ? AND `+taskmember.Filter("t", true)+`
 		)
 		OR subject_container_uuid IN (
 			SELECT cp.container_uuid

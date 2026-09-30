@@ -30,6 +30,8 @@ func newFindCmd() *cobra.Command {
 	var cursorTok, typeFilter, sort string
 	var labels []string
 	var slugGlob, state, dueBefore, dueAfter, kind, assignee, claimedBy, claimedNode, parentTask, requestedBy, assignedProject, causedBy, campaign string
+	var subtasks bool
+	var ownerState string
 	cmd := &cobra.Command{
 		Use:   "find [PATH...]",
 		Short: "Search for tasks and containers",
@@ -122,6 +124,12 @@ func newFindCmd() *cobra.Command {
 				params["campaign"] = sc.containerSelectorWithAbsoluteFallback(cmd.Context(), tr, campaign)
 			}
 
+			if subtasks {
+				params["subtasks"] = true
+			}
+			if ownerState != "" {
+				params["ownerState"] = ownerState
+			}
 			raw, err := tr.Call(cmd.Context(), "wrkq.task.findListView", params)
 			if err != nil {
 				if re, ok := err.(*Error); ok {
@@ -224,7 +232,9 @@ func newFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Filter by assignee principal ref or bare agent slug")
 	cmd.Flags().StringVar(&claimedBy, "claimed-by", "", "Filter by claim holder principal ref")
 	cmd.Flags().StringVar(&claimedNode, "claimed-node", "", "Filter by server-derived claim node")
-	cmd.Flags().StringVar(&parentTask, "parent-task", "", "Filter subtasks of a specific parent task (ID or path)")
+	cmd.Flags().BoolVar(&subtasks, "subtasks", false, "Include named subtasks")
+	cmd.Flags().StringVar(&ownerState, "owner-state", "", "Filter subtasks by owner state (including terminal)")
+	cmd.Flags().StringVar(&parentTask, "parent-task", "", "Filter child tasks of a specific parent task (ID or path)")
 	cmd.Flags().StringVar(&requestedBy, "requested-by", "", "Filter by requester project ID")
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Filter by assignee project ID")
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Filter tasks whose caused_by lineage includes this task ID (e.g. T-00012)")

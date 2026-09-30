@@ -47,12 +47,13 @@ type WrkqRoom struct {
 	// LastActivityAt is the activity clock: max(openedAt, newest envelope,
 	// newest member join). openedAt always exists, so it is defined for every
 	// room including one that has never carried a message.
-	LastActivityAt string `json:"lastActivityAt"`
-	MemberCount    int    `json:"memberCount"`
-	MessageCount   int    `json:"messageCount"`
-	ETag           int64  `json:"etag"`
-	CreatedAt      string `json:"createdAt"`
-	UpdatedAt      string `json:"updatedAt"`
+	LastActivityAt   string `json:"lastActivityAt"`
+	OpenSubtaskCount int    `json:"openSubtaskCount"`
+	MemberCount      int    `json:"memberCount"`
+	MessageCount     int    `json:"messageCount"`
+	ETag             int64  `json:"etag"`
+	CreatedAt        string `json:"createdAt"`
+	UpdatedAt        string `json:"updatedAt"`
 }
 
 // WrkqEnvelopeParty is one end of an envelope. ScopeRef is absent for a

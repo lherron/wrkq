@@ -48,6 +48,14 @@ predicate: >
   the exact prior state, and unarchive restores only those marked tasks. A
   cross-residency child linked only by `parent_task_uuid` is never selected by
   that cascade.
+  Ordinary task residency remains authoritative. Named subtasks use
+  subtask_owner_uuid instead of parent_task_uuid; their materialized residency
+  is derived from the owner and enforced by owner-update cascade and divergent
+  insert/update guards. Container archive and purge selections use the shared
+  taskMemberFilter membership predicate and exclude named subtasks. A container
+  holding an owner with subtasks cannot be physically purged. Ordinary child-task
+  residency, bounded depth and cross-project deletion remain unchanged.
+
 authority:
   repo: wrkq
   surface: tasks table parent graph + wrkq task/container mutation/read-model surfaces
@@ -58,8 +66,13 @@ required_tests:
   - go test ./internal/workrpc -run 'TestWrkqTaskMove_(ResidentSubtreeMove|CrossProjectChild)'
   - just architecture-records
 last_verified:
-  date: 2026-09-08
-  evidence: "T-08261: container archive/unarchive task cascade follows recursive residency and round-trips causal markers; focused nested acceptance, full verify, and installed scratch smoke green."
+  date: 2026-09-30
+  evidence: >
+    T-09897 focused API/store checks and isolated built-binary acceptance cover
+    named-subtask residency, membership exclusion, owner-room routing, campaign
+    context/activity, historical snapshot restore and event-family selectors.
+    Artifacts: var/wrkq-artifacts/T-09897/VALIDATION.md. Live activation and fleet
+    client pins remain Mable-owned.
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the hierarchy mutation/read-model call site"
 source:
   - internal/db/migrations/000026_external_principal_attribution.sql

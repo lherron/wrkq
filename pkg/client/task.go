@@ -4,6 +4,9 @@ package client
 type TaskService struct{ client *Client }
 
 type TaskListOptions struct {
+	Subtasks       bool     `json:"subtasks,omitempty"`
+	SubtaskOwner   string   `json:"subtaskOwner,omitempty"`
+	OwnerState     string   `json:"ownerState,omitempty"`
 	Path           string   `json:"path,omitempty"`
 	States         []string `json:"state,omitempty"`
 	Kinds          []string `json:"kind,omitempty"`

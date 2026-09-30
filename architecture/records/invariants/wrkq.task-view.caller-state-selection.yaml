@@ -23,6 +23,11 @@ predicate: >
   State == completed; cancelled does not become closed. External task backlinks
   do not become resident rollup inputs. This decision does not change traversal
   depth, task residency, or campaign-portfolio contracts.
+  Named subtasks are excluded by the shared taskMemberFilter from default
+  resident membership, counts and completion rollups. Explicit subtask-aware
+  reads opt in. Owner rows expose an open-subtask count without folding it into
+  owner completion; a completed owner displays complete; N subtasks open.
+
 authority:
   repo: wrkq
   surface: wrkqapi task view projections, rpccli caller policy, and workrpc schema catalog
@@ -57,22 +62,13 @@ required_tests:
   - TestProtocolSchemaHashPinned
   - TestProtocolCatalogCardinality
 last_verified:
-  date: 2026-09-07
+  date: 2026-09-30
   evidence: >
-    Activated at 5b265d0219ef039982aaf106f9b66c93d1021ff8, following 7752a12
-    and 127a3d1. Daedalus read the producer's GATES.txt in
-    var/wrkq-artifacts/T-08216 and the gate-16 reproduction/results submitted
-    in EN-05740: open selection returns cc at limits 1/2/3; completed selection
-    returns aa at limit 1 and aa,bb at limit 2; unpruned returns aa,bb,cc.
-    Source verification confirms EXISTS precedes ORDER BY/LIMIT and the old
-    Go-side pruning path is deleted. Earlier evidence covers required/invalid
-    selectors, default and non-default priorities, unchanged tree -a, bounded
-    --open annotation changes, cancelled-task rollups, and actual deployment
-    skew refusing schema e2b21570 from the new b8182664 client. Daedalus also
-    independently observed the installed single-task path return null for draft
-    and T-08216 completed for completed after 127a3d1. Suite and fleet-deployment
-    results are producer-reported; Daedalus did not run builds, suites, installs,
-    or restarts for activation.
+    T-09897 focused API/store checks and isolated built-binary acceptance cover
+    named-subtask residency, membership exclusion, owner-room routing, campaign
+    context/activity, historical snapshot restore and event-family selectors.
+    Artifacts: var/wrkq-artifacts/T-09897/VALIDATION.md. Live activation and fleet
+    client pins remain Mable-owned.
 reopen_when:
   - a server supplies a default task-state set for these projections
   - visibility pruning changes the completion aggregate

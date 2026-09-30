@@ -29,6 +29,8 @@ type TreeViewParams struct {
 // can reconstruct the NDJSON stream + nesting without a second RPC; the CLI strips
 // them before rendering the JSON mode. Not a canonical resource.
 type WrkqTreeNode struct {
+	OpenSubtaskCount     int             `json:"open_subtask_count"`
+	SubtaskOwnerID       string          `json:"subtask_owner_id,omitempty"`
 	Type                 string          `json:"type"`
 	ID                   string          `json:"id"`
 	Slug                 string          `json:"slug"`

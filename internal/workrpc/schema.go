@@ -11,6 +11,8 @@ import (
 
 var dtoSchemaTypes = map[string]reflect.Type{
 	"RPCInitializeResult":             dtoType[initializeResult](),
+	"WrkqTaskCreateParams":            dtoType[wrkqapi.TaskCreateParams](),
+	"WrkqTaskListParams":              dtoType[wrkqapi.TaskListParams](),
 	"WrkqTask":                        dtoType[wrkqapi.WrkqTask](),
 	"WrkqTaskUpdateParams":            dtoType[wrkqapi.TaskUpdateParams](),
 	"WrkqCommentAddParams":            dtoType[wrkqapi.CommentAddParams](),
@@ -75,6 +77,7 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkqFindListView":                dtoType[wrkqapi.WrkqFindListView](),
 	"WrkqHistoryListView":             dtoType[wrkqapi.WrkqHistoryListView](),
 	"WrkqLogEvent":                    dtoType[wrkqapi.WrkqLogEvent](),
+	"WrkqHistoryTailViewParams":       dtoType[wrkqapi.HistoryTailViewParams](),
 	"WrkqHistoryTailView":             dtoType[wrkqapi.WrkqHistoryTailView](),
 	"WrkqWatchEvent":                  dtoType[wrkqapi.WrkqWatchEvent](),
 	"WrkqMonitorEventsView":           dtoType[wrkqapi.WrkqMonitorEventsView](),

@@ -7,6 +7,7 @@ package wrkqapi
 // limit+1 / next-cursor truncation over that combined set — exactly as legacy
 // runLs does — so the CLI mirror never re-sorts or re-paginates.
 type LsListViewParams struct {
+	Subtasks               bool     `json:"subtasks,omitempty"`
 	Path                   string   `json:"path,omitempty"`
 	Paths                  []string `json:"paths,omitempty"`
 	Sort                   string   `json:"sort,omitempty"`
@@ -27,6 +28,7 @@ type LsListViewParams struct {
 
 // WrkqLsEntry matches the legacy lsEntry shape exactly (field order + json tags).
 type WrkqLsEntry struct {
+	OpenSubtaskCount     int     `json:"open_subtask_count"`
 	Type                 string  `json:"type"`
 	ID                   string  `json:"id"`
 	Slug                 string  `json:"slug"`

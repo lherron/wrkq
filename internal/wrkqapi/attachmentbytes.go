@@ -18,6 +18,7 @@ import (
 	"github.com/lherron/wrkq/internal/attach"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/store"
 )
 
 const nsAttachmentAddBytes = "wrkq.attachment.addBytes"
@@ -393,11 +394,12 @@ func (a *API) finalizeUpload(uploadID string, up *attachmentUpload) (*WrkqAttach
 		return nil, NewInternalError(scanErr)
 	}
 
-	payload, _ := json.Marshal(map[string]any{
-		"filename":   up.filename,
-		"size_bytes": up.received,
-		"mime_type":  up.mimeType,
-	})
+	payloadData := map[string]any{"filename": up.filename, "size_bytes": up.received, "mime_type": up.mimeType, "task_id": up.taskUUID}
+	if err := store.StampTaskCampaignContext(tx, up.taskUUID, payloadData); err != nil {
+		_ = os.Remove(absPath)
+		return nil, NewInternalError(err)
+	}
+	payload, _ := json.Marshal(payloadData)
 	payloadStr := string(payload)
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
 		PrincipalRef: attr.PrincipalRef,

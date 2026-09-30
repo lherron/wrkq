@@ -249,8 +249,17 @@ func validateSnapshot(snap *Snapshot) error {
 				return fmt.Errorf("task %s references unknown campaign container %s", uuid, task.CampaignUUID)
 			}
 		}
+		if task.SubtaskOwnerUUID != nil {
+			owner, ok := snap.Tasks[*task.SubtaskOwnerUUID]
+			if !ok || owner.SubtaskOwnerUUID != nil {
+				return fmt.Errorf("task %s has invalid subtask owner", uuid)
+			}
+			if task.ProjectUUID != owner.ProjectUUID {
+				return fmt.Errorf("task %s subtask residency differs from owner", uuid)
+			}
+		}
 		if task.ParentTaskUUID != nil {
-			if _, ok := snap.Tasks[*task.ParentTaskUUID]; !ok {
+			if parent, ok := snap.Tasks[*task.ParentTaskUUID]; !ok || parent.SubtaskOwnerUUID != nil {
 				return fmt.Errorf("task %s references unknown parent task %s", uuid, *task.ParentTaskUUID)
 			}
 		}
@@ -548,10 +557,16 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 	for uuid := range snap.Tasks {
 		uuids = append(uuids, uuid)
 	}
-	sort.Strings(uuids)
+	sort.Slice(uuids, func(i, j int) bool {
+		a, b := snap.Tasks[uuids[i]], snap.Tasks[uuids[j]]
+		if (a.SubtaskOwnerUUID == nil) != (b.SubtaskOwnerUUID == nil) {
+			return a.SubtaskOwnerUUID == nil
+		}
+		return uuids[i] < uuids[j]
+	})
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO tasks (uuid, id, slug, title, kind, project_uuid, campaign_uuid, parent_task_uuid,
+		INSERT INTO tasks (uuid, id, slug, title, kind, project_uuid, campaign_uuid, parent_task_uuid, subtask_owner_uuid,
 		                   requested_by_project_id, assigned_project_id, acknowledged_at, resolution,
 		                   workflow_preset, preset_version, phase, risk_class,
 		                   state, priority, assignee_principal_ref,
@@ -565,7 +580,7 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		                   claimed_by_principal_ref, claimed_scope_ref, claimed_node, claimed_at,
 		                   claim_token_hash, claim_generation)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-		        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -587,7 +602,7 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		}
 
 		if _, err := stmt.Exec(uuid, t.ID, t.Slug, t.Title, t.Kind, t.ProjectUUID,
-			nullableSnapshotString(t.CampaignUUID), nullableSnapshotPointer(t.ParentTaskUUID),
+			nullableSnapshotString(t.CampaignUUID), nullableSnapshotPointer(t.ParentTaskUUID), nullableSnapshotPointer(t.SubtaskOwnerUUID),
 			nullableSnapshotString(t.RequestedByProjectID), nullableSnapshotString(t.AssignedProjectID),
 			nullableSnapshotString(t.AcknowledgedAt), nullableSnapshotString(t.Resolution),
 			nullableSnapshotString(t.WorkflowPreset), presetVersion,

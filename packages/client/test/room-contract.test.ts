@@ -74,6 +74,7 @@ const ROOM: WrkqRoom = {
   openedByPrincipalRef: "agent:clod",
   openedAt: "2026-08-27T00:00:00Z",
   lastActivityAt: "2026-08-27T00:05:00Z",
+  openSubtaskCount: 0,
   memberCount: 2,
   messageCount: 1,
   etag: 1,

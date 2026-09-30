@@ -29,6 +29,13 @@ predicate: >
   detail projection and returns member project identity, footprint, labels, and
   the same activity definition. Downstream Epic/portfolio displays are consumer
   views, not mutation or dual-write authorities.
+  Named subtasks are never resident or enrolled campaign members or separate
+  portfolio/timeline counts. Their campaign event context follows their owner's
+  effective resident-or-enrolled campaign. Their updated_at contributes to the
+  owner's member activity, so lastActivityAt includes this folded activity.
+  Subtask creation is not independent campaign admission and is permitted under
+  an open owner in a terminal campaign.
+
 authority:
   repo: wrkq
   surface: campaign store transactions + wrkqapi portfolio/timeline methods + @wrkq/client
@@ -63,8 +70,13 @@ required_tests:
   - TestCampaignWebhookPostCommitPayloadInheritanceAndClassIsolation
   - TestCatViewInCatalogs
 last_verified:
-  date: 2026-07-23
-  evidence: "T-06826 focused migration/store/API/RPC/CLI/client guards plus installed daemon-backed smoke green."
+  date: 2026-09-30
+  evidence: >
+    T-09897 focused API/store checks and isolated built-binary acceptance cover
+    named-subtask residency, membership exclusion, owner-room routing, campaign
+    context/activity, historical snapshot restore and event-family selectors.
+    Artifacts: var/wrkq-artifacts/T-09897/VALIDATION.md. Live activation and fleet
+    client pins remain Mable-owned.
 reopen_when:
   - any non-wrkq store becomes a campaign lifecycle, membership, or label write authority
   - a new task admission path can enter a terminal campaign or bypass exclusivity

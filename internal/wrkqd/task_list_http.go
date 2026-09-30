@@ -11,6 +11,7 @@ import (
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/store"
+	"github.com/lherron/wrkq/internal/taskmember"
 )
 
 type findOptions struct {
@@ -34,6 +35,7 @@ type findOptions struct {
 }
 
 type findResult struct {
+	OpenSubtaskCount     int      `json:"open_subtask_count"`
 	Type                 string   `json:"type"`
 	UUID                 string   `json:"uuid"`
 	ID                   string   `json:"id"`
@@ -75,8 +77,8 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 		SELECT t.uuid, t.id, t.slug, t.title, t.specification, t.state, t.priority, t.kind,
 		       t.assignee_principal_ref, t.parent_task_uuid, t.requested_by_project_id,
 		       t.assigned_project_id, t.acknowledged_at, t.resolution, t.due_at, t.etag,
-		       cp.path || '/' || t.slug, t.created_at, t.updated_at
-		FROM tasks t JOIN v_container_paths cp ON cp.uuid = t.project_uuid WHERE 1=1`
+		       cp.path || '/' || t.slug, t.created_at, t.updated_at, (SELECT COUNT(*) FROM tasks st WHERE st.subtask_owner_uuid=t.uuid AND st.state NOT IN ('completed','cancelled','archived','deleted'))
+		FROM tasks t JOIN v_container_paths cp ON cp.uuid = t.project_uuid WHERE ` + taskmember.Filter("t", false)
 	args := []interface{}{}
 	switch opts.state {
 	case "all":
@@ -185,7 +187,7 @@ func findTasks(database *db.DB, opts findOptions, skipPagination bool) ([]findRe
 		var priority sql.NullInt64
 		if err := rows.Scan(&result.UUID, &result.ID, &result.Slug, &result.Title, &result.Specification, &state, &priority, &kind,
 			&assignee, &parentTaskUUID, &requestedBy, &assignedProject, &acknowledgedAt, &resolution,
-			&dueAt, &result.ETag, &result.Path, &result.CreatedAt, &result.UpdatedAt); err != nil {
+			&dueAt, &result.ETag, &result.Path, &result.CreatedAt, &result.UpdatedAt, &result.OpenSubtaskCount); err != nil {
 			return nil, false, fmt.Errorf("scan failed: %w", err)
 		}
 		result.Type = "task"

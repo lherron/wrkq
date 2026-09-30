@@ -85,6 +85,7 @@ type WrkqSearchListView struct {
 // scoping is the CALLER's responsibility: Paths are already scoped before they
 // reach this method.
 type SearchListViewParams struct {
+	Subtasks             bool     `json:"subtasks,omitempty"`
 	Query                string   `json:"query"`
 	Paths                []string `json:"paths,omitempty"`
 	State                string   `json:"state,omitempty"`

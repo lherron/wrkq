@@ -1,13 +1,13 @@
 id: wrkq.named-subtasks.v1
 kind: contract
-status: proposed
+status: active
 owner_project: wrkq
 scope: named subtask identity, ownership, residency, collaboration and campaign context
 predicate: >
   Named subtasks follow docs/named-subtasks-proposal.md revision 5, approved
   against f1310d9 in R-00240 on 2026-09-30. This record carries the approved
-  design pending implementation; proposed status does not change active law
-  or assert installed behavior.
+  design. The delivered slice enforces this contract; fleet activation and
+  consumer pins remain a separately coordinated rollout.
 
   A subtask is an ordinary tasks row discriminated by subtask_owner_uuid,
   with a server-built owner-ID plus dot plus local-slug ID, no task-sequence
@@ -45,6 +45,12 @@ predicate: >
   purge is refused when ownership exists. Ordinary child-task semantics remain
   governed by wrkq.task-hierarchy.cross-project-parents.
 
+  Ordinary task selectors in event reads and subscriptions include the owner's
+  subtasks; composite selectors remain exact. State and state-only predicates
+  remain exact. Event streams never apply the membership predicate and preserve
+  the event's own task ID. Webhook v2 adds subtask_owner_id and
+  subtask_owner_uuid while preserving the subtask ticket identity.
+
   Create RPC fields are subtaskOwner plus required slug; path, project,
   parentTask and campaign are refused with subtaskOwner, and slug is refused
   without it. Producer catalog and Go/TypeScript clients change together.
@@ -61,9 +67,10 @@ consumers:
   - ACP and taskboard
   - Go and TypeScript wrkq clients
 enforced_by: >
-  Approved revision-5 design; implementation and installed acceptance are
-  pending. Promote only with delivered guards and acceptance evidence, and
-  amend the four affected active records with slice 2's behavior.
+  Migration 000066 owner/residency/identity/disjointness guards, API/store
+  creation and purge rules, shared taskMemberFilter, owner room routing,
+  owner-folded campaign projections, RPC catalogs and Go/TypeScript clients;
+  scratch built-binary acceptance in var/wrkq-artifacts/T-09897/VALIDATION.md.
 source:
   - docs/named-subtasks-proposal.md
   - architecture/records/invariants/wrkq.task-hierarchy.cross-project-parents.yaml
@@ -74,11 +81,16 @@ source:
   - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
   - architecture/records/invariants/wrkq.rpc.remote-transport-locator.yaml
 required_tests:
-  - Revision 5 installed acceptance scenarios 1 through 17 with transcripts, JSON, database and event readback, and session references
+  - Revision 5 installed acceptance scenarios 1 through 18 with transcripts, JSON, database and event readback, and session references
   - Fleet-wide placement and live-subtask owner-worktree prune acceptance before subtask creation activates
   - Real-migration owner cascade, divergent subtask insert and update refusal, and same-project and cross-project movement acceptance
   - Resident and enrolled campaign owner parity for membership, activity, event context and terminal-campaign subtask creation
-last_verified: null
+last_verified:
+  date: 2026-09-30
+  evidence: >
+    T-09897 scratch migration/core built-binary identity, movement, fencing,
+    deletion and causal-lineage acceptance plus API routing/campaign tests.
+    Fleet activation remains Mable-owned. Full run: var/wrkq-artifacts/T-09897/VALIDATION.md.
 reopen_when:
   - subtask identity, ownership, slug immutability or scope-token semantics change
   - residency becomes caller-maintained or can diverge from the owner

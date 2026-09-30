@@ -306,7 +306,14 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		if _, eerr := tx.Exec("DELETE FROM comments WHERE uuid = ?", commentUUID); eerr != nil {
 			return nil, NewInternalError(eerr)
 		}
-		payload := `{"task_id":"` + taskUUID + `","comment_id":"` + preDTO.ID + `","hard_delete":true}`
+		payloadData := map[string]any{"task_id": taskUUID, "comment_id": preDTO.ID, "hard_delete": true}
+		if taskUUID != "" {
+			if err := store.StampTaskCampaignContext(tx, taskUUID, payloadData); err != nil {
+				return nil, NewInternalError(err)
+			}
+		}
+		payloadJSON, _ := json.Marshal(payloadData)
+		payload := string(payloadJSON)
 		if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
 			PrincipalRef: attr.PrincipalRef,
 			ScopeRef:     attr.ScopeRef,
@@ -340,8 +347,14 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		return nil, NewInternalError(eerr)
 	}
 
-	payload := `{"task_id":"` + taskUUID + `","comment_id":"` + preDTO.ID +
-		`","deleted_by_principal_ref":"` + attr.PrincipalRef + `","soft_delete":true}`
+	payloadData := map[string]any{"task_id": taskUUID, "comment_id": preDTO.ID, "deleted_by_principal_ref": attr.PrincipalRef, "soft_delete": true}
+	if taskUUID != "" {
+		if err := store.StampTaskCampaignContext(tx, taskUUID, payloadData); err != nil {
+			return nil, NewInternalError(err)
+		}
+	}
+	payloadJSON, _ := json.Marshal(payloadData)
+	payload := string(payloadJSON)
 	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
 		PrincipalRef: attr.PrincipalRef,
 		ScopeRef:     attr.ScopeRef,

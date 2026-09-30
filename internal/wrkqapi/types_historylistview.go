@@ -20,6 +20,8 @@ type HistoryListViewParams struct {
 // uses a struct, not a map), so the field order here is the wire order. payload
 // stays a STRING (the raw event_log.payload); --patch is rendered CLIENT-side.
 type WrkqLogEvent struct {
+	ResourceID   *string   `json:"resource_id,omitempty"`
+	TaskID       string    `json:"task_id,omitempty"`
 	ID           int64     `json:"id"`
 	Timestamp    time.Time `json:"timestamp"`
 	PrincipalRef *string   `json:"principal_ref,omitempty"`

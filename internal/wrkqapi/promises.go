@@ -501,8 +501,8 @@ func (a *API) promiseDTO(ctx context.Context, promise *domain.Promise) (*WrkqPro
 	if promise.SubjectTaskUUID != nil {
 		ref := &WrkqPromiseSubjectRef{Type: "task", UUID: *promise.SubjectTaskUUID}
 		err := a.db.QueryRowContext(ctx, `
-			SELECT t.id, COALESCE(cp.path || '/' || t.slug, t.slug)
-			  FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid
+			SELECT t.id, COALESCE(tp.path, t.slug)
+			  FROM tasks t LEFT JOIN v_task_paths tp ON tp.uuid = t.uuid
 			 WHERE t.uuid = ?`, *promise.SubjectTaskUUID).Scan(&ref.ID, &ref.Path)
 		if err != nil {
 			if err == sql.ErrNoRows {

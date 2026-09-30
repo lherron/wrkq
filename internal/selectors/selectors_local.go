@@ -10,6 +10,7 @@ import (
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/taskmember"
 )
 
 // Database-backed selector resolution (T-07090). Resolving a selector against
@@ -156,47 +157,51 @@ func ResolveTaskByPath(database *db.DB, path string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid path: empty")
 	}
 
-	// Get parent container
+	// Walk containers until the ordinary task is reached, then permit one
+	// owner-local subtask segment. Bare slugs never select named subtasks.
 	var parentUUID *string
-	if len(segments) > 1 {
-		parentPath := paths.JoinPath(segments[:len(segments)-1]...)
-		uuid, _, err := WalkContainerPath(database, parentPath)
+	var taskUUID, friendlyID string
+	for i, segment := range segments {
+		slug, err := paths.NormalizeSlug(segment)
 		if err != nil {
 			return "", "", err
 		}
-		parentUUID = &uuid
-	}
-
-	// Normalize task slug
-	taskSlug := segments[len(segments)-1]
-	normalizedSlug, err := paths.NormalizeSlug(taskSlug)
-	if err != nil {
-		return "", "", fmt.Errorf("invalid task slug %q: %w", taskSlug, err)
-	}
-
-	// Find task
-	var taskUUID, friendlyID string
-	if parentUUID == nil {
-		// Try to find in any root container
-		err = database.QueryRow(`
-			SELECT uuid, id FROM tasks WHERE slug = ? AND project_uuid IN (
-				SELECT uuid FROM containers WHERE kind = 'project'
-			) LIMIT 1
-		`, normalizedSlug).Scan(&taskUUID, &friendlyID)
-	} else {
-		err = database.QueryRow(`
-			SELECT uuid, id FROM tasks WHERE slug = ? AND project_uuid = ?
-		`, normalizedSlug, *parentUUID).Scan(&taskUUID, &friendlyID)
-	}
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", "", fmt.Errorf("task not found: %s", path)
+		if i < len(segments)-1 {
+			if uuid, _, exists := LookupContainerSegment(database, slug, parentUUID); exists {
+				parentUUID = &uuid
+				continue
+			}
 		}
-		return "", "", fmt.Errorf("database error: %w", err)
+		query := "SELECT uuid,id FROM tasks WHERE slug=? AND " + taskmember.Filter("", false)
+		args := []any{slug}
+		if parentUUID == nil {
+			query += " AND project_uuid IN (SELECT uuid FROM containers WHERE kind='project') LIMIT 1"
+		} else {
+			query += " AND project_uuid=?"
+			args = append(args, *parentUUID)
+		}
+		err = database.QueryRow(query, args...).Scan(&taskUUID, &friendlyID)
+		if err != nil {
+			return "", "", fmt.Errorf("task not found: %s: %w", path, err)
+		}
+		if i == len(segments)-1 {
+			return taskUUID, friendlyID, nil
+		}
+		if i != len(segments)-2 {
+			return "", "", fmt.Errorf("subtask path has too many segments: %s", path)
+		}
+		subslug, err := paths.NormalizeSlug(segments[i+1])
+		if err != nil {
+			return "", "", err
+		}
+		err = database.QueryRow("SELECT uuid,id FROM tasks WHERE subtask_owner_uuid=? AND slug=?", taskUUID, subslug).Scan(&taskUUID, &friendlyID)
+		if err != nil {
+			return "", "", fmt.Errorf("subtask not found: %s: %w", path, err)
+		}
+		return taskUUID, friendlyID, nil
 	}
+	return "", "", fmt.Errorf("task not found: %s", path)
 
-	return taskUUID, friendlyID, nil
 }
 
 // ResolveTask resolves a task selector to its UUID.
@@ -219,7 +224,7 @@ func ResolveTask(database *db.DB, selector string) (string, string, error) {
 	}
 
 	// Try as friendly ID
-	if strings.HasPrefix(token, "T-") {
+	if id.IsTask(token) {
 		var uuid string
 		err := database.QueryRow("SELECT uuid FROM tasks WHERE id = ?", token).Scan(&uuid)
 		if err == nil {

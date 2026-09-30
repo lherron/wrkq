@@ -18,6 +18,7 @@ import (
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
+	"github.com/lherron/wrkq/internal/taskmember"
 	"github.com/lherron/wrkq/internal/webhooks"
 )
 
@@ -132,7 +133,7 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 
 	// Create-or-overwrite decision.
 	var existingUUID string
-	_ = tx.QueryRow("SELECT uuid FROM tasks WHERE project_uuid = ? AND slug = ?", destUUID, slug).Scan(&existingUUID)
+	_ = tx.QueryRow("SELECT uuid FROM tasks WHERE project_uuid = ? AND slug = ? AND "+taskmember.Filter("", false), destUUID, slug).Scan(&existingUUID)
 	if existingUUID != "" && !p.Overwrite {
 		return nil, NewConflictError(
 			fmt.Sprintf("task with slug '%s' already exists in destination container", slug),
@@ -191,6 +192,9 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 	if attachmentCount > 0 {
 		payloadData["attachment_count"] = attachmentCount
 		payloadData["with_files"] = p.WithAttachments
+	}
+	if err := store.StampTaskCampaignContext(tx, newUUID, payloadData); err != nil {
+		return nil, err
 	}
 	payloadJSON, _ := json.Marshal(payloadData)
 	payloadStr := string(payloadJSON)

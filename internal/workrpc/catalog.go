@@ -241,10 +241,12 @@ var methodCatalog = []string{
 var dtoCatalog = []string{
 	"RPCInitializeResult", // rpc.initialize compatibility handshake, including server build provenance
 	"WrkqTask",
+	"WrkqTaskCreateParams",
+	"WrkqTaskListParams",
 	"WrkqTaskUpdateParams", // scoped writer attribution on task mutations
 	"WrkqCommentAddParams", // scoped writer attribution on comment mutations
-	"WrkqTaskCopyParams", // wrkq.task.copy request envelope (server-owned deep copy)
-	"WrkqTaskCopyResult", // wrkq.task.copy per-source outcome (legacy copyResult output shape)
+	"WrkqTaskCopyParams",   // wrkq.task.copy request envelope (server-owned deep copy)
+	"WrkqTaskCopyResult",   // wrkq.task.copy per-source outcome (legacy copyResult output shape)
 	"WrkqTaskClaim",
 	"WrkqPromise",
 	"WrkqPromiseSubjectRef",
@@ -304,16 +306,17 @@ var dtoCatalog = []string{
 	"WrkqFindListView",       // CLI compatibility list projection (find)
 	"WrkqHistoryListView",    // CLI compatibility history read model (log over event_log); nested WrkqLogEvent is part of this DTO
 	"WrkqLogEvent",           // element of history.listView (the legacy logEvent row shape)
-	"WrkqHistoryTailView",    // CLI compatibility bounded ASCENDING raw tail (watch / monitor --raw); nested WrkqWatchEvent is part of this DTO
-	"WrkqWatchEvent",         // element of history.tailView (the legacy watchEvent row shape — INCLUDES resource_id, distinct from WrkqLogEvent)
-	"WrkqMonitorEventsView",  // CLI compatibility bounded ASCENDING filtered event page (monitor watch); nested WrkqMonitorEvent is part of this DTO
-	"WrkqMonitorEvent",       // element of monitor.eventsView (the legacy monitorEventLine data row)
-	"WrkqMonitorStateView",   // CLI compatibility single --until condition snapshot (monitor watch/wait)
-	"WrkqTreeView",           // CLI compatibility tree projection (tree); nested WrkqTreeNode is part of this DTO
-	"WrkqTreeViewParams",     // CLI compatibility tree REQUEST (T-08216 caller state selection)
-	"WrkqTaskBlockedView",    // CLI compatibility projection (check blocked); nested WrkqTaskBlockedEntry is part of this DTO
-	"WrkqInboxView",          // CLI compatibility list projection (check-inbox); nested WrkqInboxEntry is part of this DTO
-	"CatViewRelation",        // element of relation.listView (also nested in WrkqTaskCatView)
+	"WrkqHistoryTailViewParams",
+	"WrkqHistoryTailView",   // CLI compatibility bounded ASCENDING raw tail (watch / monitor --raw); nested WrkqWatchEvent is part of this DTO
+	"WrkqWatchEvent",        // element of history.tailView (the legacy watchEvent row shape — INCLUDES resource_id, distinct from WrkqLogEvent)
+	"WrkqMonitorEventsView", // CLI compatibility bounded ASCENDING filtered event page (monitor watch); nested WrkqMonitorEvent is part of this DTO
+	"WrkqMonitorEvent",      // element of monitor.eventsView (the legacy monitorEventLine data row)
+	"WrkqMonitorStateView",  // CLI compatibility single --until condition snapshot (monitor watch/wait)
+	"WrkqTreeView",          // CLI compatibility tree projection (tree); nested WrkqTreeNode is part of this DTO
+	"WrkqTreeViewParams",    // CLI compatibility tree REQUEST (T-08216 caller state selection)
+	"WrkqTaskBlockedView",   // CLI compatibility projection (check blocked); nested WrkqTaskBlockedEntry is part of this DTO
+	"WrkqInboxView",         // CLI compatibility list projection (check-inbox); nested WrkqInboxEntry is part of this DTO
+	"CatViewRelation",       // element of relation.listView (also nested in WrkqTaskCatView)
 	"WrkqTaskListResult",
 	"WrkqComment",
 	"WrkqCommentListResult",

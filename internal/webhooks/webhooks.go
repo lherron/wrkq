@@ -117,33 +117,35 @@ type EventContext struct {
 
 // Payload is the webhook payload for task updates.
 type Payload struct {
-	SchemaVersion  int               `json:"schema_version"`
-	EventID        string            `json:"event_id"`
-	EventSeq       int64             `json:"event_seq"`
-	Event          string            `json:"event"`
-	OccurredAt     string            `json:"occurred_at"`
-	Origin         Origin            `json:"origin"`
-	TicketID       string            `json:"ticket_id"`
-	TicketUUID     string            `json:"ticket_uuid"`
-	ProjectID      string            `json:"project_id"`
-	ProjectUUID    string            `json:"project_uuid"`
-	ProjectScopeID string            `json:"project_scope_id"`
-	Transition     *Transition       `json:"transition"`
-	Changed        []string          `json:"changed"`
-	Changes        map[string]Change `json:"changes"`
-	Title          string            `json:"title"`
-	Slug           string            `json:"slug"`
-	ContainerPath  string            `json:"container_path"`
-	Labels         []string          `json:"labels"`
-	State          string            `json:"state"`
-	Priority       int               `json:"priority"`
-	Kind           string            `json:"kind"`
-	Resolution     *string           `json:"resolution"`
-	Meta           json.RawMessage   `json:"meta"`
-	ETag           int64             `json:"etag"`
-	BlockedBy      []BlockerInfo     `json:"blocked_by,omitempty"`
-	Subject        *Subject          `json:"subject,omitempty"`
-	Workflow       *WorkflowPayload  `json:"workflow,omitempty"`
+	SubtaskOwnerID   string            `json:"subtask_owner_id,omitempty"`
+	SubtaskOwnerUUID string            `json:"subtask_owner_uuid,omitempty"`
+	SchemaVersion    int               `json:"schema_version"`
+	EventID          string            `json:"event_id"`
+	EventSeq         int64             `json:"event_seq"`
+	Event            string            `json:"event"`
+	OccurredAt       string            `json:"occurred_at"`
+	Origin           Origin            `json:"origin"`
+	TicketID         string            `json:"ticket_id"`
+	TicketUUID       string            `json:"ticket_uuid"`
+	ProjectID        string            `json:"project_id"`
+	ProjectUUID      string            `json:"project_uuid"`
+	ProjectScopeID   string            `json:"project_scope_id"`
+	Transition       *Transition       `json:"transition"`
+	Changed          []string          `json:"changed"`
+	Changes          map[string]Change `json:"changes"`
+	Title            string            `json:"title"`
+	Slug             string            `json:"slug"`
+	ContainerPath    string            `json:"container_path"`
+	Labels           []string          `json:"labels"`
+	State            string            `json:"state"`
+	Priority         int               `json:"priority"`
+	Kind             string            `json:"kind"`
+	Resolution       *string           `json:"resolution"`
+	Meta             json.RawMessage   `json:"meta"`
+	ETag             int64             `json:"etag"`
+	BlockedBy        []BlockerInfo     `json:"blocked_by,omitempty"`
+	Subject          *Subject          `json:"subject,omitempty"`
+	Workflow         *WorkflowPayload  `json:"workflow,omitempty"`
 }
 
 // CampaignPayload is the container-native campaign transition webhook. It is
@@ -277,22 +279,24 @@ func (p EnvelopePayload) applyWebhookTemplate(raw string) string {
 
 // TaskInfo carries task metadata needed for webhook dispatch.
 type TaskInfo struct {
-	TaskID         string
-	TaskUUID       string
-	ProjectID      string
-	ProjectUUID    string
-	ProjectScopeID string
-	Title          string
-	Slug           string
-	ContainerPath  string
-	Labels         *string
-	State          string
-	Priority       int
-	Kind           string
-	Resolution     *string
-	Meta           *string
-	ETag           int64
-	BlockedBy      []BlockerInfo
+	SubtaskOwnerID   string
+	SubtaskOwnerUUID string
+	TaskID           string
+	TaskUUID         string
+	ProjectID        string
+	ProjectUUID      string
+	ProjectScopeID   string
+	Title            string
+	Slug             string
+	ContainerPath    string
+	Labels           *string
+	State            string
+	Priority         int
+	Kind             string
+	Resolution       *string
+	Meta             *string
+	ETag             int64
+	BlockedBy        []BlockerInfo
 }
 
 // DispatchTask resolves task info then dispatches webhooks.
@@ -372,32 +376,34 @@ func DispatchTaskInfoEvent(database *db.DB, info TaskInfo, ctx EventContext) {
 		changes = map[string]Change{}
 	}
 	payload := Payload{
-		SchemaVersion:  2,
-		EventID:        eventID,
-		EventSeq:       eventSeq,
-		Event:          ctx.Event,
-		OccurredAt:     occurredAt,
-		Origin:         origin,
-		TicketID:       info.TaskID,
-		TicketUUID:     info.TaskUUID,
-		ProjectID:      info.ProjectID,
-		ProjectUUID:    info.ProjectUUID,
-		ProjectScopeID: info.ProjectScopeID,
-		Transition:     ctx.Transition,
-		Changed:        changed,
-		Changes:        changes,
-		Title:          info.Title,
-		Slug:           info.Slug,
-		ContainerPath:  info.ContainerPath,
-		Labels:         labels,
-		State:          info.State,
-		Priority:       info.Priority,
-		Kind:           info.Kind,
-		Resolution:     info.Resolution,
-		Meta:           meta,
-		ETag:           info.ETag,
-		BlockedBy:      info.BlockedBy,
-		Workflow:       ctx.Workflow,
+		SubtaskOwnerID:   info.SubtaskOwnerID,
+		SubtaskOwnerUUID: info.SubtaskOwnerUUID,
+		SchemaVersion:    2,
+		EventID:          eventID,
+		EventSeq:         eventSeq,
+		Event:            ctx.Event,
+		OccurredAt:       occurredAt,
+		Origin:           origin,
+		TicketID:         info.TaskID,
+		TicketUUID:       info.TaskUUID,
+		ProjectID:        info.ProjectID,
+		ProjectUUID:      info.ProjectUUID,
+		ProjectScopeID:   info.ProjectScopeID,
+		Transition:       ctx.Transition,
+		Changed:          changed,
+		Changes:          changes,
+		Title:            info.Title,
+		Slug:             info.Slug,
+		ContainerPath:    info.ContainerPath,
+		Labels:           labels,
+		State:            info.State,
+		Priority:         info.Priority,
+		Kind:             info.Kind,
+		Resolution:       info.Resolution,
+		Meta:             meta,
+		ETag:             info.ETag,
+		BlockedBy:        info.BlockedBy,
+		Workflow:         ctx.Workflow,
 	}
 	if ctx.Subject != nil {
 		subject := *ctx.Subject
@@ -579,7 +585,7 @@ func lookupEnvelopeRoom(database *db.DB, envelope *domain.Envelope) (string, *En
 		ToScopeRef: envelope.ToScopeRef, ToPrincipalRef: envelope.ToPrincipalRef,
 		Obligation: string(envelope.Obligation), State: string(envelope.State),
 		MaterializationIntent: envelope.MaterializationIntent,
-		ETag: envelope.ETag,
+		ETag:                  envelope.ETag,
 	}
 	projection.RoomKey = roomID.String
 
@@ -617,9 +623,9 @@ func lookupPromiseSubject(database *db.DB, promise *domain.Promise) (string, *Pr
 	if promise.SubjectTaskUUID != nil {
 		var containerUUID, id, path string
 		err := database.QueryRow(`
-			SELECT t.project_uuid, t.id, COALESCE(cp.path || '/' || t.slug, t.slug)
+			SELECT t.project_uuid, t.id, COALESCE(tp.path, t.slug)
 			  FROM tasks t
-			  LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid
+			  LEFT JOIN v_task_paths tp ON tp.uuid = t.uuid
 			 WHERE t.uuid = ?
 		`, *promise.SubjectTaskUUID).Scan(&containerUUID, &id, &path)
 		if err != nil {
@@ -702,15 +708,15 @@ func LookupTaskInfoWith(database taskInfoQueryer, taskUUID string) (TaskInfo, er
 
 	err := database.QueryRow(`
 		SELECT t.id, t.uuid, t.project_uuid, c.id, t.slug, t.title, cp.path,
-		       t.state, t.priority, t.kind, t.resolution, t.meta, t.labels, t.etag
-		FROM tasks t
+		       t.state, t.priority, t.kind, t.resolution, t.meta, t.labels, t.etag, COALESCE(owner.id,''), COALESCE(t.subtask_owner_uuid,'')
+		FROM tasks t LEFT JOIN tasks owner ON owner.uuid = t.subtask_owner_uuid
 		JOIN containers c ON c.uuid = t.project_uuid
 		JOIN v_container_paths cp ON cp.uuid = t.project_uuid
 		WHERE t.uuid = ?
 	`, taskUUID).Scan(
 		&info.TaskID, &info.TaskUUID, &info.ProjectUUID, &info.ProjectID, &info.Slug, &info.Title, &info.ContainerPath,
 		&info.State, &info.Priority, &info.Kind,
-		&resolution, &meta, &labels, &info.ETag,
+		&resolution, &meta, &labels, &info.ETag, &info.SubtaskOwnerID, &info.SubtaskOwnerUUID,
 	)
 	if err != nil {
 		return TaskInfo{}, fmt.Errorf("lookup task info: %w", err)

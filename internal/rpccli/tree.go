@@ -186,6 +186,8 @@ type treeWireNode struct {
 	Resolution           *string         `json:"resolution,omitempty"`
 	IsArchived           bool            `json:"is_archived"`
 	IsDeleted            bool            `json:"is_deleted"`
+	OpenSubtaskCount     int             `json:"open_subtask_count"`
+	SubtaskOwnerID       string          `json:"subtask_owner_id,omitempty"`
 	AllTasksCompleted    bool            `json:"all_tasks_completed,omitempty"`
 	Promises             []promiseWire   `json:"promises"`
 	Children             []*treeWireNode `json:"children,omitempty"`
@@ -225,6 +227,8 @@ type treeJSONNode struct {
 	Resolution           *string         `json:"resolution,omitempty"`
 	IsArchived           bool            `json:"is_archived"`
 	IsDeleted            bool            `json:"is_deleted"`
+	OpenSubtaskCount     int             `json:"open_subtask_count"`
+	SubtaskOwnerID       string          `json:"subtask_owner_id,omitempty"`
 	AllTasksCompleted    bool            `json:"all_tasks_completed,omitempty"`
 	Promises             []promiseWire   `json:"promises"`
 	Children             []*treeJSONNode `json:"children,omitempty"`
@@ -257,9 +261,10 @@ func toTreeJSONNodes(nodes []*treeWireNode) []*treeJSONNode {
 			Resolution:           n.Resolution,
 			IsArchived:           n.IsArchived,
 			IsDeleted:            n.IsDeleted,
-			AllTasksCompleted:    n.AllTasksCompleted,
-			Promises:             n.Promises,
-			Children:             toTreeJSONNodes(n.Children),
+			OpenSubtaskCount:     n.OpenSubtaskCount, SubtaskOwnerID: n.SubtaskOwnerID,
+			AllTasksCompleted: n.AllTasksCompleted,
+			Promises:          n.Promises,
+			Children:          toTreeJSONNodes(n.Children),
 		})
 	}
 	return out
@@ -304,6 +309,8 @@ type treeStreamEntry struct {
 	Resolution           *string `json:"resolution,omitempty"`
 	IsArchived           bool    `json:"is_archived"`
 	IsDeleted            bool    `json:"is_deleted"`
+	OpenSubtaskCount     int     `json:"open_subtask_count"`
+	SubtaskOwnerID       string  `json:"subtask_owner_id,omitempty"`
 	AllTasksCompleted    bool    `json:"all_tasks_completed,omitempty"`
 	OwnerPrincipalRef    string  `json:"owner_principal_ref,omitempty"`
 	ReviewAt             string  `json:"review_at,omitempty"`
@@ -350,7 +357,8 @@ func flattenTreeWire(view *treeWireView) []treeStreamEntry {
 				Resolution:           node.Resolution,
 				IsArchived:           node.IsArchived,
 				IsDeleted:            node.IsDeleted,
-				AllTasksCompleted:    node.AllTasksCompleted,
+				OpenSubtaskCount:     node.OpenSubtaskCount, SubtaskOwnerID: node.SubtaskOwnerID,
+				AllTasksCompleted: node.AllTasksCompleted,
 			}
 			if parentID != nil {
 				entry.ParentID = parentID
@@ -668,6 +676,9 @@ func formatTreeHumanNode(node *treeWireNode) string {
 }
 
 func formatTreeHumanTaskState(node *treeWireNode) string {
+	if node.OpenSubtaskCount > 0 && node.State == "completed" {
+		return fmt.Sprintf("complete; %d subtasks open", node.OpenSubtaskCount)
+	}
 	if node.State != "open" {
 		return node.State
 	}

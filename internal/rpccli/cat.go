@@ -373,20 +373,31 @@ func writeCatNDJSON(w io.Writer, objs []json.RawMessage) error {
 // RawMessage decodes losslessly. The mirror MUST NOT import wrkqapi (import
 // guard), so this struct is duplicated here.
 type catTask struct {
-	ID                    string          `json:"id"`
-	UUID                  string          `json:"uuid"`
-	Path                  string          `json:"path"`
-	ArtifactDir           string          `json:"artifact_dir"`
-	ProjectID             string          `json:"project_id"`
-	ProjectUUID           string          `json:"project_uuid"`
-	Campaign              *catCampaign    `json:"campaign,omitempty"`
-	RequestedByProjectID  *string         `json:"requested_by_project_id,omitempty"`
-	AssignedProjectID     *string         `json:"assigned_project_id,omitempty"`
-	Slug                  string          `json:"slug"`
-	Title                 string          `json:"title"`
-	State                 string          `json:"state"`
-	Priority              int             `json:"priority"`
-	Kind                  string          `json:"kind"`
+	ID                   string       `json:"id"`
+	UUID                 string       `json:"uuid"`
+	Path                 string       `json:"path"`
+	ArtifactDir          string       `json:"artifact_dir"`
+	ProjectID            string       `json:"project_id"`
+	ProjectUUID          string       `json:"project_uuid"`
+	Campaign             *catCampaign `json:"campaign,omitempty"`
+	RequestedByProjectID *string      `json:"requested_by_project_id,omitempty"`
+	AssignedProjectID    *string      `json:"assigned_project_id,omitempty"`
+	Slug                 string       `json:"slug"`
+	Title                string       `json:"title"`
+	State                string       `json:"state"`
+	Priority             int          `json:"priority"`
+	Kind                 string       `json:"kind"`
+	RoomLocator          string       `json:"room_locator,omitempty"`
+	SubtaskOwnerID       *string      `json:"subtask_owner_id,omitempty"`
+	SubtaskOwnerUUID     *string      `json:"subtask_owner_uuid,omitempty"`
+	Subtasks             []struct {
+		ID        string `json:"id"`
+		Slug      string `json:"slug"`
+		Title     string `json:"title"`
+		State     string `json:"state"`
+		ClaimedBy string `json:"claimedBy,omitempty"`
+	} `json:"subtasks,omitempty"`
+	OpenSubtaskCount      int             `json:"open_subtask_count"`
 	ParentTaskID          *string         `json:"parent_task_id,omitempty"`
 	ParentTaskUUID        *string         `json:"parent_task_uuid,omitempty"`
 	AssigneeSlug          *string         `json:"assignee,omitempty"`
@@ -481,6 +492,21 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 			fmt.Fprintf(w, "state: %s\n", t.State)
 			fmt.Fprintf(w, "priority: %d\n", t.Priority)
 			fmt.Fprintf(w, "kind: %s\n", t.Kind)
+			if t.RoomLocator != "" {
+				fmt.Fprintf(w, "room_locator: %s\n", t.RoomLocator)
+			}
+			if t.SubtaskOwnerID != nil {
+				fmt.Fprintf(w, "subtask_owner_id: %s\n", *t.SubtaskOwnerID)
+			}
+			if t.SubtaskOwnerUUID != nil {
+				fmt.Fprintf(w, "subtask_owner_uuid: %s\n", *t.SubtaskOwnerUUID)
+			}
+			if len(t.Subtasks) > 0 {
+				fmt.Fprintln(w, "subtasks:")
+				for _, item := range t.Subtasks {
+					fmt.Fprintf(w, "  - %s: %s (%s)\n", item.ID, item.Title, item.State)
+				}
+			}
 			if t.ParentTaskID != nil {
 				fmt.Fprintf(w, "parent_task_id: %s\n", *t.ParentTaskID)
 			}

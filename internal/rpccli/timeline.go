@@ -21,9 +21,12 @@ type timelineMember struct {
 }
 
 type timelineEntry struct {
-	Type      string `json:"type"`
-	EventID   int64  `json:"eventId"`
-	Timestamp string `json:"timestamp"`
+	ContainerUUID string  `json:"containerUuid,omitempty"`
+	CampaignUUID  *string `json:"campaignUuid"`
+	ResourceUUID  string  `json:"resourceUuid,omitempty"`
+	Type          string  `json:"type"`
+	EventID       int64   `json:"eventId"`
+	Timestamp     string  `json:"timestamp"`
 	// PrincipalRef is the actor the server attributes the entry to. It is the
 	// one field every entry kind shares and the one a reader asks for first, so
 	// it is carried through rather than dropped in projection.

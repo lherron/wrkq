@@ -125,6 +125,8 @@ class WorkClientImpl implements WorkClient {
 
   readonly wrkq: WrkqFacade = {
     task: {
+      lsView: (p) => this.call("wrkq.task.lsView", p),
+      treeView: (p) => this.call("wrkq.task.treeView", p),
       create: async (p) =>
         this.call("wrkq.task.create", rejectLegacyActorAttribution(p)),
       show: (p) => this.call("wrkq.task.show", p),

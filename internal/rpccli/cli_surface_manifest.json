@@ -1270,8 +1270,14 @@
             "hidden": false
           },
           {
+            "name": "owner-state",
+            "usage": "Filter subtasks by owner state (including terminal)",
+            "type": "string",
+            "hidden": false
+          },
+          {
             "name": "parent-task",
-            "usage": "Filter subtasks of a specific parent task (ID or path)",
+            "usage": "Filter child tasks of a specific parent task (ID or path)",
             "type": "string",
             "hidden": false
           },
@@ -1326,6 +1332,13 @@
             "name": "state",
             "usage": "Filter by one state, or 'all' for every state (default: draft, open, in_progress, blocked; --ack-pending alone selects unacked completed/cancelled)",
             "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "subtasks",
+            "usage": "Include named subtasks",
+            "type": "bool",
+            "default": "false",
             "hidden": false
           },
           {
@@ -1869,6 +1882,13 @@
             "name": "states",
             "usage": "Task states to show, comma-separated (default draft,open,in_progress,blocked; \"any\" for all)",
             "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "subtasks",
+            "usage": "List named subtasks of an owner",
+            "type": "bool",
+            "default": "false",
             "hidden": false
           },
           {
@@ -3188,6 +3208,13 @@
             "usage": "Filter by state (default open, use all for non-deleted states)",
             "type": "string",
             "hidden": false
+          },
+          {
+            "name": "subtasks",
+            "usage": "Include named subtasks in search results",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
           }
         ]
       },
@@ -3671,7 +3698,7 @@
           },
           {
             "name": "parent-task",
-            "usage": "Parent task ID or path (for subtasks)",
+            "usage": "Parent task ID or path (for child tasks)",
             "type": "string",
             "hidden": false
           },
@@ -3711,6 +3738,13 @@
             "usage": "Initial task state (idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted)",
             "type": "string",
             "default": "open",
+            "hidden": false
+          },
+          {
+            "name": "subtask",
+            "usage": "Create a named subtask using T-XXXXX.slug",
+            "type": "bool",
+            "default": "false",
             "hidden": false
           },
           {

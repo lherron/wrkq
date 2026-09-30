@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/id"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +32,7 @@ func newTouchCmd() *cobra.Command {
 	var dueAt, startAt, requestedBy, assignedProject, resolution, metaFile, forceUUID, causedBy string
 	var campaign string
 	var priority int
-	var asJSON bool
+	var asJSON, subtask bool
 
 	cmd := &cobra.Command{
 		Use:   "touch <path>...",
@@ -47,7 +48,7 @@ func newTouchCmd() *cobra.Command {
 				assignee: assignee, requestedBy: requestedBy, assignedProject: assignedProject,
 				resolution: resolution, labels: labels, meta: meta, metaFile: metaFile,
 				dueAt: dueAt, startAt: startAt, forceUUID: forceUUID, causedBy: causedBy,
-				campaign: campaign, json: asJSON,
+				campaign: campaign, json: asJSON, subtask: subtask,
 				labelsSet: cmd.Flags().Changed("labels"),
 			})
 		},
@@ -58,7 +59,8 @@ func newTouchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&state, "state", "open", "Initial task state (idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted)")
 	cmd.Flags().IntVar(&priority, "priority", 3, "Initial task priority (1-4)")
 	cmd.Flags().StringVar(&kind, "kind", "", "Task kind: task, subtask, spike, bug, chore (default: task)")
-	cmd.Flags().StringVar(&parentTask, "parent-task", "", "Parent task ID or path (for subtasks)")
+	cmd.Flags().BoolVar(&subtask, "subtask", false, "Create a named subtask using T-XXXXX.slug")
+	cmd.Flags().StringVar(&parentTask, "parent-task", "", "Parent task ID or path (for child tasks)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee principal ref or bare agent slug")
 	cmd.Flags().StringVar(&requestedBy, "requested-by", "", "Requester project ID (return-to target)")
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Assignee project ID")
@@ -82,6 +84,7 @@ type touchOpts struct {
 	priority                                                             int
 	json                                                                 bool
 	labelsSet                                                            bool
+	subtask                                                              bool
 }
 
 func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
@@ -108,6 +111,9 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 	// Legacy: applyProjectRootToPaths(args, false) for the new-task paths and
 	// applyProjectRootToSelector(parentTask, false) for the parent reference.
 	paths := sc.paths(args, false)
+	if o.subtask {
+		paths = args
+	}
 	parentTask := ""
 	if o.parentTask != "" {
 		parentTask = sc.selector(o.parentTask, false)
@@ -147,6 +153,21 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 			title = segs[len(segs)-1]
 		}
 		params := map[string]any{"path": path, "title": title}
+		if o.subtask {
+			owner, slug, err := id.ParseTask(path)
+			if err != nil || slug == "" {
+				return fmt.Errorf("--subtask requires a named subtask ID (T-XXXXX.slug)")
+			}
+			if o.parentTask != "" || o.campaign != "" {
+				return fmt.Errorf("--subtask cannot combine with --parent-task or --campaign")
+			}
+			delete(params, "path")
+			params["subtaskOwner"] = owner
+			params["slug"] = slug
+			if o.title == "" {
+				params["title"] = slug
+			}
+		}
 		if o.description != "" {
 			params["description"] = description
 		}

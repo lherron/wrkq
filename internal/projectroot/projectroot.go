@@ -101,7 +101,7 @@ func applyToken(root, token string) string {
 		return token
 	}
 
-	if id.IsFriendlyID(token) || id.IsUUID(token) {
+	if id.IsTask(token) || id.IsFriendlyID(token) || id.IsUUID(token) {
 		return token
 	}
 

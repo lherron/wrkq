@@ -24,6 +24,7 @@ async function clientWith(transport: FakeTransport, autoInitialize = false) {
 }
 
 const MOCK_TASK: WrkqTask = {
+  openSubtaskCount: 0,
   uuid: "u-1",
   id: "T-00001",
   slug: "my-task",

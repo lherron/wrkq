@@ -2587,3 +2587,28 @@ on stdout:
   stream
 
 The tests at `internal/workrpc/server_contract_test.go` cover this invariant.
+
+## Named subtasks (v1)
+
+`wrkq.task.create` accepts `subtaskOwner` (ID/path/UUID) plus required `slug`.
+It builds the composite ID on the server. These fields refuse `path`, `project`,
+`parentTask` and `campaign`; `slug` without an owner is invalid. Unknown request
+keys remain refused. Task create/list request DTOs are catalogued with the read
+and write fields in the protocol schema hash and Go/TypeScript clients.
+
+`wrkq.task.show` returns owner subtask summaries (ID, slug, title, state, claim
+holder), `subtaskOwner` references, and `openSubtaskCount`. Compatibility cat
+uses `subtask_owner_id`/`subtask_owner_uuid` beside child-task parent fields.
+`wrkq.task.list` supports `subtasks`, `subtaskOwner`, and `ownerState`; the latter
+requires subtasks and accepts `terminal` or one state. `lsView` accepts `subtasks`
+with an owner path; `findListView` accepts `subtasks` and `ownerState`. Lists/tree
+expose `open_subtask_count` computed with their query. Default container membership
+excludes named subtasks. Search's `subtasks` opt-in includes their text. Rooms
+expose `openSubtaskCount` and route their subjects through the owner effective room.
+
+Ordinary task selectors in monitor event reads, history list/tail, room log task
+filters and timeline/project-event filters cover the owner plus its subtasks;
+subtask selectors remain exact and each event keeps its own task ID. State-only
+predicates remain exact. These reads never apply task membership exclusion.
+Webhook v2 adds optional `subtask_owner_id` and `subtask_owner_uuid` while keeping
+`ticket_id` and `ticket_uuid` as the event's own task.

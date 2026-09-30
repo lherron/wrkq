@@ -11,6 +11,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/selectors"
+	"github.com/lherron/wrkq/internal/taskmember"
 )
 
 // LsListView lists one path's children (containers + tasks) with the legacy
@@ -83,6 +84,11 @@ func (a *API) LsListView(ctx context.Context, p LsListViewParams) (*WrkqLsListVi
 // exactly as legacy does, before the combined merge-sort in LsListView.
 func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewParams, filter treeFilter, pruneEmpty bool, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
 	var entries []WrkqLsEntry
+	if p.Subtasks && path != "" {
+		if owner, _, err := selectors.ResolveTask(a.db, path); err == nil {
+			return a.lsOwnerSubtasks(ctx, owner, filter, pag)
+		}
+	}
 	if path == "" {
 		if p.Type == "" || p.Type == "p" {
 			rows, qerr := a.lsQueryContainers(ctx, "(SELECT uuid FROM containers WHERE kind = 'root')", pag, filter, pruneEmpty, "")
@@ -103,7 +109,7 @@ func (a *API) lsEntriesForPath(ctx context.Context, path string, p LsListViewPar
 			entries = append(entries, rows...)
 		}
 		if p.Type == "" || p.Type == "t" {
-			rows, qerr := a.lsQueryTasks(ctx, containerUUID, path, filter, pag)
+			rows, qerr := a.lsQueryTasks(ctx, containerUUID, path, filter, pag, p.Subtasks)
 			if qerr != nil {
 				return nil, qerr
 			}
@@ -148,8 +154,8 @@ func (a *API) lsQueryCampaignEnrollments(ctx context.Context, campaignUUID, camp
 	SELECT t.id, t.slug, t.title, t.created_at, t.updated_at, t.state, t.kind,
 	       t.requested_by_project_id, t.assigned_project_id, t.acknowledged_at, t.resolution,
 	       COALESCE((SELECT slug FROM container_ancestors ca
-	                  WHERE ca.task_uuid = t.uuid AND ca.kind = 'project' LIMIT 1), '')
-	  FROM tasks t WHERE t.campaign_uuid = ? AND t.project_uuid != ?`
+	                  WHERE ca.task_uuid = t.uuid AND ca.kind = 'project' LIMIT 1), ''), (SELECT COUNT(*) FROM tasks st WHERE st.subtask_owner_uuid=t.uuid AND st.state NOT IN ('completed','cancelled','archived','deleted'))
+	  FROM tasks t WHERE t.campaign_uuid = ? AND t.project_uuid != ? AND ` + taskmember.Filter("t", false)
 	args := []any{campaignUUID, campaignUUID}
 	if clause, clauseArgs := filter.sqlPredicate("t"); clause != "" {
 		query += clause
@@ -174,7 +180,7 @@ func (a *API) lsQueryCampaignEnrollments(ctx context.Context, campaignUUID, camp
 		var e WrkqLsEntry
 		var residentProject string
 		if err := rows.Scan(&e.ID, &e.Slug, &e.Title, &e.CreatedAt, &e.UpdatedAt, &e.State, &e.Kind,
-			&e.RequestedByProjectID, &e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution, &residentProject); err != nil {
+			&e.RequestedByProjectID, &e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution, &residentProject, &e.OpenSubtaskCount); err != nil {
 			return nil, NewInternalError(err)
 		}
 		e.Type = "task"
@@ -210,7 +216,7 @@ func (a *API) lsQueryContainers(ctx context.Context, parentExpr string, pag *cur
 	if pruneEmpty {
 		clause, clauseArgs := filter.sqlPredicate("t")
 		query += ` AND EXISTS (SELECT 1 FROM ls_sub s JOIN tasks t ON t.project_uuid = s.uuid
-			WHERE s.root_uuid = containers.uuid` + clause + `)`
+			WHERE s.root_uuid = containers.uuid AND ` + taskmember.Filter("t", false) + clause + `)`
 		args = append(args, clauseArgs...)
 	}
 	if pag.WhereClause != "" {
@@ -255,10 +261,10 @@ func (a *API) lsQueryContainers(ctx context.Context, parentExpr string, pag *cur
 	return out, rows.Err()
 }
 
-func (a *API) lsQueryTasks(ctx context.Context, containerUUID, pathPrefix string, filter treeFilter, pag *cursor.ApplyResult) ([]WrkqLsEntry, error) {
+func (a *API) lsQueryTasks(ctx context.Context, containerUUID, pathPrefix string, filter treeFilter, pag *cursor.ApplyResult, includeSubtasks bool) ([]WrkqLsEntry, error) {
 	query := `SELECT id, slug, title, created_at, updated_at, state, kind,
-		requested_by_project_id, assigned_project_id, acknowledged_at, resolution
-		FROM tasks WHERE project_uuid = ?`
+		requested_by_project_id, assigned_project_id, acknowledged_at, resolution, (SELECT COUNT(*) FROM tasks st WHERE st.subtask_owner_uuid=tasks.uuid AND st.state NOT IN ('completed','cancelled','archived','deleted')), COALESCE((SELECT o.slug || '/' FROM tasks o WHERE o.uuid=tasks.subtask_owner_uuid),'') || slug
+		FROM tasks WHERE project_uuid = ? AND ` + taskmember.Filter("", includeSubtasks)
 	args := []any{containerUUID}
 	if clause, clauseArgs := filter.sqlPredicate(""); clause != "" {
 		query += clause
@@ -281,16 +287,16 @@ func (a *API) lsQueryTasks(ctx context.Context, containerUUID, pathPrefix string
 	var out []WrkqLsEntry
 	for rows.Next() {
 		var e WrkqLsEntry
-		var slug string
+		var slug, memberPath string
 		if err := rows.Scan(&e.ID, &slug, &e.Title, &e.CreatedAt, &e.UpdatedAt, &e.State, &e.Kind,
-			&e.RequestedByProjectID, &e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution); err != nil {
+			&e.RequestedByProjectID, &e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution, &e.OpenSubtaskCount, &memberPath); err != nil {
 			return nil, NewInternalError(err)
 		}
 		e.Type = "task"
 		e.Slug = slug
-		e.Path = slug
+		e.Path = memberPath
 		if pathPrefix != "" {
-			e.Path = pathPrefix + "/" + slug
+			e.Path = pathPrefix + "/" + memberPath
 		}
 		out = append(out, e)
 	}
@@ -298,7 +304,7 @@ func (a *API) lsQueryTasks(ctx context.Context, containerUUID, pathPrefix string
 }
 
 func (a *API) lsSingleTask(ctx context.Context, path string, filter treeFilter) (*WrkqLsEntry, error) {
-	taskUUID, taskID, terr := selectors.ResolveTaskByPath(a.db, path)
+	taskUUID, taskID, terr := selectors.ResolveTask(a.db, path)
 	if terr != nil {
 
 		return nil, NewNotFoundError(path, "path")
@@ -308,10 +314,10 @@ func (a *API) lsSingleTask(ctx context.Context, path string, filter treeFilter) 
 	var archivedAt, deletedAt *string
 	if err := a.db.QueryRowContext(ctx, `
 		SELECT slug, title, created_at, updated_at, state, kind, requested_by_project_id,
-		       assigned_project_id, acknowledged_at, resolution, archived_at, deleted_at
+		       assigned_project_id, acknowledged_at, resolution, archived_at, deleted_at, (SELECT COUNT(*) FROM tasks st WHERE st.subtask_owner_uuid=tasks.uuid AND st.state NOT IN ('completed','cancelled','archived','deleted'))
 		FROM tasks WHERE uuid = ?`, taskUUID).Scan(
 		&slug, &e.Title, &e.CreatedAt, &e.UpdatedAt, &e.State, &e.Kind, &e.RequestedByProjectID,
-		&e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution, &archivedAt, &deletedAt); err != nil {
+		&e.AssignedProjectID, &e.AcknowledgedAt, &e.Resolution, &archivedAt, &deletedAt, &e.OpenSubtaskCount); err != nil {
 		return nil, NewInternalError(err)
 	}
 	if !filter.admits(e.State, archivedAt != nil, deletedAt != nil) {
@@ -341,7 +347,7 @@ func (a *API) containerRollupCounts(ctx context.Context, containerUUID string) (
 		                AND t.deleted_at IS NULL
 		               THEN 1
 		             END)
-		FROM descendants d LEFT JOIN tasks t ON t.project_uuid = d.uuid`, containerUUID).Scan(&taskCount, &activeTaskCount)
+		FROM descendants d LEFT JOIN tasks t ON t.project_uuid = d.uuid AND `+taskmember.Filter("t", false), containerUUID).Scan(&taskCount, &activeTaskCount)
 	if err != nil {
 		return 0, 0, NewInternalError(err)
 	}

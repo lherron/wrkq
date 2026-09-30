@@ -18,6 +18,8 @@ import (
 // renderers go through the SAME byte path as legacy. payload stays a raw STRING;
 // --patch decodes it CLIENT-side (no extra RPC, no server-side patch projection).
 type logEvent struct {
+	ResourceID   *string   `json:"resource_id,omitempty"`
+	TaskID       string    `json:"task_id,omitempty"`
 	ID           int64     `json:"id"`
 	Timestamp    time.Time `json:"timestamp"`
 	PrincipalRef *string   `json:"principal_ref,omitempty"`

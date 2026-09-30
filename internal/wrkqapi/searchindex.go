@@ -106,6 +106,7 @@ func (a *API) SearchListView(ctx context.Context, p SearchListViewParams) (*Wrkq
 
 	resp, err := svc.Search(sctx, search.Options{
 		Query:                p.Query,
+		Subtasks:             p.Subtasks,
 		Paths:                p.Paths,
 		State:                p.State,
 		Kind:                 p.Kind,

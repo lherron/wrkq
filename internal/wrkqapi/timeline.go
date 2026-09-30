@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/taskmember"
 )
 
 const (
@@ -235,10 +236,10 @@ func loadTimelineMembersTx(
 		WITH RECURSIVE
 		member_tasks AS (
 			SELECT t.uuid, t.id, t.slug, t.title, t.state, t.outcome, t.labels,
-			       t.updated_at, t.project_uuid,
+			       MAX(t.updated_at, COALESCE((SELECT MAX(s.updated_at) FROM tasks s WHERE s.subtask_owner_uuid = t.uuid), t.updated_at)) AS updated_at, t.project_uuid,
 			       CASE WHEN t.project_uuid = ? THEN 'resident' ELSE 'enrolled' END AS membership
 			  FROM tasks t
-			 WHERE t.project_uuid = ? OR t.campaign_uuid = ?
+			 WHERE (t.project_uuid = ? OR t.campaign_uuid = ?) AND `+taskmember.Filter("t", false)+`
 		),
 		ancestors(task_uuid, uuid, id, slug, title, kind, parent_uuid) AS (
 			SELECT m.uuid, c.uuid, c.id, c.slug, c.title, c.kind, c.parent_uuid

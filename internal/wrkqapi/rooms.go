@@ -406,7 +406,11 @@ func (a *API) routeToTask(ctx context.Context, attr attribution.Attribution, sel
 // routeToTaskUUID applies strict campaign coalesce: a task inside a campaign
 // talks in the campaign's room, tagged with the task it came through.
 func (a *API) routeToTaskUUID(ctx context.Context, attr attribution.Attribution, taskUUID string) (*routedSay, error) {
-	campaignUUID, err := a.effectiveCampaignForTask(ctx, taskUUID)
+	anchorUUID, err := a.taskRoomAnchor(ctx, taskUUID)
+	if err != nil {
+		return nil, err
+	}
+	campaignUUID, err := a.effectiveCampaignForTask(ctx, anchorUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -417,11 +421,24 @@ func (a *API) routeToTaskUUID(ctx context.Context, attr attribution.Attribution,
 		}
 		return &routedSay{room: room, taskTagUUID: &taskUUID}, nil
 	}
-	room, err := a.ensureTaskRoom(attr, taskUUID)
+	room, err := a.ensureTaskRoom(attr, anchorUUID)
 	if err != nil {
 		return nil, err
 	}
 	return &routedSay{room: room, taskTagUUID: &taskUUID}, nil
+}
+
+// taskRoomAnchor preserves the exact message subject while sharing the owner's room.
+func (a *API) taskRoomAnchor(ctx context.Context, taskUUID string) (string, error) {
+	var anchor string
+	err := a.db.QueryRowContext(ctx, `SELECT COALESCE(subtask_owner_uuid, uuid) FROM tasks WHERE uuid = ?`, taskUUID).Scan(&anchor)
+	if err == sql.ErrNoRows {
+		return "", NewNotFoundError(taskUUID, "task")
+	}
+	if err != nil {
+		return "", NewInternalError(err)
+	}
+	return anchor, nil
 }
 
 // effectiveCampaignForTask answers "which campaign does this task belong to",
@@ -446,10 +463,11 @@ func (a *API) effectiveCampaignForTask(ctx context.Context, taskUUID string) (st
 	var enrolledUUID, residentState, enrolledState sql.NullString
 	err := a.db.QueryRowContext(ctx, `
 		SELECT t.project_uuid, t.campaign_uuid, resident.campaign_state, enrolled.campaign_state
-		  FROM tasks t
+		  FROM tasks subject
+		  JOIN tasks t ON t.uuid = COALESCE(subject.subtask_owner_uuid, subject.uuid)
 		  LEFT JOIN containers resident ON resident.uuid = t.project_uuid
 		  LEFT JOIN containers enrolled ON enrolled.uuid = t.campaign_uuid
-		 WHERE t.uuid = ?`, taskUUID).
+		 WHERE subject.uuid = ?`, taskUUID).
 		Scan(&residentUUID, &enrolledUUID, &residentState, &enrolledState)
 	if err == sql.ErrNoRows {
 		return "", NewNotFoundError(taskUUID, "task")
@@ -2028,12 +2046,13 @@ type roomState struct {
 	lastActivity string
 	// workState and workTerminalAt name the terminal transition the stale notice
 	// quotes back ("task completed 2026-08-27").
-	workState      string
-	workTerminalAt string
-	memberCount    int
-	messageCount   int
-	lastMessageAt  string
-	links          []WrkqRoomLink
+	workState        string
+	workTerminalAt   string
+	openSubtaskCount int
+	memberCount      int
+	messageCount     int
+	lastMessageAt    string
+	links            []WrkqRoomLink
 }
 
 func (a *API) resolveRoomSelector(ctx context.Context, selector string) (*roomState, error) {
@@ -2087,6 +2106,11 @@ func (a *API) resolveRoomSelector(ctx context.Context, selector string) (*roomSt
 // The comment on effectiveCampaignForTask records that exact bug, fixed once
 // already on the say side.
 func (a *API) roomOrDerivedForTask(ctx context.Context, taskUUID string) (*roomState, error) {
+	anchorUUID, err := a.taskRoomAnchor(ctx, taskUUID)
+	if err != nil {
+		return nil, err
+	}
+	taskUUID = anchorUUID
 	// An EXISTING task room wins, and the order matters. A task room that
 	// predates enrolment keeps its own history readable at its own selector
 	// while new says route to the campaign room — linked, never merged. Asking
@@ -2196,9 +2220,10 @@ func (a *API) hydrateRoomState(ctx context.Context, room *domain.Room) (*roomSta
 		var terminalAt sql.NullString
 		err := a.db.QueryRowContext(ctx, `
 			SELECT t.id, COALESCE(cp.path || '/' || t.slug, t.slug), t.state,
-			       COALESCE(t.completed_at, t.archived_at, t.deleted_at, t.updated_at)
+			       COALESCE(t.completed_at, t.archived_at, t.deleted_at, t.updated_at),
+ (SELECT COUNT(*) FROM tasks sub WHERE sub.subtask_owner_uuid = t.uuid AND sub.state NOT IN ('completed','cancelled','archived','deleted'))
 			  FROM tasks t LEFT JOIN v_container_paths cp ON cp.uuid = t.project_uuid
-			 WHERE t.uuid = ?`, *room.TaskUUID).Scan(&ref.ID, &ref.Path, &taskState, &terminalAt)
+			 WHERE t.uuid = ?`, *room.TaskUUID).Scan(&ref.ID, &ref.Path, &taskState, &terminalAt, &state.openSubtaskCount)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return nil, NewNotFoundError(*room.TaskUUID, "room task")
@@ -2236,10 +2261,14 @@ func (a *API) hydrateRoomState(ctx context.Context, room *domain.Room) (*roomSta
 		var campaignState sql.NullString
 		var containerUpdatedAt string
 		err := a.db.QueryRowContext(ctx, `
-			SELECT c.id, COALESCE(v.path, c.slug), c.campaign_state, c.updated_at
+			SELECT c.id, COALESCE(v.path, c.slug), c.campaign_state, c.updated_at,
+ (SELECT COUNT(*) FROM tasks sub JOIN tasks owner ON owner.uuid = sub.subtask_owner_uuid
+ LEFT JOIN containers resident ON resident.uuid = owner.project_uuid
+ WHERE sub.state NOT IN ('completed','cancelled','archived','deleted')
+ AND COALESCE(CASE WHEN resident.campaign_state IS NOT NULL THEN owner.project_uuid END, owner.campaign_uuid) = c.uuid)
 			  FROM containers c LEFT JOIN v_container_paths v ON v.uuid = c.uuid
 			 WHERE c.uuid = ?`, *room.ContainerUUID).
-			Scan(&ref.ID, &ref.Path, &campaignState, &containerUpdatedAt)
+			Scan(&ref.ID, &ref.Path, &campaignState, &containerUpdatedAt, &state.openSubtaskCount)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return nil, NewNotFoundError(*room.ContainerUUID, "room container")
@@ -2382,8 +2411,9 @@ func (a *API) roomDTO(ctx context.Context, state *roomState) (*WrkqRoom, error) 
 		Work: string(state.work), Activity: string(state.activity),
 		Labels: labels, WorkRef: state.workRef, Links: state.links,
 		OpenedByPrincipalRef: room.OpenedByPrincipalRef, OpenedAt: toRFC3339(room.OpenedAt),
-		LastActivityAt: state.lastActivity,
-		MemberCount:    state.memberCount, MessageCount: state.messageCount,
+		LastActivityAt:   state.lastActivity,
+		OpenSubtaskCount: state.openSubtaskCount,
+		MemberCount:      state.memberCount, MessageCount: state.messageCount,
 		ETag: room.ETag, CreatedAt: toRFC3339(room.CreatedAt), UpdatedAt: toRFC3339(room.UpdatedAt),
 	}
 	if dto.Links == nil {

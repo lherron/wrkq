@@ -18,6 +18,11 @@ type TaskCatViewParams struct {
 // artifact_dir is a CANONICAL-HOST/server-local path hint, not a guarantee that
 // the path exists on a remote caller's filesystem.
 type WrkqTaskCatView struct {
+	RoomLocator           string            `json:"room_locator,omitempty"`
+	SubtaskOwnerID        *string           `json:"subtask_owner_id,omitempty"`
+	SubtaskOwnerUUID      *string           `json:"subtask_owner_uuid,omitempty"`
+	Subtasks              []SubtaskSummary  `json:"subtasks,omitempty"`
+	OpenSubtaskCount      int               `json:"open_subtask_count"`
 	ID                    string            `json:"id"`
 	UUID                  string            `json:"uuid"`
 	Path                  string            `json:"path"`
