@@ -103,6 +103,25 @@ type WrkqTimelineTaskState struct {
 	SourceEventType string  `json:"sourceEventType"`
 }
 
+// WrkqTimelineClaim details task.claimed and task.claim_released. For a
+// claim it names the new holder; for a release it names the holder released
+// (the entry's principalRef is whoever released it, which differs on force).
+type WrkqTimelineClaim struct {
+	PrincipalRef string `json:"principalRef,omitempty"`
+	ScopeRef     string `json:"scopeRef,omitempty"`
+	Node         string `json:"node,omitempty"`
+	Generation   int64  `json:"generation"`
+	TakeOver     bool   `json:"takeOver,omitempty"`
+	Force        bool   `json:"force,omitempty"`
+}
+
+// WrkqTimelineRequester rides on a task.created entry whose task was created
+// with requester fields.
+type WrkqTimelineRequester struct {
+	PrincipalRef string `json:"principalRef"`
+	ScopeRef     string `json:"scopeRef,omitempty"`
+}
+
 type WrkqTimelineProjectEvent struct {
 	UUID         string          `json:"uuid"`
 	Type         string          `json:"type"`
@@ -118,8 +137,8 @@ type WrkqTimelineContainerState struct {
 	To   string  `json:"to"`
 }
 
-// WrkqTimelineEntry is a discriminated event projection. Exactly one detail
-// object matching Type is populated.
+// WrkqTimelineEntry is a discriminated event projection. One detail object
+// matching Type is populated; a task.created entry may also carry Requester.
 type WrkqTimelineEntry struct {
 	Type           string                      `json:"type"`
 	EventID        int64                       `json:"eventId"`
@@ -137,6 +156,8 @@ type WrkqTimelineEntry struct {
 	Message        *WrkqTimelineMessage        `json:"message,omitempty"`
 	Outcome        *WrkqTimelineOutcome        `json:"outcome,omitempty"`
 	TaskState      *WrkqTimelineTaskState      `json:"taskState,omitempty"`
+	Requester      *WrkqTimelineRequester      `json:"requester,omitempty"`
+	Claim          *WrkqTimelineClaim          `json:"claim,omitempty"`
 	ContainerState *WrkqTimelineContainerState `json:"containerState,omitempty"`
 	ProjectEvent   *WrkqTimelineProjectEvent   `json:"projectEvent,omitempty"`
 }

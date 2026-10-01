@@ -206,7 +206,8 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 
 	query := `
 		SELECT t.uuid, t.id, t.slug, t.title, t.specification, t.state, t.priority, t.kind,
-		       t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref,
+		       t.assignee_principal_ref, t.requester_principal_ref, t.requester_scope_ref,
+		       t.claimed_by_principal_ref, t.claimed_scope_ref,
 		       t.claimed_node, t.claimed_at, t.claim_generation,
 		       t.parent_task_uuid, t.requested_by_project_id,
 		       t.assigned_project_id, t.acknowledged_at, t.resolution, t.due_at, t.etag,
@@ -377,13 +378,14 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 		var r WrkqFindEntry
 		var specification string
 		var state, kind, assigneePrincipalRef, claimedBy, claimedScope, claimedNode, claimedAt sql.NullString
+		var requesterPrincipalRef, requesterScopeRef sql.NullString
 		var claimGeneration int64
 		var parentTaskUUID, dueAt sql.NullString
 		var requestedBy, assignedProject, acknowledgedAt, resolution sql.NullString
 		var priority sql.NullInt64
 
 		if err := rows.Scan(&r.UUID, &r.ID, &r.Slug, &r.Title, &specification, &state, &priority, &kind,
-			&assigneePrincipalRef, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
+			&assigneePrincipalRef, &requesterPrincipalRef, &requesterScopeRef, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
 			&parentTaskUUID, &requestedBy, &assignedProject,
 			&acknowledgedAt, &resolution, &dueAt, &r.ETag, &r.Path, &r.CreatedAt, &r.UpdatedAt, &r.membership, &r.SubtaskOwnerID, &r.OpenSubtaskCount); err != nil {
 			return nil, false, NewInternalError(err)
@@ -405,6 +407,12 @@ func (a *API) findTasks(ctx context.Context, opts findQueryOptions, skipPaginati
 			r.AssigneePrincipalRef = &assigneePrincipalRef.String
 			display := attribution.PrincipalHandle(assigneePrincipalRef.String)
 			r.Assignee = &display
+		}
+		if requesterPrincipalRef.Valid {
+			r.RequesterPrincipalRef = &requesterPrincipalRef.String
+		}
+		if requesterScopeRef.Valid {
+			r.RequesterScopeRef = &requesterScopeRef.String
 		}
 		if claimedBy.Valid {
 			r.ClaimedBy = &claimedBy.String

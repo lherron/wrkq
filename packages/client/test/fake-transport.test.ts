@@ -41,6 +41,8 @@ const MOCK_TASK: WrkqTask = {
   riskClass: "medium",
   etag: 2,
   assigneePrincipalRef: "agent:larry",
+  requesterPrincipalRef: "agent:mable",
+  requesterScopeRef: "agent:mable:project:wrkq:role:primary",
   createdAt: "2026-06-30T00:00:00Z",
   updatedAt: "2026-06-30T00:00:00Z",
 };
@@ -383,6 +385,7 @@ describe("wrkq namespace", () => {
       kind: "task",
       state: "open",
       riskClass: "medium",
+      requesterScopeRef: "mable@wrkq:primary",
       idempotencyKey: "k1",
     });
 
@@ -391,12 +394,15 @@ describe("wrkq namespace", () => {
     expect(frame.params).toMatchObject({
       title: "my task",
       riskClass: "medium",
+      requesterScopeRef: "mable@wrkq:primary",
       idempotencyKey: "k1",
     });
     expect(task.id).toBe("T-00001");
     expect(task.riskClass).toBe("medium");
     expect(task.etag).toBe(2);
     expect(task.assigneePrincipalRef).toBe("agent:larry");
+    expect(task.requesterPrincipalRef).toBe("agent:mable");
+    expect(task.requesterScopeRef).toBe("agent:mable:project:wrkq:role:primary");
   });
 
   test("workflow.syncMeta stays in the task-owned wrkq namespace", async () => {

@@ -43,6 +43,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		requestedBy, assignedProject, acknowledgedAt, resolution       *string
 		parentTaskUUID, subtaskOwnerUUID, assigneePrincipalRef         *string
 		claimedBy, claimedScope, claimedNode, claimedAt                *string
+		requesterPrincipalRef, requesterScopeRef                       *string
 		claimGeneration                                                int64
 		createdAt, updatedAt                                           string
 		etag                                                           int64
@@ -54,6 +55,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		SELECT id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 		       state, priority,
 		       kind, parent_task_uuid, subtask_owner_uuid, assignee_principal_ref,
+		       requester_principal_ref, requester_scope_ref,
 		       claimed_by_principal_ref, claimed_scope_ref, claimed_node, claimed_at, claim_generation,
 		       start_at, due_at, labels, meta, description, specification, outcome, etag,
 		       created_at, updated_at, completed_at, archived_at,
@@ -62,6 +64,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		FROM tasks WHERE uuid = ?`, taskUUID).Scan(
 		&id, &slug, &title, &projectUUID, &requestedBy, &assignedProject, &state, &priority,
 		&kind, &parentTaskUUID, &subtaskOwnerUUID, &assigneePrincipalRef,
+		&requesterPrincipalRef, &requesterScopeRef,
 		&claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
 		&startAt, &dueAt, &labels, &meta, &description, &specification, &outcome, &etag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
@@ -141,6 +144,8 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		ParentTaskUUID:        parentTaskUUID,
 		AssigneeSlug:          assigneeSlug,
 		AssigneePrincipalRef:  assigneePrincipalRef,
+		RequesterPrincipalRef: requesterPrincipalRef,
+		RequesterScopeRef:     requesterScopeRef,
 		ClaimedBy:             claimedBy,
 		ClaimedScope:          claimedScope,
 		ClaimedNode:           claimedNode,

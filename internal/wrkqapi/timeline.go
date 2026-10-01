@@ -489,14 +489,37 @@ func normalizeTimelineEntry(
 		entry.Type = "task.outcome"
 		outcome, _ := timelinePayloadString(payload, "outcome")
 		entry.Outcome = &WrkqTimelineOutcome{Text: outcome}
-	// The quiet entries (see timelineQuietTypes) carry no new detail object --
-	// the wire schema is pinned by the client handshake. task.created reuses
-	// the task-state detail for its initial state; task.edited and task.moved
-	// carry only the task identity, and a reader re-reads the task.
+	// task.created reuses the task-state detail for its initial state and adds
+	// the requester when one was set; task.edited and task.moved carry only the
+	// task identity, and a reader re-reads the task.
 	case "task.created":
 		entry.Type = "task.created"
 		if state, _ := timelinePayloadString(payload, "state"); state != nil {
 			entry.TaskState = &WrkqTimelineTaskState{State: *state, SourceEventType: eventType}
+		}
+		if principal, _ := timelinePayloadString(payload, "requester_principal_ref"); principal != nil {
+			entry.Requester = &WrkqTimelineRequester{PrincipalRef: *principal}
+			if scopeRef, _ := timelinePayloadString(payload, "requester_scope_ref"); scopeRef != nil {
+				entry.Requester.ScopeRef = *scopeRef
+			}
+		}
+	case "task.claimed":
+		entry.Type = "task.claimed"
+		claim := &WrkqTimelineClaim{}
+		claim.PrincipalRef = timelinePayloadText(payload, "claimed_by")
+		claim.ScopeRef = timelinePayloadText(payload, "claimed_scope")
+		claim.Node = timelinePayloadText(payload, "claimed_node")
+		claim.Generation = timelinePayloadInt(payload, "claim_generation")
+		claim.TakeOver = timelinePayloadBool(payload, "take_over")
+		entry.Claim = claim
+	case "task.claim_released":
+		entry.Type = "task.claim_released"
+		entry.Claim = &WrkqTimelineClaim{
+			PrincipalRef: timelinePayloadText(payload, "prior_holder"),
+			ScopeRef:     entry.ScopeRef,
+			Node:         timelinePayloadText(payload, "prior_node"),
+			Generation:   timelinePayloadInt(payload, "claim_generation"),
+			Force:        timelinePayloadBool(payload, "force"),
 		}
 	case "task.moved":
 		entry.Type = "task.moved"
@@ -538,6 +561,29 @@ func normalizeTimelineEntry(
 		return fmt.Errorf("unsupported timeline event type %s", eventType)
 	}
 	return nil
+}
+
+func timelinePayloadText(payload map[string]json.RawMessage, key string) string {
+	if value, _ := timelinePayloadString(payload, key); value != nil {
+		return *value
+	}
+	return ""
+}
+
+func timelinePayloadInt(payload map[string]json.RawMessage, key string) int64 {
+	var value int64
+	if raw, ok := payload[key]; ok {
+		_ = json.Unmarshal(raw, &value)
+	}
+	return value
+}
+
+func timelinePayloadBool(payload map[string]json.RawMessage, key string) bool {
+	var value bool
+	if raw, ok := payload[key]; ok {
+		_ = json.Unmarshal(raw, &value)
+	}
+	return value
 }
 
 func timelinePayloadString(payload map[string]json.RawMessage, key string) (*string, bool) {

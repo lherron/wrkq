@@ -637,6 +637,10 @@ export interface WrkqTaskCreateParams {
   state?: WrkqTaskState;
   parentTask?: string;
   assigneePrincipalRef?: string | null;
+  /** Requester principal (agent:<id> or bare slug). */
+  requesterPrincipalRef?: string | null;
+  /** Requester scope: canonical ScopeRef or <id>@<project>[:<lane>]; its agent must match the principal. */
+  requesterScopeRef?: string | null;
   labels?: string[];
   meta?: Record<string, unknown>;
   riskClass?: WrkqRiskClass;
@@ -693,6 +697,10 @@ export interface WrkqTaskUpdateParams {
     meta?: Record<string, unknown>;
     riskClass?: WrkqRiskClass;
     assigneePrincipalRef?: string | null;
+    /** "" clears both requester fields. */
+    requesterPrincipalRef?: string | null;
+    /** "" clears only the scope. A scope alone derives the principal. */
+    requesterScopeRef?: string | null;
     dueAt?: string | null;
     startAt?: string | null;
     /** Campaign ID/path to enroll; empty string unenrolls. */
@@ -871,6 +879,9 @@ export interface WrkqTask {
   deletedAt?: string;
   acknowledgedAt?: string;
   assigneePrincipalRef?: string;
+  /** Who asked for the work; distinct from creator attribution and requestedBy. */
+  requesterPrincipalRef?: string;
+  requesterScopeRef?: string;
   claimedBy?: string;
   claimedScope?: string;
   claimedNode?: string;
@@ -938,6 +949,8 @@ export interface WrkqFindEntry {
   kind?: string;
   assignee?: string;
   assignee_principal_ref?: string;
+  requester_principal_ref?: string;
+  requester_scope_ref?: string;
   claimed_by?: string;
   claimed_scope?: string;
   claimed_node?: string;
@@ -1448,11 +1461,30 @@ export interface WrkqTimelineTaskState {
   from?: WrkqTaskState;
   state: WrkqTaskState | "purged";
   sourceEventType:
+    | "task.created"
     | "task.updated"
     | "task.archived"
     | "task.deleted"
     | "task.restored"
     | "task.purged";
+}
+
+export interface WrkqTimelineRequester {
+  principalRef: string;
+  scopeRef?: string;
+}
+
+/**
+ * task.claimed names the new holder; task.claim_released names the holder that
+ * was released (the entry's principalRef is the releaser).
+ */
+export interface WrkqTimelineClaim {
+  principalRef?: string;
+  scopeRef?: string;
+  node?: string;
+  generation: number;
+  takeOver?: boolean;
+  force?: boolean;
 }
 
 export interface WrkqTimelineContainerState {
@@ -1490,6 +1522,18 @@ export type WrkqTimelineEntry =
   | (WrkqTimelineEntryBase & {
       type: "task.state";
       taskState: WrkqTimelineTaskState;
+    })
+  | (WrkqTimelineEntryBase & {
+      type: "task.created";
+      taskState?: WrkqTimelineTaskState;
+      requester?: WrkqTimelineRequester;
+    })
+  | (WrkqTimelineEntryBase & {
+      type: "task.claimed" | "task.claim_released";
+      claim: WrkqTimelineClaim;
+    })
+  | (WrkqTimelineEntryBase & {
+      type: "task.edited" | "task.moved";
     })
   | (WrkqTimelineEntryBase & {
       type: "container.state";

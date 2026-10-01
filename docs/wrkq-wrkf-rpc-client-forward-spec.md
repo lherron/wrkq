@@ -642,6 +642,8 @@ interface WrkqTaskUpdateParams {
     labels?: string[];
     meta?: Record<string, unknown>;
     assigneePrincipalRef?: string | null;
+    requesterPrincipalRef?: string | null;
+    requesterScopeRef?: string | null;
     dueAt?: string | null;
     startAt?: string | null;
   };

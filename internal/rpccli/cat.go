@@ -402,6 +402,8 @@ type catTask struct {
 	ParentTaskUUID        *string         `json:"parent_task_uuid,omitempty"`
 	AssigneeSlug          *string         `json:"assignee,omitempty"`
 	AssigneePrincipalRef  *string         `json:"assignee_principal_ref,omitempty"`
+	RequesterPrincipalRef *string         `json:"requester_principal_ref,omitempty"`
+	RequesterScopeRef     *string         `json:"requester_scope_ref,omitempty"`
 	ClaimedBy             *string         `json:"claimed_by,omitempty"`
 	ClaimedScope          *string         `json:"claimed_scope,omitempty"`
 	ClaimedNode           *string         `json:"claimed_node,omitempty"`
@@ -518,6 +520,12 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 			}
 			if t.AssigneePrincipalRef != nil {
 				fmt.Fprintf(w, "assignee_principal_ref: %s\n", *t.AssigneePrincipalRef)
+			}
+			if t.RequesterPrincipalRef != nil {
+				fmt.Fprintf(w, "requester_principal_ref: %s\n", *t.RequesterPrincipalRef)
+			}
+			if t.RequesterScopeRef != nil {
+				fmt.Fprintf(w, "requester_scope_ref: %s\n", *t.RequesterScopeRef)
 			}
 			if t.ClaimedBy != nil {
 				fmt.Fprintf(w, "claimed_by: %s\n", *t.ClaimedBy)

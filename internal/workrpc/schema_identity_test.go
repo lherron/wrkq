@@ -78,7 +78,9 @@ import (
 // T-09634 adds the optional timeline before bound; old requests keep their shape.
 // T-09886 adds optional session attribution to comment.add and comment read DTOs.
 // T-09897 catalogs task create/list requests and named-subtask read/write fields.
-const pinnedProtocolSchemaHash = "sha256:5f54bf7e2d246610f37a2fb22ef875dfca0f5e4eb3155010d0ed2dd02b4e0999"
+// T-09978 adds requesterPrincipalRef/requesterScopeRef to task create, patch,
+// task, cat and find DTOs, and the timeline entry's claim and requester details.
+const pinnedProtocolSchemaHash = "sha256:49bb104a7d3e4c4461c004eff046e58ba556deb12421ee2d1d5bc62e4640703a"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

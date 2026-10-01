@@ -627,6 +627,8 @@ interface WrkqTaskCreateParams {
   state?: WrkqTaskState;
   parentTask?: string;
   assigneePrincipalRef?: string | null;
+  requesterPrincipalRef?: string | null; // who asked; scope alone derives it (T-09978)
+  requesterScopeRef?: string | null;     // canonical ScopeRef or handle; agent must match
   requestedBy?: string;
   assignedProject?: string;
   resolution?: "done" | "wont_do" | "duplicate" | "needs_info";
@@ -679,6 +681,8 @@ interface WrkqTaskUpdateParams {
     meta?: Record<string, unknown>;
     metaRaw?: string; // compatibility carrier: validated JSON object/null stored verbatim
     assigneePrincipalRef?: string | null;
+    requesterPrincipalRef?: string | null; // "" clears requester and scope
+    requesterScopeRef?: string | null;     // "" clears scope only
     requestedBy?: string;
     assignedProject?: string;
     resolution?: "done" | "wont_do" | "duplicate" | "needs_info";

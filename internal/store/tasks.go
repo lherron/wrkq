@@ -29,34 +29,36 @@ type pendingWebhook struct {
 
 // CreateParams contains parameters for creating a new task.
 type CreateParams struct {
-	UUID                 string // optional: force specific UUID instead of auto-generating
-	Slug                 string
-	Title                string
-	Description          string
-	Specification        string
-	ProjectUUID          string
-	State                domain.State
-	Priority             int
-	Kind                 string  // task, subtask, spike, bug, chore - defaults to "task"
-	ParentTaskUUID       *string // for child tasks
-	SubtaskOwnerUUID     *string // immutable named-subtask owner
-	AssigneeActorUUID    *string // task assignment
-	AssigneePrincipalRef *string // canonical task assignment
-	RequestedByProjectID *string
-	AssignedProjectID    *string
-	Resolution           *string
-	WorkflowPreset       *string
-	PresetVersion        *int
-	Phase                *string
-	RiskClass            *string
-	Labels               string  // JSON array
-	Meta                 *string // JSON object
-	DueAt                string
-	StartAt              string
-	CausedBy             []CausedByRef // ordered, de-duplicated causal lineage edges
-	CampaignUUID         *string       // optional campaign ENROLMENT at create time (cross-project membership)
-	Via                  string        // origin.via for webhooks; defaults to "cli"
-	CreatorScopeRef      string        // full praesidium scopeRef of the creating agent; stored as created_by_scope_ref
+	UUID                  string // optional: force specific UUID instead of auto-generating
+	Slug                  string
+	Title                 string
+	Description           string
+	Specification         string
+	ProjectUUID           string
+	State                 domain.State
+	Priority              int
+	Kind                  string  // task, subtask, spike, bug, chore - defaults to "task"
+	ParentTaskUUID        *string // for child tasks
+	SubtaskOwnerUUID      *string // immutable named-subtask owner
+	AssigneeActorUUID     *string // task assignment
+	AssigneePrincipalRef  *string // canonical task assignment
+	RequesterPrincipalRef *string // who asked for the work (not creator attribution)
+	RequesterScopeRef     *string // requester's canonical ScopeRef; requires RequesterPrincipalRef
+	RequestedByProjectID  *string
+	AssignedProjectID     *string
+	Resolution            *string
+	WorkflowPreset        *string
+	PresetVersion         *int
+	Phase                 *string
+	RiskClass             *string
+	Labels                string  // JSON array
+	Meta                  *string // JSON object
+	DueAt                 string
+	StartAt               string
+	CausedBy              []CausedByRef // ordered, de-duplicated causal lineage edges
+	CampaignUUID          *string       // optional campaign ENROLMENT at create time (cross-project membership)
+	Via                   string        // origin.via for webhooks; defaults to "cli"
+	CreatorScopeRef       string        // full praesidium scopeRef of the creating agent; stored as created_by_scope_ref
 }
 
 // CreateResult contains the result of task creation.
@@ -178,7 +180,7 @@ func loadTaskFieldValues(tx *sql.Tx, taskUUID string, fields []string) (map[stri
 			} else {
 				values[field] = value
 			}
-		case "state", "slug", "title", "project_uuid", "kind", "resolution", "outcome", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_principal_ref", "requested_by_project_id", "assigned_project_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
+		case "state", "slug", "title", "project_uuid", "kind", "resolution", "outcome", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_principal_ref", "requester_principal_ref", "requester_scope_ref", "requested_by_project_id", "assigned_project_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
 			var value sql.NullString
 			if err := tx.QueryRow("SELECT "+field+" FROM tasks WHERE uuid = ?", taskUUID).Scan(&value); err != nil {
 				return nil, err
@@ -290,19 +292,19 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 
 		if params.UUID != "" {
 			query = `INSERT INTO tasks (uuid, id, slug, title, description, specification, project_uuid, state, priority, kind,
-				parent_task_uuid, subtask_owner_uuid, assignee_principal_ref, requested_by_project_id, assigned_project_id, resolution,
+				parent_task_uuid, subtask_owner_uuid, assignee_principal_ref, requester_principal_ref, requester_scope_ref, requested_by_project_id, assigned_project_id, resolution,
 				workflow_preset, preset_version, phase, risk_class,
 				labels, meta, due_at, start_at,
 				created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref, updated_by_scope_ref)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			args = append(args, params.UUID)
 		} else {
 			query = `INSERT INTO tasks (id, slug, title, description, specification, project_uuid, state, priority, kind,
-				parent_task_uuid, subtask_owner_uuid, assignee_principal_ref, requested_by_project_id, assigned_project_id, resolution,
+				parent_task_uuid, subtask_owner_uuid, assignee_principal_ref, requester_principal_ref, requester_scope_ref, requested_by_project_id, assigned_project_id, resolution,
 				workflow_preset, preset_version, phase, risk_class,
 				labels, meta, due_at, start_at,
 				created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref, updated_by_scope_ref)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		}
 
 		// Common args for both cases
@@ -319,6 +321,8 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 			params.ParentTaskUUID,
 			params.SubtaskOwnerUUID,
 			params.AssigneePrincipalRef,
+			params.RequesterPrincipalRef,
+			params.RequesterScopeRef,
 			params.RequestedByProjectID,
 			params.AssignedProjectID,
 			params.Resolution,
@@ -397,6 +401,15 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 		}
 		if params.AssigneePrincipalRef != nil {
 			payload["assignee_principal_ref"] = *params.AssigneePrincipalRef
+		}
+		if params.SubtaskOwnerUUID != nil {
+			payload["subtask_owner_uuid"] = *params.SubtaskOwnerUUID
+		}
+		if params.RequesterPrincipalRef != nil {
+			payload["requester_principal_ref"] = *params.RequesterPrincipalRef
+		}
+		if params.RequesterScopeRef != nil {
+			payload["requester_scope_ref"] = *params.RequesterScopeRef
 		}
 		if params.RequestedByProjectID != nil {
 			payload["requested_by_project_id"] = *params.RequestedByProjectID

@@ -578,9 +578,10 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 		                   cp_project_id, cp_run_id, cp_session_id, cp_work_item_id,
 		                   sdk_session_id, run_status,
 		                   claimed_by_principal_ref, claimed_scope_ref, claimed_node, claimed_at,
-		                   claim_token_hash, claim_generation)
+		                   claim_token_hash, claim_generation,
+		                   requester_principal_ref, requester_scope_ref)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-		        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -621,7 +622,8 @@ func importTasks(tx *sql.Tx, snap *Snapshot) error {
 			nullableSnapshotPointer(t.SDKSessionID), nullableSnapshotPointer(t.RunStatus),
 			nullableSnapshotPointer(t.ClaimedByPrincipalRef), nullableSnapshotPointer(t.ClaimedScopeRef),
 			nullableSnapshotPointer(t.ClaimedNode), nullableSnapshotPointer(t.ClaimedAt),
-			nullableSnapshotPointer(t.ClaimTokenHash), t.ClaimGeneration); err != nil {
+			nullableSnapshotPointer(t.ClaimTokenHash), t.ClaimGeneration,
+			nullableSnapshotPointer(t.RequesterPrincipalRef), nullableSnapshotPointer(t.RequesterScopeRef)); err != nil {
 			return fmt.Errorf("failed to import task %s: %w", uuid, err)
 		}
 	}

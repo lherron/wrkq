@@ -42,6 +42,8 @@ type WrkqTaskCatView struct {
 	AssigneeSlug          *string           `json:"assignee,omitempty"`
 	AssigneeUUID          *string           `json:"assignee_uuid,omitempty"`
 	AssigneePrincipalRef  *string           `json:"assignee_principal_ref,omitempty"`
+	RequesterPrincipalRef *string           `json:"requester_principal_ref,omitempty"`
+	RequesterScopeRef     *string           `json:"requester_scope_ref,omitempty"`
 	ClaimedBy             *string           `json:"claimed_by,omitempty"`
 	ClaimedScope          *string           `json:"claimed_scope,omitempty"`
 	ClaimedNode           *string           `json:"claimed_node,omitempty"`

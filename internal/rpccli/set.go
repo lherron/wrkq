@@ -23,7 +23,7 @@ import (
 func newSetCmd() *cobra.Command {
 	var description, specification, outcome, state, title, slug, labels, meta, kind, assignee, dueAt, startAt string
 	var parentTask, parentID, requestedBy, assignedProject, resolution, causedBy, campaign string
-	var projectRoot string
+	var projectRoot, requester, requesterScope string
 	var metaFile string
 	var priority, jobs, batchSize int
 	var ifMatch int64
@@ -117,6 +117,16 @@ func newSetCmd() *cobra.Command {
 				patch["assigneePrincipalRef"] = principalRef
 				dryFields["assignee_principal_ref"] = principalRef
 			}
+			// --requester '' clears both requester fields; --requester-scope ''
+			// clears only the scope. The server validates and canonicalizes.
+			if cmd.Flags().Changed("requester") {
+				patch["requesterPrincipalRef"] = requester
+				dryFields["requester_principal_ref"] = requester
+			}
+			if cmd.Flags().Changed("requester-scope") {
+				patch["requesterScopeRef"] = requesterScope
+				dryFields["requester_scope_ref"] = requesterScope
+			}
 			if requestedBy != "" {
 				patch["requestedBy"] = requestedBy
 				dryFields["requested_by_project_id"] = requestedBy
@@ -209,12 +219,18 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&parentID, "parent-id", "", "Alias for --parent-task")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Update task assignee")
 	cmd.Flags().StringVar(&requestedBy, "requested-by", "", "Update requester project ID")
+	cmd.Flags().StringVar(&requester, "requester", "", "Update requester principal (empty clears it and the scope; --requester-scope sets the scope)")
+	cmd.Flags().StringVar(&requesterScope, "requester-scope", "", "Update requester scope (agent:<id>:project:<p>... or <id>@<project>[:<lane>]; empty clears scope only)")
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Update assignee project ID")
 	cmd.Flags().StringVar(&resolution, "resolution", "", "Update task resolution")
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Replace causal lineage with comma-separated task IDs (empty string clears; omit to leave unchanged)")
 	cmd.Flags().StringVar(&campaign, "campaign", "", "Enroll in a draft or active campaign by ID or path; the task keeps its own project (empty string unenrolls)")
 	cmd.Flags().StringVar(&projectRoot, "root", "", "Set a top-level project's checkout root (stored as ~/... when under $HOME; empty clears; consumers expand it)")
 	_ = cmd.Flags().MarkHidden("batch-size") // Accepted for compatibility; it has no behavior.
+	// Kept out of the 40-line help budget: --parent-id is an alias, and
+	// --requester-scope is named by --requester's help line.
+	_ = cmd.Flags().MarkHidden("parent-id")
+	_ = cmd.Flags().MarkHidden("requester-scope")
 	_ = batchSize                            // Legacy accepts --batch-size but does not apply batching.
 	return refuseRepeatedFlags(cmd)
 }

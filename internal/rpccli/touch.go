@@ -30,7 +30,7 @@ type touchResult struct {
 func newTouchCmd() *cobra.Command {
 	var title, description, specification, state, kind, parentTask, assignee, labels, meta string
 	var dueAt, startAt, requestedBy, assignedProject, resolution, metaFile, forceUUID, causedBy string
-	var campaign string
+	var campaign, requester, requesterScope string
 	var priority int
 	var asJSON, subtask bool
 
@@ -49,6 +49,7 @@ func newTouchCmd() *cobra.Command {
 				resolution: resolution, labels: labels, meta: meta, metaFile: metaFile,
 				dueAt: dueAt, startAt: startAt, forceUUID: forceUUID, causedBy: causedBy,
 				campaign: campaign, json: asJSON, subtask: subtask,
+				requester: requester, requesterScope: requesterScope,
 				labelsSet: cmd.Flags().Changed("labels"),
 			})
 		},
@@ -63,6 +64,8 @@ func newTouchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&parentTask, "parent-task", "", "Parent task ID or path (for child tasks)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee principal ref or bare agent slug")
 	cmd.Flags().StringVar(&requestedBy, "requested-by", "", "Requester project ID (return-to target)")
+	cmd.Flags().StringVar(&requester, "requester", "", "Requester principal ref or bare agent slug (who asked for the work)")
+	cmd.Flags().StringVar(&requesterScope, "requester-scope", "", "Requester scope (agent:<id>:project:<p>... or <id>@<project>[:<lane>]); implies --requester")
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Assignee project ID")
 	cmd.Flags().StringVar(&resolution, "resolution", "", "Task resolution (done, wont_do, duplicate, needs_info)")
 	cmd.Flags().StringVar(&labels, "labels", "", "Initial labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
@@ -81,6 +84,7 @@ type touchOpts struct {
 	title, description, specification, state, kind, parentTask, assignee string
 	requestedBy, assignedProject, resolution, labels, meta, metaFile     string
 	dueAt, startAt, forceUUID, causedBy, campaign                        string
+	requester, requesterScope                                            string
 	priority                                                             int
 	json                                                                 bool
 	labelsSet                                                            bool
@@ -188,6 +192,12 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 		}
 		if o.assignee != "" {
 			params["assigneePrincipalRef"] = o.assignee
+		}
+		if o.requester != "" {
+			params["requesterPrincipalRef"] = o.requester
+		}
+		if o.requesterScope != "" {
+			params["requesterScopeRef"] = o.requesterScope
 		}
 		if o.requestedBy != "" {
 			params["requestedBy"] = o.requestedBy

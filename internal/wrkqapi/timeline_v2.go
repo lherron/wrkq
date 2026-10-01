@@ -31,6 +31,8 @@ type timelineRawEvent struct {
 	commentBody string
 	commentMeta sql.NullString
 	envelope    timelineRawEnvelope
+	// subtask is true when the event's task row has a subtask owner.
+	subtask bool
 }
 
 // timelineRawEnvelope carries the room-message columns for an envelope.created
@@ -555,7 +557,8 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 		       env.from_project_uuid,
 		       (SELECT group_concat(to_project_uuid) FROM envelopes sibling
 		         WHERE COALESCE(sibling.group_id, sibling.id) = COALESCE(env.group_id, env.id)
-		           AND sibling.to_project_uuid IS NOT NULL)
+		           AND sibling.to_project_uuid IS NOT NULL),
+		       t.subtask_owner_uuid IS NOT NULL
 		  FROM event_log e
 		  LEFT JOIN tasks t ON e.resource_type = 'task' AND t.uuid = e.resource_uuid
 		  LEFT JOIN v_task_paths tp ON tp.uuid = t.uuid
@@ -592,6 +595,7 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 			&raw.envelope.from, &raw.envelope.obligation, &raw.envelope.body,
 			&raw.envelope.container, &raw.envelope.campaign,
 			&raw.envelope.fromProject, &raw.envelope.toProjects,
+			&raw.subtask,
 		); err != nil {
 			return nil, false, NewInternalError(err)
 		}
@@ -728,6 +732,7 @@ func timelineOrdered(query string, desc bool) string {
 var timelinePublicStoredTypes = map[string][]string{
 	"comment": {"comment.created"}, "message": {"envelope.created"},
 	"task.outcome": {"task.outcome_set"}, "task.created": {"task.created"},
+	"task.claimed": {"task.claimed"}, "task.claim_released": {"task.claim_released"},
 	"task.edited": {"task.updated"}, "task.moved": {"task.moved"},
 	"task.state":      {"task.updated", "task.archived", "task.deleted", "task.restored", "task.purged"},
 	"container.state": {"container.campaign_state_changed"},
@@ -997,7 +1002,8 @@ func deliverTimelineEvent(raw timelineRawEvent, root string, affiliation map[str
 	if err := normalizeTimelineEntry(&entry, raw.eventType, raw.payload, root); err != nil {
 		return WrkqTimelineEntry{}, false, NewInternalError(err)
 	}
-	if timelineQuietTypes[entry.Type] && (len(filters) == 0 || !timelineTypeMatches(filters, entry.Type)) {
+	if timelineQuietTypes[entry.Type] && !timelineCreatedVisible(entry, raw.subtask) &&
+		(len(filters) == 0 || !timelineTypeMatches(filters, entry.Type)) {
 		return WrkqTimelineEntry{}, false, nil
 	}
 	if raw.eventType == "envelope.created" {
@@ -1080,7 +1086,7 @@ func timelineProjectListContains(raw, target string) bool {
 func timelineEventTypeSupported(eventType, payload string) bool {
 	switch eventType {
 	case "comment.created", "envelope.created", "task.outcome_set", "task.archived", "task.deleted", "task.restored", "task.purged", "container.campaign_state_changed",
-		"task.created", "task.updated", "task.moved":
+		"task.created", "task.updated", "task.moved", "task.claimed", "task.claim_released":
 		return true
 	default:
 		return false
@@ -1092,6 +1098,13 @@ func timelineEventTypeSupported(eventType, payload string) bool {
 // never sees them. They exist for a cursor-driven reader that mirrors tasks
 // and must learn of every change it has to re-read.
 var timelineQuietTypes = map[string]bool{"task.created": true, "task.edited": true, "task.moved": true}
+
+// timelineCreatedVisible lifts task.created out of the quiet set for delegated
+// work: a named subtask (decided from the task row's owner relation) or a task
+// created with requester fields. Ordinary task creation stays quiet.
+func timelineCreatedVisible(entry WrkqTimelineEntry, subtask bool) bool {
+	return entry.Type == "task.created" && (subtask || entry.Requester != nil)
+}
 
 // applyTimelineMove affiliates a move by the container it LEFT as well as the
 // one it entered: a reader of the old project must learn the task went away.

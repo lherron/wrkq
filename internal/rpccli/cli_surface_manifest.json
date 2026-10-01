@@ -3504,7 +3504,7 @@
             "name": "parent-id",
             "usage": "Alias for --parent-task",
             "type": "string",
-            "hidden": false
+            "hidden": true
           },
           {
             "name": "parent-task",
@@ -3524,6 +3524,18 @@
             "usage": "Update requester project ID",
             "type": "string",
             "hidden": false
+          },
+          {
+            "name": "requester",
+            "usage": "Update requester principal (empty clears it and the scope; --requester-scope sets the scope)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "requester-scope",
+            "usage": "Update requester scope (agent:\u003cid\u003e:project:\u003cp\u003e... or \u003cid\u003e@\u003cproject\u003e[:\u003clane\u003e]; empty clears scope only)",
+            "type": "string",
+            "hidden": true
           },
           {
             "name": "resolution",
@@ -3712,6 +3724,18 @@
           {
             "name": "requested-by",
             "usage": "Requester project ID (return-to target)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "requester",
+            "usage": "Requester principal ref or bare agent slug (who asked for the work)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "requester-scope",
+            "usage": "Requester scope (agent:\u003cid\u003e:project:\u003cp\u003e... or \u003cid\u003e@\u003cproject\u003e[:\u003clane\u003e]); implies --requester",
             "type": "string",
             "hidden": false
           },

@@ -793,9 +793,35 @@ func styledTimelineEntries(entries []timelineEntry) []style.StyledEntry {
 			}
 			if entry.Type == "task.created" {
 				styled.Label = "created → " + entry.TaskState.State
+				if entry.Requester != nil {
+					styled.Label += "  requester=" + wrkpRequesterLabel(entry.Requester.PrincipalRef, entry.Requester.ScopeRef)
+				}
 			}
 			styled.Accent = style.StateColor(entry.TaskState.State)
 			styled.TaskState = entry.TaskState.State
+		case entry.Claim != nil:
+			// The actor column already names who claimed or released; the label
+			// carries the generation and, for a release by someone else, whose
+			// claim it was.
+			styled.Accent = style.ColMarker
+			generation := fmt.Sprintf(" gen %d", entry.Claim.Generation)
+			if entry.Type == "task.claimed" {
+				styled.Label = "claimed" + generation
+				if entry.Claim.ScopeRef != "" {
+					styled.Label += "  " + entry.Claim.ScopeRef
+				}
+				if entry.Claim.TakeOver {
+					styled.Label += " (take-over)"
+				}
+			} else {
+				styled.Label = "claim released" + generation
+				if entry.Claim.PrincipalRef != "" && entry.Claim.PrincipalRef != entry.PrincipalRef {
+					styled.Label += "  holder=" + entry.Claim.PrincipalRef
+				}
+				if entry.Claim.Force {
+					styled.Label += " (forced)"
+				}
+			}
 		case entry.ContainerState != nil:
 			styled.Label = "campaign → " + entry.ContainerState.To
 			if entry.ContainerState.From != nil && *entry.ContainerState.From != "" {
@@ -882,4 +908,13 @@ func wrkpNewestEntryStamp(ctx context.Context, tr Transport, project string) str
 	return fmt.Sprintf("%s (%s ago)",
 		style.FormatLocalTime(newest),
 		style.FormatDuration(elapsed))
+}
+
+// wrkpRequesterLabel prefers the requester's scope, which is the address a
+// worker replies to, and falls back to the principal.
+func wrkpRequesterLabel(principalRef, scopeRef string) string {
+	if scopeRef != "" {
+		return scopeRef
+	}
+	return principalRef
 }

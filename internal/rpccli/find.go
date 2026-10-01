@@ -316,34 +316,36 @@ func resolveFindMode(cmd *cobra.Command, asJSON, ndjson, porcelain, pretty bool)
 // the table/tsv row construction render byte-identically to legacy. The mirror
 // decodes the byte-proven findListView projection into this type.
 type findResult struct {
-	Type                 string   `json:"type"` // "task" or "container"
-	UUID                 string   `json:"uuid"`
-	ID                   string   `json:"id"`
-	Slug                 string   `json:"slug"`
-	Title                string   `json:"title"`
-	Path                 string   `json:"path"`
-	Specification        string   `json:"specification,omitempty"`
-	State                *string  `json:"state,omitempty"`
-	Priority             *int     `json:"priority,omitempty"`
-	Kind                 *string  `json:"kind,omitempty"`
-	Assignee             *string  `json:"assignee,omitempty"`
-	AssigneePrincipalRef *string  `json:"assignee_principal_ref,omitempty"`
-	ClaimedBy            *string  `json:"claimed_by,omitempty"`
-	ClaimedScope         *string  `json:"claimed_scope,omitempty"`
-	ClaimedNode          *string  `json:"claimed_node,omitempty"`
-	ClaimedAt            *string  `json:"claimed_at,omitempty"`
-	ClaimGeneration      int64    `json:"claim_generation,omitempty"`
-	ParentTaskID         *string  `json:"parent_task_id,omitempty"`
-	RequestedByProjectID *string  `json:"requested_by_project_id,omitempty"`
-	AssignedProjectID    *string  `json:"assigned_project_id,omitempty"`
-	AcknowledgedAt       *string  `json:"acknowledged_at,omitempty"`
-	Resolution           *string  `json:"resolution,omitempty"`
-	DueAt                *string  `json:"due_at,omitempty"`
-	CausedBy             []string `json:"caused_by,omitempty"`
-	CreatedAt            string   `json:"created_at"`
-	UpdatedAt            string   `json:"updated_at"`
-	ETag                 int64    `json:"etag"`
-	Membership           string   `json:"membership,omitempty"`
+	Type                  string   `json:"type"` // "task" or "container"
+	UUID                  string   `json:"uuid"`
+	ID                    string   `json:"id"`
+	Slug                  string   `json:"slug"`
+	Title                 string   `json:"title"`
+	Path                  string   `json:"path"`
+	Specification         string   `json:"specification,omitempty"`
+	State                 *string  `json:"state,omitempty"`
+	Priority              *int     `json:"priority,omitempty"`
+	Kind                  *string  `json:"kind,omitempty"`
+	Assignee              *string  `json:"assignee,omitempty"`
+	AssigneePrincipalRef  *string  `json:"assignee_principal_ref,omitempty"`
+	RequesterPrincipalRef *string  `json:"requester_principal_ref,omitempty"`
+	RequesterScopeRef     *string  `json:"requester_scope_ref,omitempty"`
+	ClaimedBy             *string  `json:"claimed_by,omitempty"`
+	ClaimedScope          *string  `json:"claimed_scope,omitempty"`
+	ClaimedNode           *string  `json:"claimed_node,omitempty"`
+	ClaimedAt             *string  `json:"claimed_at,omitempty"`
+	ClaimGeneration       int64    `json:"claim_generation,omitempty"`
+	ParentTaskID          *string  `json:"parent_task_id,omitempty"`
+	RequestedByProjectID  *string  `json:"requested_by_project_id,omitempty"`
+	AssignedProjectID     *string  `json:"assigned_project_id,omitempty"`
+	AcknowledgedAt        *string  `json:"acknowledged_at,omitempty"`
+	Resolution            *string  `json:"resolution,omitempty"`
+	DueAt                 *string  `json:"due_at,omitempty"`
+	CausedBy              []string `json:"caused_by,omitempty"`
+	CreatedAt             string   `json:"created_at"`
+	UpdatedAt             string   `json:"updated_at"`
+	ETag                  int64    `json:"etag"`
+	Membership            string   `json:"membership,omitempty"`
 }
 
 // decodeFindResults unmarshals the server projection items into the legacy

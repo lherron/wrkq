@@ -91,6 +91,14 @@ wrkq touch T-00001.render --subtask -t "Render preview"
 wrkq ls T-00001 --subtasks
 wrkq find --subtasks --owner-state terminal
 
+# Record who asked for the work (delegated requests). A scope alone implies
+# the principal; when both are given the scope's agent must match.
+wrkq touch T-00001.render --subtask -t "Render preview" \
+  --requester-scope mable@agent-control-plane:primary --assignee arris
+wrkq set T-00001.render --requester cody          # drops a scope naming another agent
+wrkq set T-00001.render --requester-scope ""      # clear the scope only
+wrkq set T-00001.render --requester ""            # clear requester and scope
+
 # Read a task, container, or promise (TTY: human/raw detail; piped: JSON)
 wrkq cat myproject/implement-feature
 wrkq cat T-00001 --output raw       # markdown in pipelines
@@ -202,6 +210,10 @@ wrkq claim T-00001 --as agent:cody --take-over --yes
 # Release holdership without changing task state
 wrkq release T-00001
 ```
+
+Claims and releases appear on the `wrkp log` timeline by default as
+`task.claimed` / `task.claim_released`, carrying the claim principal, scope,
+node and generation.
 
 Completing a claimed task (`wrkq set --state completed`) requires the exact
 current principal/scope/node/token/generation tuple in the same transaction

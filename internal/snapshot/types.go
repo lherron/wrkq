@@ -126,6 +126,8 @@ type TaskEntry struct {
 	SubtaskOwnerUUID      *string `json:"subtask_owner_uuid,omitempty"`
 	ParentTaskUUID        *string `json:"parent_task_uuid,omitempty"`
 	AssigneePrincipalRef  *string `json:"assignee_principal_ref,omitempty"`
+	RequesterPrincipalRef *string `json:"requester_principal_ref,omitempty"`
+	RequesterScopeRef     *string `json:"requester_scope_ref,omitempty"`
 	Meta                  *string `json:"meta,omitempty"`
 	Outcome               *string `json:"outcome,omitempty"`
 	CPProjectID           *string `json:"cp_project_id,omitempty"`

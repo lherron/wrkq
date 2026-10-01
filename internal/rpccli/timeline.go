@@ -59,6 +59,18 @@ type timelineEntry struct {
 		State           string  `json:"state"`
 		SourceEventType string  `json:"sourceEventType"`
 	} `json:"taskState,omitempty"`
+	Requester *struct {
+		PrincipalRef string `json:"principalRef"`
+		ScopeRef     string `json:"scopeRef,omitempty"`
+	} `json:"requester,omitempty"`
+	Claim *struct {
+		PrincipalRef string `json:"principalRef,omitempty"`
+		ScopeRef     string `json:"scopeRef,omitempty"`
+		Node         string `json:"node,omitempty"`
+		Generation   int64  `json:"generation"`
+		TakeOver     bool   `json:"takeOver,omitempty"`
+		Force        bool   `json:"force,omitempty"`
+	} `json:"claim,omitempty"`
 	ContainerState *struct {
 		From *string `json:"from"`
 		To   string  `json:"to"`

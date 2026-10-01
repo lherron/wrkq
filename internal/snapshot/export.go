@@ -342,7 +342,8 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		       cp_project_id, cp_run_id, cp_session_id, cp_work_item_id,
 		       sdk_session_id, run_status,
 		       claimed_by_principal_ref, claimed_scope_ref, claimed_node, claimed_at,
-		       claim_token_hash, claim_generation
+		       claim_token_hash, claim_generation,
+		       requester_principal_ref, requester_scope_ref
 		FROM tasks
 		ORDER BY uuid
 	`)
@@ -360,6 +361,7 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		var workflowPreset, phase, riskClass sql.NullString
 		var presetVersion sql.NullInt64
 		var assignee, meta, outcome sql.NullString
+		var requesterPrincipal, requesterScope sql.NullString
 		var deletedAt, deletedByPrincipal, deletedByScope sql.NullString
 		var createdByPrincipal, createdByScope, updatedByPrincipal, updatedByScope sql.NullString
 		var cpProject, cpRun, cpSession, cpWorkItem, sdkSession, runStatus sql.NullString
@@ -376,7 +378,8 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 			&createdByPrincipal, &createdByScope, &updatedByPrincipal, &updatedByScope,
 			&cpProject, &cpRun, &cpSession, &cpWorkItem, &sdkSession, &runStatus,
 			&claimedBy, &claimedScope, &claimedNode, &claimedAt,
-			&claimTokenHash, &entry.ClaimGeneration); err != nil {
+			&claimTokenHash, &entry.ClaimGeneration,
+			&requesterPrincipal, &requesterScope); err != nil {
 			return err
 		}
 
@@ -413,6 +416,8 @@ func exportTasks(db *sql.DB, snap *Snapshot) error {
 		entry.ParentTaskUUID = snapshotNullString(parentTaskUUID)
 		entry.SubtaskOwnerUUID = snapshotNullString(subtaskOwnerUUID)
 		entry.AssigneePrincipalRef = snapshotNullString(assignee)
+		entry.RequesterPrincipalRef = snapshotNullString(requesterPrincipal)
+		entry.RequesterScopeRef = snapshotNullString(requesterScope)
 		entry.Meta = snapshotNullString(meta)
 		entry.Outcome = snapshotNullString(outcome)
 		entry.DeletedAt = snapshotNullString(deletedAt)

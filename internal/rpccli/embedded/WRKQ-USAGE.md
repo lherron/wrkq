@@ -122,6 +122,15 @@ Its immutable ID is `T-12345.render`; it consumes no global task number and shar
 its owner's residency and effective room. ID, UUID, and full owner path select
 it; bare slugs do not. Claims, completion, scopes and obligations remain distinct.
 
+Record who asked for delegated work with `--requester <principal>` and/or
+`--requester-scope <scope>` on `touch` (including `--subtask`) and `set`. A scope
+(`mable@proj:primary` or a canonical `agent:...` ScopeRef, stored canonical)
+implies the principal; both together must agree. `set --requester ''` clears
+both, `set --requester-scope ''` clears only the scope. `cat`, `find` and
+`task.show`/`task.list` project `requester_principal_ref`/`requester_scope_ref`
+(`requesterPrincipalRef`/`requesterScopeRef` on the task DTO). Creator
+attribution stays audit history; `--requested-by` is project routing.
+
 `wrkq cat T-12345` lists the owner's subtask summaries. `wrkq ls T-12345 --subtasks`
 lists its assignments. Default container views exclude named subtasks; opt in
 with `find --subtasks` or `search <query> --subtasks`. Use

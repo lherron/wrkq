@@ -138,6 +138,10 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		trimmed := strings.TrimSpace(p.AssigneePrincipalRef)
 		assigneePrincipalRef = &trimmed
 	}
+	requesterPrincipalRef, requesterScopeRef, rqerr := resolveRequester(p.RequesterPrincipalRef, p.RequesterScopeRef)
+	if rqerr != nil {
+		return nil, rqerr
+	}
 	var requestedByProjectID *string
 	if strings.TrimSpace(p.RequestedByProjectID) != "" {
 		trimmed := strings.TrimSpace(p.RequestedByProjectID)
@@ -184,29 +188,31 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		return nil, aerr
 	}
 	result, err := a.store.Tasks.CreateWithAttribution(attr, store.CreateParams{
-		UUID:                 p.ForceUUID,
-		Slug:                 slug,
-		Title:                p.Title,
-		Description:          p.Description,
-		Specification:        p.Specification,
-		ProjectUUID:          projectUUID,
-		State:                state,
-		Priority:             priority,
-		Kind:                 p.Kind,
-		ParentTaskUUID:       parentTaskUUID,
-		SubtaskOwnerUUID:     subtaskOwnerUUID,
-		AssigneePrincipalRef: assigneePrincipalRef,
-		RequestedByProjectID: requestedByProjectID,
-		AssignedProjectID:    assignedProjectID,
-		Resolution:           resolution,
-		Labels:               labelsString(p.Labels),
-		Meta:                 meta,
-		DueAt:                p.DueAt,
-		StartAt:              p.StartAt,
-		RiskClass:            riskClass,
-		CausedBy:             causedByRefs,
-		CampaignUUID:         campaignUUID,
-		Via:                  "rpc",
+		UUID:                  p.ForceUUID,
+		Slug:                  slug,
+		Title:                 p.Title,
+		Description:           p.Description,
+		Specification:         p.Specification,
+		ProjectUUID:           projectUUID,
+		State:                 state,
+		Priority:              priority,
+		Kind:                  p.Kind,
+		ParentTaskUUID:        parentTaskUUID,
+		SubtaskOwnerUUID:      subtaskOwnerUUID,
+		AssigneePrincipalRef:  assigneePrincipalRef,
+		RequesterPrincipalRef: requesterPrincipalRef,
+		RequesterScopeRef:     requesterScopeRef,
+		RequestedByProjectID:  requestedByProjectID,
+		AssignedProjectID:     assignedProjectID,
+		Resolution:            resolution,
+		Labels:                labelsString(p.Labels),
+		Meta:                  meta,
+		DueAt:                 p.DueAt,
+		StartAt:               p.StartAt,
+		RiskClass:             riskClass,
+		CausedBy:              causedByRefs,
+		CampaignUUID:          campaignUUID,
+		Via:                   "rpc",
 	})
 	if err != nil {
 		return nil, mapStoreError(err, "")
@@ -429,7 +435,7 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 	}
 	query := "SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.campaign_uuid, t.state, t.priority, t.kind, " + bodyColumns + ", t.outcome, " +
 		"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, " +
-		"t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, " +
+		"t.assignee_principal_ref, t.requester_principal_ref, t.requester_scope_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, " +
 		"t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), " +
 		"COALESCE(cp.path || '/' || CASE WHEN owner.uuid IS NULL THEN t.slug ELSE owner.slug || '/' || t.slug END, t.slug), " +
 		"CAST(LENGTH(TRIM(COALESCE(t.description,''), " + taskPresenceTrimCharsSQL + ")) > 0 AS INTEGER) AS has_description, " +
@@ -617,6 +623,19 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 	if len(fields) == 0 {
 
 		return a.loadTask(uuid)
+	}
+	// A new requester principal without a scope drops a stored scope that
+	// names a different agent, keeping the pair consistent.
+	if principal, ok := fields["requester_principal_ref"].(string); ok {
+		if _, scopeSet := fields["requester_scope_ref"]; !scopeSet {
+			var stored sql.NullString
+			if qerr := a.db.QueryRow("SELECT requester_scope_ref FROM tasks WHERE uuid = ?", uuid).Scan(&stored); qerr != nil {
+				return nil, NewInternalError(qerr)
+			}
+			if stored.Valid && requesterScopeAgent(stored.String) != principal {
+				fields["requester_scope_ref"] = nil
+			}
+		}
 	}
 
 	attr, aerr := a.attributionForScope(p.Actor, p.ScopeRef)
@@ -1326,6 +1345,9 @@ func (a *API) patchFields(patch TaskPatch) (map[string]any, error) {
 			fields["assignee_principal_ref"] = principalRef
 		}
 	}
+	if err := requesterPatchFields(patch, fields); err != nil {
+		return nil, err
+	}
 	if patch.RequestedByProjectID != nil {
 		fields["requested_by_project_id"] = *patch.RequestedByProjectID
 	}
@@ -1384,7 +1406,7 @@ func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 	row := a.db.QueryRow(
 		"SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.campaign_uuid, t.state, t.priority, t.kind, t.description, t.specification, t.outcome, "+
 			"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, "+
-			"t.assignee_principal_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, "+
+			"t.assignee_principal_ref, t.requester_principal_ref, t.requester_scope_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, "+
 			"t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), "+
 			"COALESCE(cp.path || '/' || CASE WHEN owner.uuid IS NULL THEN t.slug ELSE owner.slug || '/' || t.slug END, t.slug), "+
 			"CAST(LENGTH(TRIM(COALESCE(t.description,''), "+taskPresenceTrimCharsSQL+")) > 0 AS INTEGER) AS has_description, "+
@@ -1439,6 +1461,7 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		createdAt, updatedAt                                                        string
 		startAt, dueAt, completedAt, archivedAt, deletedAt, acknowledgedAt          sql.NullString
 		assignee, claimedBy, claimedScope, claimedNode, claimedAt                   sql.NullString
+		requesterPrincipal, requesterScope                                          sql.NullString
 		createdByPrincipal, updatedByPrincipal                                      sql.NullString
 		claimGeneration                                                             int64
 		riskClass, path                                                             string
@@ -1449,7 +1472,7 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 	if err := s.Scan(
 		&uuid, &id, &slug, &title, &projectUUID, &campaignUUID, &state, &priority, &kind, &description, &specification, &outcome,
 		&labels, &meta, &etag, &startAt, &dueAt, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
-		&assignee, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
+		&assignee, &requesterPrincipal, &requesterScope, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
 		&createdByPrincipal, &updatedByPrincipal, &riskClass, &path, &hasDescription, &hasSpecification, &subtaskOwner, &subtaskOwnerUUID, &openSubtaskCount,
 	); err != nil {
 		return nil, "", err
@@ -1484,6 +1507,8 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		DeletedAt:             toRFC3339(deletedAt.String),
 		AcknowledgedAt:        toRFC3339(acknowledgedAt.String),
 		AssigneePrincipalRef:  assignee.String,
+		RequesterPrincipalRef: requesterPrincipal.String,
+		RequesterScopeRef:     requesterScope.String,
 		ClaimedBy:             claimedBy.String,
 		ClaimedScope:          claimedScope.String,
 		ClaimedNode:           claimedNode.String,

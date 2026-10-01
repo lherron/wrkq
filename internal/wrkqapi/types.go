@@ -51,6 +51,8 @@ type WrkqTask struct {
 	DeletedAt             string           `json:"deletedAt,omitempty"`
 	AcknowledgedAt        string           `json:"acknowledgedAt,omitempty"`
 	AssigneePrincipalRef  string           `json:"assigneePrincipalRef,omitempty"`
+	RequesterPrincipalRef string           `json:"requesterPrincipalRef,omitempty"`
+	RequesterScopeRef     string           `json:"requesterScopeRef,omitempty"`
 	ClaimedBy             string           `json:"claimedBy,omitempty"`
 	ClaimedScope          string           `json:"claimedScope,omitempty"`
 	ClaimedNode           string           `json:"claimedNode,omitempty"`
@@ -125,33 +127,37 @@ type WrkqWorkflowTimelineResult struct {
 
 // TaskCreateParams mirrors WrkqTaskCreateParams (§6.2).
 type TaskCreateParams struct {
-	SubtaskOwner         string         `json:"subtaskOwner,omitempty"`
-	Slug                 string         `json:"slug,omitempty"`
-	Path                 string         `json:"path,omitempty"`
-	Project              string         `json:"project,omitempty"`
-	Title                string         `json:"title"`
-	Description          string         `json:"description,omitempty"`
-	Specification        string         `json:"specification,omitempty"`
-	Kind                 string         `json:"kind,omitempty"`
-	Priority             int            `json:"priority,omitempty"`
-	State                string         `json:"state,omitempty"`
-	RiskClass            string         `json:"riskClass,omitempty"`
-	ParentTask           string         `json:"parentTask,omitempty"`
-	AssigneePrincipalRef string         `json:"assigneePrincipalRef,omitempty"`
-	RequestedByProjectID string         `json:"requestedBy,omitempty"`
-	AssignedProjectID    string         `json:"assignedProject,omitempty"`
-	Resolution           string         `json:"resolution,omitempty"`
-	Labels               []string       `json:"labels,omitempty"`
-	Meta                 map[string]any `json:"meta,omitempty"`
-	MetaRaw              string         `json:"metaRaw,omitempty"`
-	DueAt                string         `json:"dueAt,omitempty"`
-	StartAt              string         `json:"startAt,omitempty"`
-	CausedBy             []string       `json:"causedBy,omitempty"`
-	Campaign             string         `json:"campaign,omitempty"`
-	ForceUUID            string         `json:"forceUuid,omitempty"`
-	PrincipalRef         string         `json:"principalRef,omitempty"`
-	Actor                string         `json:"actor,omitempty"`
-	IdempotencyKey       string         `json:"idempotencyKey,omitempty"`
+	SubtaskOwner         string `json:"subtaskOwner,omitempty"`
+	Slug                 string `json:"slug,omitempty"`
+	Path                 string `json:"path,omitempty"`
+	Project              string `json:"project,omitempty"`
+	Title                string `json:"title"`
+	Description          string `json:"description,omitempty"`
+	Specification        string `json:"specification,omitempty"`
+	Kind                 string `json:"kind,omitempty"`
+	Priority             int    `json:"priority,omitempty"`
+	State                string `json:"state,omitempty"`
+	RiskClass            string `json:"riskClass,omitempty"`
+	ParentTask           string `json:"parentTask,omitempty"`
+	AssigneePrincipalRef string `json:"assigneePrincipalRef,omitempty"`
+	// RequesterPrincipalRef / RequesterScopeRef name who asked for the work.
+	// A scope alone derives the principal; both must agree.
+	RequesterPrincipalRef string         `json:"requesterPrincipalRef,omitempty"`
+	RequesterScopeRef     string         `json:"requesterScopeRef,omitempty"`
+	RequestedByProjectID  string         `json:"requestedBy,omitempty"`
+	AssignedProjectID     string         `json:"assignedProject,omitempty"`
+	Resolution            string         `json:"resolution,omitempty"`
+	Labels                []string       `json:"labels,omitempty"`
+	Meta                  map[string]any `json:"meta,omitempty"`
+	MetaRaw               string         `json:"metaRaw,omitempty"`
+	DueAt                 string         `json:"dueAt,omitempty"`
+	StartAt               string         `json:"startAt,omitempty"`
+	CausedBy              []string       `json:"causedBy,omitempty"`
+	Campaign              string         `json:"campaign,omitempty"`
+	ForceUUID             string         `json:"forceUuid,omitempty"`
+	PrincipalRef          string         `json:"principalRef,omitempty"`
+	Actor                 string         `json:"actor,omitempty"`
+	IdempotencyKey        string         `json:"idempotencyKey,omitempty"`
 }
 
 // TaskShowParams mirrors WrkqTaskShowParams.
@@ -266,12 +272,16 @@ type TaskPatch struct {
 	Meta                 *map[string]any `json:"meta,omitempty"`
 	MetaRaw              *string         `json:"metaRaw,omitempty"`
 	AssigneePrincipalRef *string         `json:"assigneePrincipalRef,omitempty"`
-	RequestedByProjectID *string         `json:"requestedBy,omitempty"`
-	AssignedProjectID    *string         `json:"assignedProject,omitempty"`
-	Resolution           *string         `json:"resolution,omitempty"`
-	DueAt                *string         `json:"dueAt,omitempty"`
-	StartAt              *string         `json:"startAt,omitempty"`
-	Campaign             *string         `json:"campaign,omitempty"`
+	// RequesterPrincipalRef "" clears both requester fields; RequesterScopeRef
+	// "" clears only the scope.
+	RequesterPrincipalRef *string `json:"requesterPrincipalRef,omitempty"`
+	RequesterScopeRef     *string `json:"requesterScopeRef,omitempty"`
+	RequestedByProjectID  *string `json:"requestedBy,omitempty"`
+	AssignedProjectID     *string `json:"assignedProject,omitempty"`
+	Resolution            *string `json:"resolution,omitempty"`
+	DueAt                 *string `json:"dueAt,omitempty"`
+	StartAt               *string `json:"startAt,omitempty"`
+	Campaign              *string `json:"campaign,omitempty"`
 	// CausedBy replaces the full causal-lineage set. A non-nil pointer to an empty
 	// slice clears it; nil means no change (absent-vs-empty preserved).
 	CausedBy *[]string `json:"causedBy,omitempty"`
