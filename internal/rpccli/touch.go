@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/spf13/cobra"
 )
@@ -191,7 +192,13 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 			params["parentTask"] = parentTask
 		}
 		if o.assignee != "" {
-			params["assigneePrincipalRef"] = o.assignee
+			// Normalized client-side as `set` does, so a bare slug works
+			// against a server that predates create-side normalization.
+			principalRef, err := attribution.NormalizeCompat(o.assignee)
+			if err != nil {
+				return fmt.Errorf("failed to resolve assignee: %w", err)
+			}
+			params["assigneePrincipalRef"] = principalRef
 		}
 		if o.requester != "" {
 			params["requesterPrincipalRef"] = o.requester

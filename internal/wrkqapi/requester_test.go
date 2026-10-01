@@ -182,3 +182,17 @@ func TestOwnerTimelineShowsDelegationFactsByDefault(t *testing.T) {
 		t.Fatal("filtered read lost ordinary task.created")
 	}
 }
+
+// task.create normalizes the assignee exactly as task.update does, so the bare
+// agent slug the touch help advertises does not hit the CHECK constraint.
+func TestTaskCreateNormalizesBareAssigneeSlug(t *testing.T) {
+	api := newAttributionAPI(t, "agent:seed")
+	ctx := context.Background()
+	task, err := api.TaskCreate(ctx, TaskCreateParams{Title: "bare assignee", PrincipalRef: "agent:seed", AssigneePrincipalRef: "arris"})
+	if err != nil || task.AssigneePrincipalRef != "agent:arris" {
+		t.Fatalf("bare-slug create = %+v, %v", task, err)
+	}
+	if _, err := api.TaskCreate(ctx, TaskCreateParams{Title: "bad assignee", PrincipalRef: "agent:seed", AssigneePrincipalRef: "user:"}); err == nil || claimErrorCode(t, err) != CodeValidation {
+		t.Fatalf("invalid assignee err = %v, want validation", err)
+	}
+}

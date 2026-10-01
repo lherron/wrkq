@@ -133,10 +133,14 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		}
 		parentTaskUUID = &uuid
 	}
+	// Normalized exactly as task.update does, so a bare agent slug works here too.
 	var assigneePrincipalRef *string
-	if strings.TrimSpace(p.AssigneePrincipalRef) != "" {
-		trimmed := strings.TrimSpace(p.AssigneePrincipalRef)
-		assigneePrincipalRef = &trimmed
+	if assignee := strings.TrimSpace(p.AssigneePrincipalRef); assignee != "" {
+		principalRef, err := attribution.NormalizeCompat(assignee)
+		if err != nil {
+			return nil, NewValidationError(err.Error(), map[string]any{"field": "assigneePrincipalRef"})
+		}
+		assigneePrincipalRef = &principalRef
 	}
 	requesterPrincipalRef, requesterScopeRef, rqerr := resolveRequester(p.RequesterPrincipalRef, p.RequesterScopeRef)
 	if rqerr != nil {
