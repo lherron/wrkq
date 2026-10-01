@@ -1,14 +1,30 @@
 # wrkq
 
-WRKQ is a task-based collaboration surface between coding agents and humans. Command structure mimics a Unix filesystem-style interface for maximum human/agent familiarity, and structured output formats plus canonical principal attribution make it native to agent workflows. Changes can be bundled as diffs and committed to git, enabling version-controlled task state that flows through your normal PR process. The easiest way to integrate is to have your agent run `wrkq info` directly or add it to an agent startup hook.
+wrkq is a local-first work ledger shared by humans and coding agents. Tasks,
+conversations, workflows and project events live in one SQLite database,
+served by a small daemon and driven through filesystem-flavored CLIs with
+stable machine-readable output. Every mutation is attributed to a principal
+and recorded in an append-only event log.
 
-## Features
+The easiest way to put an agent on wrkq is to have it run `wrkq info` (and
+`wrkc info`, `wrkp info`) at session start; each prints an embedded agent
+guide.
 
-- **Agent-first** - Structured output, principal attribution, and machine-readable formats designed for AI agent workflows
-- **Unix-style interface** - Familiar commands like `ls`, `cat`, `mv`, `rm`, `tree`, `touch`, `mkdir`
-- **Git-native** - SQLite database hydrated from git; bundle changes as diffs for PRs
-- **Pipe-friendly** - JSON, NDJSON, and porcelain output formats for scripting
-- **Optimistic concurrency** - ETag-based conflict detection on writes
+## Binaries
+
+`just build` and `just install` build six binaries:
+
+| Binary | Role |
+| --- | --- |
+| `wrkq` | Day-to-day task surface: containers, tasks, comments, attachments, relations, claims, search, handoffs, promises, campaigns, monitoring |
+| `wrkc` | Collaboration: rooms, addressed envelopes, reply obligations, inbox |
+| `wrkp` | Project events: post foreign facts (git, CI, `just` runs) and read the merged project timeline |
+| `wrkf` | Workflow engine: templates, instances, evidence, obligations, effects and transitions layered on wrkq tasks |
+| `wrkqd` | Daemon: token-authenticated HTTP + JSON-RPC API over the database |
+| `wrkqadm` | Administration: init, migrations, snapshots, state export/import, patches, doctor. Not for agents |
+
+The repository also ships `@wrkq/client` (`packages/client`), a TypeScript
+client for the same JSON-RPC surface.
 
 ## Installation
 
@@ -19,140 +35,236 @@ brew tap lherron/wrkq
 brew install wrkq
 ```
 
-### From Source
+### From source
+
+Requires the Go toolchain named in `go.mod` (currently Go 1.25) and
+[`just`](https://github.com/casey/just). SQLite is bundled.
 
 ```bash
-# Clone and build
 git clone https://github.com/lherron/wrkq.git
 cd wrkq
-just build
-
-# Install to ~/.local/bin
-just install
+just build      # binaries in ./bin
+just install    # install to ~/.local/bin
 ```
 
-Then update your agent startup hook to run `wrkq info`:
+### Agent startup hook
 
 ```bash
 echo "=== This project uses wrkq ==="
 wrkq info 2>/dev/null || echo "(wrkq info failed or not available, notify user)"
 ```
 
-`wrkq agent-info` is a compatibility alias that serves the same agent guide.
-
-### Requirements
-
-- Go 1.23.2 or newer local toolchain; see `go.mod`
-- SQLite 3.x (bundled via go-sqlite3)
-
-## Agent / sandbox validation
-
-For no-network or constrained environments, run:
+## Quick start
 
 ```bash
-scripts/agent-check.sh
-```
-
-See [AGENTS.md](AGENTS.md) for details.
-
-## Quick Start
-
-```bash
-# Initialize a new project database
+# Point at a database: a local file, or rpc://host[:port] for a wrkqd
+export WRKQ_DB=$PWD/.wrkq/wrkq.db
 wrkqadm init
 
-# Create a container (project)
-wrkq mkdir myproject
+# Create a project and work inside it (a leading / is root-absolute)
+wrkq mkdir /myproject --kind project
+export WRKQ_PROJECT_ROOT=myproject
 
-# Create a task
-wrkq touch myproject/implement-feature -t "Implement new feature" -d "Description here"
+# Tasks
+wrkq touch implement-feature -t "Implement new feature" -d "Description here"
+wrkq tree
+wrkq cat T-00001
 
-# List tasks
-wrkq ls myproject
-
-# View task details
-wrkq cat myproject/implement-feature
-
-# Update task state
+# Work it
 wrkq set T-00001 --state in_progress
-
-# Cross-node work: atomically claim at the canonical wrkqd home
-wrkq claim T-00001 --as agent:cody \
-  --scope agent:cody:project:wrkq:task:T-00001
-
-# Add a comment
 wrkq comment add T-00001 -m "Started implementation"
-
-# Mark complete
 wrkq set T-00001 --state completed
+
+# Structured output for scripts and agents
+wrkq find --state all --json
+wrkq cat T-00001 --json --one
 ```
 
-## Architecture
+## Core concepts
 
-The system ships four binaries:
+| Concept | Summary |
+| --- | --- |
+| **Container** | Hierarchical unit of organization. Kinds: `project`, `directory`, `feature`, `area`. Top-level projects can register checkout roots. |
+| **Task** | The work item. Kinds `task`, `spike`, `bug`, `chore`; priority `1` (highest) to `4`; labels, due dates, assignee, metadata, description and specification. |
+| **Named subtask** | An assignment owned by a task, addressed `T-00001.render`. Created with `wrkq touch T-00001.render --subtask`; moves with its owner and is hidden from default listings (`--subtasks` includes it). |
+| **Child task** | An independent task linked with `--parent-task`; it keeps its own ID and project. |
+| **Comment** | Append-only task or container notes, optionally a judgment kind (`blocker`, `decision`, `postmortem`, `digest`). |
+| **Attachment** | File bytes stored outside the database, keyed by task UUID. |
+| **Relation** | `blocks`, `relates_to`, `duplicates` edges between tasks; `caused_by` records rework lineage. |
+| **Claim** | Atomic, cross-node holdership of a task by a session scope (`wrkq claim`, `wrkq release`). |
+| **Campaign** | A container adorned with a brief, specification and lifecycle; tasks from other projects can enroll in it. |
+| **Promise** | A recorded intent to revisit a subject at a future time, attached to a task or container. |
+| **Handoff** | A durable note one agent session leaves for the next. |
+| **Principal** | The caller identity (`agent:<id>`) every mutation is attributed to. Runtime/session scope is recorded separately. |
 
-- **`wrkq`** - Day-to-day task management, made for agents and humans
-- **`wrkqadm`** - Administrative operations (database init, migrations, actor management)
-- **`wrkqd`** - Local daemon for shared database access
-- **`wrkf`** - Workflow engine CLI
+### Task states
 
-See [docs/SPEC.md](docs/SPEC.md) for the canonical product, domain, CLI, and
-daemon contract. The wrkf JSON-RPC stdio contract lives in
-[docs/wrkf-rpc.md](docs/wrkf-rpc.md).
-
-## Proposals
-
-- [Named subtasks](docs/named-subtasks-proposal.md): parent-local work addresses, shared rooms and explicit subtask scopes. Proposal only; not installed behavior.
-
-## Core Concepts
-
-| Concept | Description |
-|---------|-------------|
-| **Principal** | Canonical caller identity (`agent:<id>`); runtime/task/project provenance remains in scope and delivery refs |
-| **Container** | Project or subproject (hierarchical); changesets bundle container state for git |
-| **Task** | Actionable item with state, priority, labels |
-| **Comment** | Append-only notes on tasks |
-| **Attachment** | File references stored alongside tasks |
-
-### Task States
-
-Common path: `idea` -> `draft` -> `open` -> `in_progress` -> `completed`.
-
-Supported states: `idea`, `draft`, `open`, `in_progress`, `blocked`,
-`completed`, `cancelled`, `archived`, `deleted`.
+`idea`, `draft`, `open`, `in_progress`, `blocked`, `completed`, `cancelled`,
+`archived`, `deleted`. The common path is
+`idea -> draft -> open -> in_progress -> completed`. `find` and `tree` show the
+actionable set (`draft`, `open`, `in_progress`, `blocked`) unless given
+`--state <state>` or `--state all`.
 
 ### Addressing
 
-Resources can be referenced by:
-- **Path**: `myproject/subproject/task-slug`
-- **Friendly ID**: `T-00123`, `P-00007`
-- **UUID**: Full database UUID
+- **Path**: `myproject/subproject/task-slug`, relative to the current project;
+  a leading `/` is root-absolute.
+- **Friendly ID**: `T-00123`, `P-00007`, `T-00123.render` (named subtask).
+  IDs are global and work from any project.
+- **UUID**: the full database UUID.
 
-## Output Formats
+## Common workflows
 
 ```bash
-wrkq ls myproject --json      # Pretty JSON
-wrkq ls myproject --ndjson    # Newline-delimited JSON
-wrkq ls myproject --porcelain # Stable machine-readable
-wrkq ls myproject --type t --sort updated_at --reverse --limit 5
+# Find and read work
+wrkq tree
+wrkq find --label urgent --state all --type t
+wrkq index update && wrkq search 'flaky migration' --state all --limit 10
+wrkq log T-00001 --oneline
+
+# Relations and readiness
+wrkq relation add T-00002 blocks T-00003
+wrkq check blocked T-00003
+
+# Named subtasks
+wrkq touch T-00002.render --subtask
+wrkq ls T-00002 --subtasks
+
+# Cross-node work: claim at the canonical wrkqd home (requires a
+# node-identified daemon connection). The claim token and generation it returns
+# travel as WRKQ_CLAIM_TOKEN / WRKQ_CLAIM_GENERATION for completion and release.
+wrkq claim T-00001 --scope agent:cody:project:myproject:task:T-00001
+wrkq release T-00001
+
+# Campaigns, promises, handoffs
+wrkq mkdir launch
+wrkq campaign convert launch --state active
+wrkq promise add --task T-00001 --in 7d --subject "Revisit perf numbers"
+wrkq handoff list --json
 ```
+
+## Collaboration (`wrkc`)
+
+`wrkc` keeps conversations and reply obligations in the same ledger. A room
+holds a conversation (a task's room, a campaign's room, a project room or an
+ad-hoc pair room); an envelope is one message in it. Only `--to` presents a
+message to someone; replying to a sender discharges their outstanding
+requests.
+
+```bash
+wrkc inbox
+wrkc show EN-00001
+wrkc log T-00001 --limit 20
+
+wrkc say T-00001 --to cody@wrkq:T-00001 - <<'TEXT'
+State the objective, scope and required completion evidence.
+TEXT
+
+wrkc defer EN-00002 --reason 'Waiting on installed validation' --retry-after 10m
+```
+
+See [docs/wrkc-reference.md](docs/wrkc-reference.md) for routing, obligations
+and identity.
+
+## Watching work
+
+```bash
+wrkq monitor watch --raw --since 100                              # raw event-log tail
+wrkq monitor watch T-00001 --until state=completed --timeout 30m  # per-task stream
+wrkq monitor wait EN-00001 --until terminal --timeout 10m         # block on a reply
+wrkq timeline myproject                                          # composite timeline
+wrkq webhook add http://127.0.0.1:18451/api/webhooks/wrkq        # global webhook
+
+wrkp post myproject --type ci.passed -m "CI green" --attr sha=abc123
+wrkp log myproject --since 24h                                   # project events
+```
+
+`wrkp git` and `wrkp just` post facts from Git hooks and `just` runs. Monitor
+exit codes: `0` condition met, `1` unmet at timeout or stall, `2` selector
+error, `3` stream error.
+
+## Workflows (`wrkf`)
+
+wrkf attaches workflow instances to wrkq tasks without replacing the task
+lifecycle. Templates are validated and installed by id, version and hash
+(`wrkf workflow`); agents act through runs (`wrkf action`, `wrkf next`), record
+evidence and resolve obligations, and supervisors recover stuck instances.
+`wrkf rpc` serves the frozen JSON-RPC stdio contract in
+[docs/wrkf-rpc.md](docs/wrkf-rpc.md).
+
+## Running the daemon
+
+A single canonical `wrkqd` owns the database; other processes and nodes reach
+it with `WRKQ_DB=rpc://host[:port]` (default port `7171`).
+
+```bash
+wrkq server start              # or: wrkqd -addr 127.0.0.1:7171 -token <token>
+wrkq server status
+wrkq server health
+wrkqd -node-tokens-file ~/.config/wrkq/node-tokens   # per-node bearer tokens
+```
+
+When an upgrade carries schema migrations, run `wrkqadm migrate` against the
+daemon's database before restarting it, and upgrade the daemon before its
+clients. Backups (`wrkqadm db snapshot`, `wrkqadm state`), health checks and
+the HTTP route surface are covered in
+[docs/wrkq-operations.md](docs/wrkq-operations.md).
 
 ## Configuration
 
-Configuration is loaded from (in precedence order):
-1. CLI flags
-2. Environment variables (`WRKQ_DB`, `WRKQ_DB_PATH`, `WRKQ_PRINCIPAL_REF`);
-   a `WRKQ_DB_PATH` that another locator would override is refused, not ignored
-3. Nearest `.env.local`, walking upward from the current directory
-4. `$PRAESIDIUM_HOME/.env.local` (or `~/praesidium/.env.local`) as a
-   cwd-independent platform fallback
-5. `~/.config/wrkq/config.yaml`
+The database locator resolves in this order:
 
-Caller authority is principal-only. Use `--principal-ref agent:<id>` (or
-`--as agent:<id>` on wrkq) or `WRKQ_PRINCIPAL_REF=agent:<id>`. For wrkf,
-use `WRKF_PRINCIPAL_REF=agent:<id>`. Legacy actor env/config values and bare,
-`A-*`, UUID, or `system:*` identities are not caller authority.
+1. `--db`
+2. `WRKQ_DB`: a local path or `rpc://host[:port]`
+3. `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` (local paths only; refused rather than
+   ignored when they disagree with a higher locator)
+4. Nearest `.env.local`, walking upward from the current directory
+5. `$PRAESIDIUM_HOME/.env.local` (or `~/praesidium/.env.local`)
+6. `~/.config/wrkq/config.yaml`
+7. `.wrkq/wrkq.db` in the current directory, if it exists
+
+`wrkqadm config doctor` reports which source won. `--project` (or
+`WRKQ_PROJECT_ROOT`) selects the project that relative paths resolve under.
+
+Caller authority is principal-only: `--as agent:<id>` / `--principal-ref`, or
+`WRKQ_PRINCIPAL_REF=agent:<id>` (`WRKF_PRINCIPAL_REF` for wrkf). Legacy actor
+values are not authority. Attribution is not authentication: wrkq records who
+claims to act, and `wrkqd` tokens gate who may connect.
+
+## Output formats
+
+`--output` accepts `table`, `human`, `json`, `ndjson`, `porcelain`, `yaml`,
+`tsv` and `raw`; most read commands also take `--json`, `--ndjson` and
+`--porcelain`. `wrkq cat` prints human detail on a TTY and JSON when piped;
+JSON `cat` is always an array unless `--one` is given. List commands return a
+cursor when more results exist.
+
+## Development
+
+```bash
+just test              # unit and integration tests
+just verify-full       # full gate, including smoke and wrkf adoption checks
+scripts/agent-check.sh # no-network / sandboxed validation
+just doc-links         # documentation link check
+```
+
+Guard recipes (`just layer-boundary`, `just surface-guard`,
+`just suppression-lint`, `just rot-sensor`) enforce architecture and surface
+contracts. See [AGENTS.md](AGENTS.md) for agent-specific working rules.
+
+## Documentation
+
+- [docs/SPEC.md](docs/SPEC.md): canonical product, domain, CLI and daemon
+  contract. It wins when docs disagree.
+- [docs/wrkq-overview.md](docs/wrkq-overview.md): architecture and data model
+- [docs/wrkq-cli-reference.md](docs/wrkq-cli-reference.md): command reference
+- [docs/wrkq-concepts.md](docs/wrkq-concepts.md): handoffs, search, monitoring,
+  attribution
+- [docs/wrkq-operations.md](docs/wrkq-operations.md): database location,
+  backups, daemon deployment
+- [docs/wrkc-reference.md](docs/wrkc-reference.md): rooms and obligations
+- [docs/wrkf-rpc.md](docs/wrkf-rpc.md): wrkf JSON-RPC contract
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE).
