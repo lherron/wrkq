@@ -62,7 +62,7 @@ type timelineRawProjectEvent struct {
 }
 
 func timelineRequestUsesV2(p ContainerTimelineViewParams) bool {
-	if p.Scope != "" || p.Types != nil || p.Task != "" || p.Since != "" || p.Before != "" || p.EntriesOnly || p.Tail || p.Order != "" {
+	if p.Scope != "" || p.Types != nil || p.AllTypes || p.Task != "" || p.Since != "" || p.Before != "" || p.EntriesOnly || p.Tail || p.Order != "" {
 		return true
 	}
 	version := timelineCursorVersion(p.Cursor)
@@ -364,6 +364,9 @@ func (a *API) containerTimelineViewV2(
 		projectIndex++
 		cur.AfterProjectEventID = raw.id
 		cur.BeforeProjectEventID = raw.id
+		if !p.AllTypes && len(filters) == 0 && strings.HasPrefix(raw.semantic, "turn.") {
+			continue
+		}
 		if entry, included := deliverTimelineProjectEvent(raw, containerUUID, affiliation, p.Types, selectedTasks, since); included {
 			entries = append(entries, entry)
 		}

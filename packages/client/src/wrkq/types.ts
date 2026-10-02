@@ -1374,6 +1374,8 @@ export interface WrkqContainerTimelineViewParams {
   limit?: number;
   scope?: "container" | "subtree";
   types?: string[];
+  /** Include turn.* facts hidden by default unless types names them. */
+  allTypes?: boolean;
   task?: string;
   since?: string;
   /** Exclusive upper bound on the server timestamp (RFC3339). */

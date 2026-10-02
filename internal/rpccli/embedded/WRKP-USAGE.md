@@ -11,7 +11,7 @@ wrkp git push <remote> <url>   # pre-push ref lines on stdin
 wrkp just [-- just-args...]    # via the `just` shim; see below
 wrkp cursor [project]          # forward cursor at the timeline head
 wrkp log [project] [--after CURSOR] [--since 4h|TS] [--before TS] [--type a,b,session.*]
-         [--task T-x] [--limit N] [--follow] [--json|--ndjson] [--porcelain]
+         [--all-types] [--task T-x] [--limit N] [--follow] [--json|--ndjson] [--porcelain]
 wrkp show <uuid>
 wrkp types [project]
 wrkp info
@@ -44,6 +44,11 @@ its types and attribute keys in its own repo and owns their stability.
 
 Identity is a uuid. Every event renders by one rule: type and principal, the
 summary, then `key=value` pairs in the producer's order.
+
+`wrkp log` hides `turn.*` facts by default, including under `--follow` and
+JSON/NDJSON reads. Use `--type 'turn.*'` (or an exact turn type) or `--all-types`
+to include them. The timeline API accepts `allTypes: true` for the same include.
+`wrkp types` still lists every stored fact type.
 
 `wrkp log --follow` starts at now unless `--since` is supplied. It polls the
 bounded timeline reader and owns its cursor locally; posting never wakes an

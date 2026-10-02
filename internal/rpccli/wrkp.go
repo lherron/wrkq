@@ -264,7 +264,7 @@ func newWrkpCursorCmd() *cobra.Command {
 func newWrkpLogCmd() *cobra.Command {
 	var after, since, before, task, typeList string
 	var limit int
-	var follow, ndjson, porcelain, pretty bool
+	var follow, ndjson, porcelain, pretty, allTypes bool
 	cmd := &cobra.Command{
 		Use: "log [project]", Short: "Read the merged project timeline", Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -341,6 +341,9 @@ func newWrkpLogCmd() *cobra.Command {
 				}
 				if typeList != "" {
 					params["types"] = splitCommaValues(typeList)
+				}
+				if allTypes {
+					params["allTypes"] = true
 				}
 				raw, err := tr.Call(cmd.Context(), "wrkq.container.timelineView", params)
 				if err != nil {
@@ -447,6 +450,7 @@ func newWrkpLogCmd() *cobra.Command {
 	cmd.Flags().StringVar(&since, "since", "", "RFC3339 time or duration")
 	cmd.Flags().StringVar(&before, "before", "", "Exclusive RFC3339 server-time upper bound")
 	cmd.Flags().StringVar(&typeList, "type", "", "Comma-separated exact or trailing-glob types")
+	cmd.Flags().BoolVar(&allTypes, "all-types", false, "Include turn.* facts hidden by default")
 	cmd.Flags().StringVar(&task, "task", "", "Task selector")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum delivered entries")
 	cmd.Flags().BoolVar(&follow, "follow", false, "Follow newly appended matching entries")

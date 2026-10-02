@@ -11,6 +11,7 @@ type ContainerTimelineViewParams struct {
 	Limit       int      `json:"limit,omitempty"`
 	Scope       string   `json:"scope,omitempty"`
 	Types       []string `json:"types,omitempty"`
+	AllTypes    bool     `json:"allTypes,omitempty"` // Include turn.* without an explicit type filter.
 	Task        string   `json:"task,omitempty"`
 	Since       string   `json:"since,omitempty"`
 	Before      string   `json:"before,omitempty"`

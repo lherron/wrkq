@@ -80,7 +80,8 @@ import (
 // T-09897 catalogs task create/list requests and named-subtask read/write fields.
 // T-09978 adds requesterPrincipalRef/requesterScopeRef to task create, patch,
 // task, cat and find DTOs, and the timeline entry's claim and requester details.
-const pinnedProtocolSchemaHash = "sha256:49bb104a7d3e4c4461c004eff046e58ba556deb12421ee2d1d5bc62e4640703a"
+// T-10087 adds allTypes to timeline reads to include quiet turn.* facts.
+const pinnedProtocolSchemaHash = "sha256:5b816d328ccccacad982de5d27fd65325321264062d79aa250f967910b0e3540"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
