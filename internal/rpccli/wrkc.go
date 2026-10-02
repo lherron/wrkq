@@ -1012,7 +1012,10 @@ the protection for the sender is visibility, not a timer.
 
 Defer is also how you exclude ONE obligation from a reply: saying --to acks
 every pending or presented obligation from that counterparty, so defer the one
-you are not answering first.`,
+you are not answering first.
+
+To finish a deferred obligation, name it in the reply:
+wrkc say EN-xxxxx --to <sender> --discharges EN-xxxxx -`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			claims := &stdinClaims{}

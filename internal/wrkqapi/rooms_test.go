@@ -1604,6 +1604,61 @@ func TestDeferredEnvelopeStillAckableByALaterReply(t *testing.T) {
 	}
 }
 
+// TestExplicitDischargeAcksADeferredEnvelopeAndResolvesItsRetry proves the
+// addressee can always finish a deferred obligation themselves: naming it in an
+// explicit discharge set acks it with no re-presentation, and the retry promise
+// that carried the deferral closes with it. A plain reply still leaves it
+// deferred, so `defer` keeps excluding one obligation from a reply.
+func TestExplicitDischargeAcksADeferredEnvelopeAndResolvesItsRetry(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	codySeat := "cody@proj:" + f.loneTaskID
+
+	ask := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "eventually", To: []string{"cody"}, PrincipalRef: "agent:clod",
+	})
+	envelopeID := ask.Envelopes[0].ID
+	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+		Envelope: envelopeID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+	}); err != nil {
+		t.Fatalf("present: %v", err)
+	}
+	deferred, err := f.api.EnvelopeDefer(ctx, EnvelopeDeferParams{
+		Envelope: envelopeID, Reason: "after the build", RetryAfter: "2h",
+		PrincipalRef: "agent:cody", ScopeRef: codySeat,
+	})
+	if err != nil || deferred.RetryPromiseID == nil {
+		t.Fatalf("defer: %+v, %v", deferred, err)
+	}
+
+	plain := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "unrelated", To: []string{"clod"}, FYI: true,
+		PrincipalRef: "agent:cody", ScopeRef: codySeat,
+	})
+	if len(plain.Acked) != 0 {
+		t.Fatalf("a plain reply acked a deferred envelope: %v", plain.Acked)
+	}
+
+	reply := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "done after all", To: []string{"clod"}, FYI: true,
+		DischargeEnvelopeIDs: []string{envelopeID}, PrincipalRef: "agent:cody", ScopeRef: codySeat,
+	})
+	if len(reply.Acked) != 1 || reply.Acked[0] != envelopeID {
+		t.Fatalf("explicit discharge of a deferred envelope acked %v", reply.Acked)
+	}
+	shown, err := f.api.EnvelopeShow(ctx, EnvelopeShowParams{Envelope: envelopeID, PrincipalRef: "agent:cody"})
+	if err != nil || shown.State != "acked" {
+		t.Fatalf("discharged envelope = %+v, %v", shown, err)
+	}
+	promise, err := f.api.PromiseShow(ctx, PromiseShowParams{Promise: *deferred.RetryPromiseID})
+	if err != nil {
+		t.Fatalf("show retry promise: %v", err)
+	}
+	if promise.State != "resolved" {
+		t.Fatalf("retry promise state = %s after its envelope was acked, want resolved", promise.State)
+	}
+}
+
 // TestEnvelopeFailIsTerminalVisibleAndIdempotentPerRuntime pins rev 5.1's
 // unsuccessful terminal transition, including its rejection rules.
 // A presented envelope whose queued copy the broker expired before injection is

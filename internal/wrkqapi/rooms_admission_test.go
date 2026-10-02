@@ -165,7 +165,7 @@ func TestManifestScopedReplyDischargesExactSetAtomically(t *testing.T) {
 
 	fyi := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "fyi", To: []string{"cody"}, FYI: true, PrincipalRef: "agent:clod"})
 	_, err = f.api.RoomSay(ctx, RoomSayParams{Ref: f.loneTaskID, Body: "not an obligation", To: []string{"clod"}, DischargeEnvelopeIDs: []string{fyi.Envelopes[0].ID}, PrincipalRef: "agent:cody", ScopeRef: codySeat})
-	assertValidationReason(t, "must be pending or presented reply_required", err)
+	assertValidationReason(t, "must be pending, presented, or deferred reply_required", err)
 }
 
 func TestSayStoresTTLHoldAndIdempotencyAcrossFanout(t *testing.T) {

@@ -798,9 +798,13 @@ func (rs *RoomStore) validateScopedDischargesTx(tx *sql.Tx, params EnvelopeCreat
 		if envelope.RoomUUID != params.RoomUUID {
 			return nil, &EnvelopeDischargeInvalidError{Envelope: envelope.ID, Reason: "foreign room"}
 		}
+		// A deferred envelope is admitted: naming it is the addressee's own
+		// explicit reply, the one way they can finish a paused obligation
+		// without waiting for a retry that may never be armed.
 		if envelope.Obligation != domain.EnvelopeObligationReplyRequired ||
-			(envelope.State != domain.EnvelopeStatePending && envelope.State != domain.EnvelopeStatePresented) {
-			return nil, &EnvelopeDischargeInvalidError{Envelope: envelope.ID, Reason: "must be pending or presented reply_required"}
+			(envelope.State != domain.EnvelopeStatePending && envelope.State != domain.EnvelopeStatePresented &&
+				envelope.State != domain.EnvelopeStateDeferred) {
+			return nil, &EnvelopeDischargeInvalidError{Envelope: envelope.ID, Reason: "must be pending, presented, or deferred reply_required"}
 		}
 		if params.FromScopeRef != nil {
 			if envelope.ToScopeRef == nil || *envelope.ToScopeRef != *params.FromScopeRef {
@@ -1474,6 +1478,22 @@ func disposeEnvelopeTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attributi
 	}
 	if _, err := tx.Exec(`UPDATE envelopes SET state = ?, defer_reason = ?, retry_at = ?, retry_promise_uuid = ?, terminal_actor = ?, terminal_at = ?, etag = etag + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'), updated_by_principal_ref = ?, updated_by_scope_ref = ? WHERE uuid = ?`, disposition.State, disposition.DeferReason, disposition.RetryAt, disposition.RetryPromiseUUID, terminalActor, terminalAt, attr.PrincipalRef, scopeSQL(attr), current.UUID); err != nil {
 		return nil, fmt.Errorf("failed to dispose envelope: %w", err)
+	}
+	// Leaving deferred for a terminal state retires the retry that carried
+	// the deferral; otherwise its promise stays open with nothing to re-pend.
+	if current.State == domain.EnvelopeStateDeferred && domain.IsEnvelopeTerminal(disposition.State) &&
+		current.RetryPromiseUUID != nil {
+		if _, err := tx.Exec(`UPDATE promises
+			SET state = 'resolved',
+			    closed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
+			    last_reviewed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
+			    last_review_note = 'deferred envelope ' || ?,
+			    etag = etag + 1,
+			    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
+			    updated_by_principal_ref = ?, updated_by_scope_ref = ?
+			WHERE uuid = ? AND state = 'open'`, string(disposition.State), attr.PrincipalRef, scopeSQL(attr), *current.RetryPromiseUUID); err != nil {
+			return nil, fmt.Errorf("failed to resolve deferral promise: %w", err)
+		}
 	}
 	payload := map[string]interface{}{"state": string(disposition.State), "previous_state": string(current.State), "room_uuid": current.RoomUUID}
 	if disposition.DeferReason != nil {

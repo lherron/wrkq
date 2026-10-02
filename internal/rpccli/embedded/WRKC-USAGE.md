@@ -22,7 +22,7 @@ TEXT
 
 A reply discharges every pending or presented reply-required envelope from that sender scope to your scope in this room. Another session of the same agent is a different counterparty. A final assistant response does not send a reply. Agents reply or defer; `wrkc ack` is operator-only.
 
-When answering only selected messages, add `--discharges EN-00001,EN-00002`. Deferred messages stay deferred even when you reply to other mail.
+When answering only selected messages, add `--discharges EN-00001,EN-00002`. Deferred messages stay deferred even when you reply to other mail; to finish one, name it in `--discharges`.
 
 ## Defer or finish a conversation
 
