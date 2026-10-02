@@ -29,6 +29,7 @@ type Server struct {
 	initialized bool
 	shutdown    bool
 	mu          sync.Mutex
+	reads       readBound
 }
 
 func NewServer(out io.Writer) *Server {
@@ -36,6 +37,7 @@ func NewServer(out io.Writer) *Server {
 		writer:   NewWriter(out),
 		handlers: map[string]Handler{},
 		maxBytes: DefaultMaxFrameBytes,
+		reads:    readBound{deadline: ReadDeadline, maxAbandoned: MaxAbandonedReads},
 	}
 }
 
@@ -71,7 +73,7 @@ func (s *Server) Serve(ctx context.Context, in io.Reader) error {
 			}
 			continue
 		}
-		resp, ok := s.HandleRequest(ctx, req)
+		resp, ok := s.dispatch(ctx, req, callStdoutPure, false)
 		if !ok {
 			return nil
 		}
@@ -85,7 +87,29 @@ func (s *Server) Serve(ctx context.Context, in io.Reader) error {
 // HandleRequest dispatches a single JSON-RPC request against this server's
 // registry. It returns ok=false only for rpc.exit, which terminates streaming
 // transports. HTTP transports can reject notifications before calling this.
+//
+// Requests run concurrently: nothing here serializes one handler behind
+// another (T-09997). Writes are serialized by SQLite itself
+// (_txlock=immediate + busy_timeout); bounded reads are cut off at the read
+// deadline here (HTTP only). The process stdout is not the frame channel for an HTTP
+// transport, so no stdout isolation is applied — wrkqd points os.Stdout at
+// stderr once at startup instead.
 func (s *Server) HandleRequest(ctx context.Context, req Request) (Response, bool) {
+	return s.dispatch(ctx, req, callHandler, true)
+}
+
+// invokeFunc runs one handler. The stdio transport wraps the call in stdout
+// isolation; HTTP calls it directly.
+type invokeFunc func(ctx context.Context, method string, handler Handler, params json.RawMessage) (json.RawMessage, error)
+
+func callHandler(ctx context.Context, _ string, handler Handler, params json.RawMessage) (json.RawMessage, error) {
+	return handler.HandleRPC(ctx, params)
+}
+
+// dispatch runs one request. bounded applies the read deadline; the stdio
+// transport leaves it off because an abandoned read there would keep holding
+// the stdout swap, stalling the very stream it was cut off to protect.
+func (s *Server) dispatch(ctx context.Context, req Request, invoke invokeFunc, bounded bool) (Response, bool) {
 	s.mu.Lock()
 	if req.Method == "rpc.exit" {
 		s.mu.Unlock()
@@ -124,7 +148,15 @@ func (s *Server) HandleRequest(ctx context.Context, req Request) (Response, bool
 		}
 		return Response{JSONRPC: "2.0", ID: responseID(req.ID), Error: protocolError(codeMethodNotFound, "method not found", nil)}, true
 	}
-	result, err := callStdoutPure(withMethod(ctx, req.Method), req.Method, handler, req.Params)
+	var (
+		result json.RawMessage
+		err    error
+	)
+	if bounded && isBoundedRead(req.Method) {
+		result, err = s.reads.run(withMethod(ctx, req.Method), req.Method, handler, req.Params, invoke)
+	} else {
+		result, err = invoke(withMethod(ctx, req.Method), req.Method, handler, req.Params)
+	}
 	if err != nil {
 		if req.isNotification() {
 			return Response{}, true
@@ -170,6 +202,11 @@ func (s *Server) writeError(id json.RawMessage, rpcErr *RPCError) error {
 	return s.writer.WriteResponse(Response{JSONRPC: "2.0", ID: id, Error: rpcErr})
 }
 
+// stdoutRedirectMu guards the process-global os.Stdout swap. Only the stdio
+// transport takes it, where the process stdout can be the frame channel and a
+// stray handler print would corrupt the stream; that transport is already one
+// request at a time, so the lock is contended only across stdio streams
+// sharing a process.
 var stdoutRedirectMu sync.Mutex
 
 func callStdoutPure(ctx context.Context, method string, handler Handler, params json.RawMessage) (json.RawMessage, error) {

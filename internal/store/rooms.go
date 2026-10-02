@@ -244,7 +244,13 @@ func (rs *RoomStore) CreateWithAttribution(attr attribution.Attribution, params 
 
 // Get resolves a room by UUID or R- friendly ID.
 func (rs *RoomStore) Get(selector string) (*domain.Room, error) {
-	room, err := scanRoom(rs.store.db.QueryRow(
+	return rs.GetContext(context.Background(), selector)
+}
+
+// GetContext is Get under the caller's context, so a cut-off read releases
+// its connection (T-09997).
+func (rs *RoomStore) GetContext(ctx context.Context, selector string) (*domain.Room, error) {
+	room, err := scanRoom(rs.store.db.QueryRowContext(ctx,
 		"SELECT "+roomColumns+" FROM rooms WHERE uuid = ? OR id = ?", selector, selector,
 	))
 	if err == sql.ErrNoRows {
@@ -866,7 +872,7 @@ const stillOwedSQL = `obligation = 'reply_required' AND (
 
 // ListEnvelopes returns envelopes ordered by insertion (id) unless the caller
 // asked for the newest first.
-func (rs *RoomStore) ListEnvelopes(params EnvelopeListParams) ([]domain.Envelope, error) {
+func (rs *RoomStore) ListEnvelopes(ctx context.Context, params EnvelopeListParams) ([]domain.Envelope, error) {
 	clauses := []string{"1 = 1"}
 	args := []interface{}{}
 	if params.RoomUUID != "" {
@@ -943,7 +949,7 @@ func (rs *RoomStore) ListEnvelopes(params EnvelopeListParams) ([]domain.Envelope
 	if params.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", params.Limit)
 	}
-	return rs.queryEnvelopes(query, args...)
+	return rs.queryEnvelopes(ctx, query, args...)
 }
 
 // MemberEnvelopePageParams selects one bounded direction over the global
@@ -1100,7 +1106,7 @@ func memberEnvelopeExists(ctx context.Context, queryer contextQueryRower, query 
 // CountEnvelopes returns how many envelopes match, without materializing them.
 // It is the shape the stop-hook predicate wants.
 func (rs *RoomStore) CountEnvelopes(params EnvelopeListParams) (int, error) {
-	rows, err := rs.ListEnvelopes(params)
+	rows, err := rs.ListEnvelopes(context.Background(), params)
 	if err != nil {
 		return 0, err
 	}
@@ -1122,7 +1128,7 @@ func (rs *RoomStore) BirthEnvelope(scopeRef string) (*domain.Envelope, error) {
 	if scopeRef == "" {
 		return nil, fmt.Errorf("birth envelope requires a target scope")
 	}
-	rows, err := rs.ListEnvelopes(EnvelopeListParams{
+	rows, err := rs.ListEnvelopes(context.Background(), EnvelopeListParams{
 		ToScopeRef:  scopeRef,
 		Obligations: []domain.EnvelopeObligation{domain.EnvelopeObligationReplyRequired},
 		Limit:       1,
@@ -1334,6 +1340,19 @@ func (rs *RoomStore) RependDueDeferrals(attr attribution.Attribution) (int, erro
 	if err := requireAttribution(attr); err != nil {
 		return 0, err
 	}
+	// Probe on a plain read first, as ExpireDueEnvelopes does: every inbox
+	// read calls this, and an unconditional write transaction would queue
+	// concurrent reads on the SQLite writer lock (T-09997). The transaction
+	// re-selects, so a racing caller that loses finds nothing to do.
+	var anyDue int
+	if err := rs.store.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM envelopes
+		 WHERE state = 'deferred' AND retry_at IS NOT NULL
+		   AND retry_at <= strftime('%Y-%m-%dT%H:%M:%SZ','now'))`).Scan(&anyDue); err != nil {
+		return 0, fmt.Errorf("failed to probe due deferrals: %w", err)
+	}
+	if anyDue == 0 {
+		return 0, nil
+	}
 	repended := 0
 	err := rs.store.withTx(func(tx *sql.Tx, _ *events.Writer) error {
 		rows, err := tx.Query(`SELECT uuid, retry_promise_uuid FROM envelopes
@@ -1495,7 +1514,7 @@ func (rs *RoomStore) PresentedObligationsForReplier(roomUUID, replierScopeRef, r
 	// "Most recent" is the most recent PRESENTATION, not the most recent send: a
 	// seat answers what it was last shown. An envelope in state presented always
 	// has a presentation row; the id tiebreak keeps the order total anyway.
-	return rs.queryEnvelopes("SELECT "+envelopeColumns+" FROM envelopes e WHERE "+
+	return rs.queryEnvelopes(context.Background(), "SELECT "+envelopeColumns+" FROM envelopes e WHERE "+
 		strings.Join(clauses, " AND ")+` ORDER BY (
 			SELECT MAX(p.presented_at) FROM envelope_presentations p WHERE p.envelope_uuid = e.uuid
 		) DESC, e.id DESC`, args...)
@@ -1526,7 +1545,7 @@ func (rs *RoomStore) StandingObligationFromSender(roomUUID, senderScopeRef, send
 		clauses = append(clauses, "to_scope_ref IS NULL AND to_principal_ref = ?")
 		args = append(args, addresseePrincipalRef)
 	}
-	rows, err := rs.queryEnvelopes("SELECT "+envelopeColumns+" FROM envelopes WHERE "+
+	rows, err := rs.queryEnvelopes(context.Background(), "SELECT "+envelopeColumns+" FROM envelopes WHERE "+
 		strings.Join(clauses, " AND ")+" ORDER BY id LIMIT 1", args...)
 	if err != nil || len(rows) == 0 {
 		return nil, err
@@ -1569,7 +1588,7 @@ func (rs *RoomStore) AckSenderObligationsWithAttribution(attr attribution.Attrib
 		args = append(args, replierPrincipalRef)
 	}
 
-	candidates, err := rs.queryEnvelopes("SELECT "+envelopeColumns+" FROM envelopes WHERE "+
+	candidates, err := rs.queryEnvelopes(context.Background(), "SELECT "+envelopeColumns+" FROM envelopes WHERE "+
 		strings.Join(clauses, " AND ")+" ORDER BY id", args...)
 	if err != nil {
 		return nil, err
@@ -1940,8 +1959,8 @@ func (rs *RoomStore) queryRooms(query string, args ...interface{}) ([]domain.Roo
 	return result, nil
 }
 
-func (rs *RoomStore) queryEnvelopes(query string, args ...interface{}) ([]domain.Envelope, error) {
-	rows, err := rs.store.db.Query(query, args...)
+func (rs *RoomStore) queryEnvelopes(ctx context.Context, query string, args ...interface{}) ([]domain.Envelope, error) {
+	rows, err := rs.store.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query envelopes: %w", err)
 	}

@@ -251,6 +251,7 @@ Every domain error must include:
 | `WRKQ_PERMISSION_DENIED` | -32022 | false | principal/scope cannot perform wrkq operation |
 | `WRKQ_DB_MIGRATION_REQUIRED` | -32023 | false | DB schema behind required migration |
 | `WRKQ_DB_BUSY` | -32024 | true | SQLite write contention that outlasted `busy_timeout`; `data.reason="sqlite_busy"`. Back off and retry the operation. |
+| `WORKRPC_TIMEOUT` | -32034 | true | wrkqd cut a pure read off at its 20-second server deadline, or refused it at once because 16 earlier reads are still running past theirs; `data` carries `method`, `reason` (`read_deadline` or `abandoned_reads_saturated`) and `timeoutMs`. Writes are never bounded. Retry. Like `WRKQ_DB_BUSY`, it is outside the protocol schema hash. |
 | `WRKQ_ALREADY_CLAIMED` | -32027 | false | task already has a holder; data names holder, scope, node, and generation |
 | `WRKQ_WRONG_STATE` | -32028 | false | task state is not claimable |
 | `WRKQ_CLAIM_SUPERSEDED` | -32029 | false | supplied claim tuple is stale; data names the current holder |
@@ -2225,8 +2226,11 @@ wrkf.hook.run
 
 Hook output must go to stderr or structured RPC result fields. Never raw stdout.
 
-Remote hook/check/effect execution is isolated from the workrpc server state
-lock and the process-wide stdout redirect lock. The daemon refuses a deployed
+wrkqd runs RPC handlers concurrently (T-09997): no lock serializes one
+request behind another. SQLite serializes writes (`_txlock=immediate` +
+`busy_timeout`); pure reads are bounded by a 20-second deadline (`WORKRPC_TIMEOUT`). Only the
+stdio transport, where process stdout can be the frame channel, swaps stdout
+per request, and it exempts hook/check/effect execution from that swap. The daemon refuses a deployed
 hook whose effective timeout exceeds 25 seconds (`timeoutMs` absent/zero means
 the five-minute local default and is therefore also refused remotely). This
 ceiling stays below the daemon's 30-second response deadline. Refusal happens

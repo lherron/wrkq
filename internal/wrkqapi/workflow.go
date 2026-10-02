@@ -52,7 +52,7 @@ func (a *API) WorkflowAttach(ctx context.Context, p WorkflowAttachParams) (*Wrkq
 	if err != nil {
 		return nil, err
 	}
-	dto, err := a.loadTask(taskUUID)
+	dto, err := a.loadTask(ctx, taskUUID)
 	if err != nil {
 		return nil, err
 	}

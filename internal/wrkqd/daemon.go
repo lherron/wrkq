@@ -92,6 +92,9 @@ func ServeDaemon(opts DaemonOptions) error {
 	}
 	rpcOpts.ServerVersion = Version
 	rpcOpts.ServerRevision = GitCommit
+	// Handlers run concurrently and without per-request stdout isolation
+	// (T-09997); a stray handler print goes to stderr, as it always did.
+	os.Stdout = os.Stderr
 	rpcServer := workrpc.NewServer(io.Discard)
 	workrpc.RegisterAPI(rpcServer, api, rpcOpts)
 

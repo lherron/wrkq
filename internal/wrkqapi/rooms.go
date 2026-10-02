@@ -1105,7 +1105,7 @@ func (a *API) RoomLogView(ctx context.Context, p RoomLogViewParams) (*WrkqRoomLo
 		params.Limit = p.Limit
 		params.NewestFirst = true
 	}
-	rows, err := a.store.Rooms.ListEnvelopes(params)
+	rows, err := a.store.Rooms.ListEnvelopes(ctx, params)
 	if err != nil {
 		return nil, mapRoomStoreError(err, p.Room)
 	}
@@ -1496,7 +1496,7 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 
 	standing := base
 	standing.States = []domain.EnvelopeState{domain.EnvelopeStatePending, domain.EnvelopeStatePresented}
-	rows, err := a.store.Rooms.ListEnvelopes(standing)
+	rows, err := a.store.Rooms.ListEnvelopes(ctx, standing)
 	if err != nil {
 		return nil, mapRoomStoreError(err, "")
 	}
@@ -1509,8 +1509,9 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 		}
 		grouped[key] = append(grouped[key], rows[index])
 	}
+	rooms := roomStates{}
 	for _, roomUUID := range order {
-		state, serr := a.loadRoomState(ctx, roomUUID)
+		state, serr := a.roomStateFor(ctx, rooms, roomUUID)
 		if serr != nil {
 			return nil, serr
 		}
@@ -1531,14 +1532,14 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 
 	deferred := base
 	deferred.States = []domain.EnvelopeState{domain.EnvelopeStateDeferred}
-	view.Deferred, err = a.envelopeListDTO(ctx, deferred)
+	view.Deferred, err = a.envelopeListDTO(ctx, rooms, deferred)
 	if err != nil {
 		return nil, err
 	}
 	if p.IncludeFailed {
 		failed := base
 		failed.States = []domain.EnvelopeState{domain.EnvelopeStateFailed}
-		view.Failed, err = a.envelopeListDTO(ctx, failed)
+		view.Failed, err = a.envelopeListDTO(ctx, rooms, failed)
 		if err != nil {
 			return nil, err
 		}
@@ -1549,17 +1550,17 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 	} else {
 		sent.FromPrincipalRef = attr.PrincipalRef
 	}
-	view.SentFailed, err = a.sentStillOwedDTO(ctx, sent)
+	view.SentFailed, err = a.sentStillOwedDTO(ctx, rooms, sent)
 	if err != nil {
 		return nil, err
 	}
 	sent.States = []domain.EnvelopeState{domain.EnvelopeStateExpired}
-	view.SentExpired, err = a.sentStillOwedDTO(ctx, sent)
+	view.SentExpired, err = a.sentStillOwedDTO(ctx, rooms, sent)
 	if err != nil {
 		return nil, err
 	}
 	sent.States = []domain.EnvelopeState{domain.EnvelopeStateWithdrawn}
-	view.SentWithdrawn, err = a.sentStillOwedDTO(ctx, sent)
+	view.SentWithdrawn, err = a.sentStillOwedDTO(ctx, rooms, sent)
 	if err != nil {
 		return nil, err
 	}
@@ -1875,13 +1876,14 @@ func (a *API) EnvelopePendingView(ctx context.Context, p EnvelopePendingViewPara
 	params.States = []domain.EnvelopeState{domain.EnvelopeStatePending, domain.EnvelopeStatePresented}
 
 	view := &WrkqEnvelopePendingView{Items: []WrkqEnvelope{}, Blocking: []string{}, Repended: repended}
+	rooms := roomStates{}
 	collect := func(listParams store.EnvelopeListParams) error {
-		rows, lerr := a.store.Rooms.ListEnvelopes(listParams)
+		rows, lerr := a.store.Rooms.ListEnvelopes(ctx, listParams)
 		if lerr != nil {
 			return mapRoomStoreError(lerr, "")
 		}
 		for index := range rows {
-			state, serr := a.loadRoomState(ctx, rows[index].RoomUUID)
+			state, serr := a.roomStateFor(ctx, rooms, rows[index].RoomUUID)
 			if serr != nil {
 				return serr
 			}
@@ -2202,8 +2204,25 @@ func (a *API) roomStateForContainerSelector(ctx context.Context, selector string
 	return a.roomOrDerivedForContainer(ctx, selector, containerUUID)
 }
 
+// roomStates memoizes hydrated room state within one read, so a listing whose
+// envelopes share rooms loads each room once instead of once per row
+// (T-09997). It lives for a single request: room state is read-time truth.
+type roomStates map[string]*roomState
+
+func (a *API) roomStateFor(ctx context.Context, rooms roomStates, roomUUID string) (*roomState, error) {
+	if state, ok := rooms[roomUUID]; ok {
+		return state, nil
+	}
+	state, err := a.loadRoomState(ctx, roomUUID)
+	if err != nil {
+		return nil, err
+	}
+	rooms[roomUUID] = state
+	return state, nil
+}
+
 func (a *API) loadRoomState(ctx context.Context, roomUUID string) (*roomState, error) {
-	room, err := a.store.Rooms.Get(roomUUID)
+	room, err := a.store.Rooms.GetContext(ctx, roomUUID)
 	if err != nil {
 		return nil, mapRoomStoreError(err, roomUUID)
 	}
@@ -2422,14 +2441,14 @@ func (a *API) roomDTO(ctx context.Context, state *roomState) (*WrkqRoom, error) 
 	return dto, nil
 }
 
-func (a *API) envelopeListDTO(ctx context.Context, params store.EnvelopeListParams) ([]WrkqEnvelope, error) {
-	rows, err := a.store.Rooms.ListEnvelopes(params)
+func (a *API) envelopeListDTO(ctx context.Context, rooms roomStates, params store.EnvelopeListParams) ([]WrkqEnvelope, error) {
+	rows, err := a.store.Rooms.ListEnvelopes(ctx, params)
 	if err != nil {
 		return nil, mapRoomStoreError(err, "")
 	}
 	result := make([]WrkqEnvelope, 0, len(rows))
 	for index := range rows {
-		state, serr := a.loadRoomState(ctx, rows[index].RoomUUID)
+		state, serr := a.roomStateFor(ctx, rooms, rows[index].RoomUUID)
 		if serr != nil {
 			return nil, serr
 		}
@@ -2455,15 +2474,15 @@ var sentFailureWindow = 24 * time.Hour
 // without a task is listed while it is younger than sentFailureWindow and its
 // room is not stale by the rule `wrkc ls` hides rooms by. The records stay in
 // the ledger; show and log still read them.
-func (a *API) sentStillOwedDTO(ctx context.Context, params store.EnvelopeListParams) ([]WrkqEnvelope, error) {
+func (a *API) sentStillOwedDTO(ctx context.Context, rooms roomStates, params store.EnvelopeListParams) ([]WrkqEnvelope, error) {
 	params.StillOwedSince = time.Now().UTC().Add(-sentFailureWindow).Format("2006-01-02T15:04:05Z")
-	rows, err := a.store.Rooms.ListEnvelopes(params)
+	rows, err := a.store.Rooms.ListEnvelopes(ctx, params)
 	if err != nil {
 		return nil, mapRoomStoreError(err, "")
 	}
 	result := make([]WrkqEnvelope, 0, len(rows))
 	for index := range rows {
-		state, serr := a.loadRoomState(ctx, rows[index].RoomUUID)
+		state, serr := a.roomStateFor(ctx, rooms, rows[index].RoomUUID)
 		if serr != nil {
 			return nil, serr
 		}

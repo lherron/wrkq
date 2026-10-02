@@ -25,8 +25,13 @@ const (
 	CodeWRKQClaimSuperseded   = "WRKQ_CLAIM_SUPERSEDED"
 	CodeWRKQNodeIdentity      = "WRKQ_NODE_IDENTITY_REQUIRED"
 	CodeWRKQCursorInvalid     = "WRKQ_CURSOR_INVALID"
-	CodeWRKQAlreadyPresented = "WRKQ_ALREADY_PRESENTED"
+	CodeWRKQAlreadyPresented  = "WRKQ_ALREADY_PRESENTED"
 	CodeWorkRPCInternal       = "WORKRPC_INTERNAL"
+	// CodeWorkRPCTimeout is the typed, retryable answer to a bounded read that
+	// outlived its server-side deadline (T-09997). Like WRKQ_DB_BUSY it is an
+	// infrastructure signal, so it stays out of ErrorCodeCatalog and the
+	// protocol schema hash; clients surface it through the generic domain code.
+	CodeWorkRPCTimeout = "WORKRPC_TIMEOUT"
 )
 
 var domainRPCCode = map[string]int{
@@ -43,6 +48,7 @@ var domainRPCCode = map[string]int{
 	CodeWRKQNodeIdentity:             -32030,
 	CodeWRKQCursorInvalid:            -32032,
 	CodeWRKQAlreadyPresented:         -32033,
+	CodeWorkRPCTimeout:               -32034,
 	wrkfapi.CodeNotFound:             -32004,
 	wrkfapi.CodeValidation:           -32602,
 	wrkfapi.CodeStaleRevision:        -32009,

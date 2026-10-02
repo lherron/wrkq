@@ -222,7 +222,7 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		return nil, mapStoreError(err, "")
 	}
 
-	dto, err := a.loadTask(result.UUID)
+	dto, err := a.loadTask(ctx, result.UUID)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +312,7 @@ func (a *API) TaskShow(ctx context.Context, p TaskShowParams) (*WrkqTask, error)
 	if err != nil {
 		return nil, err
 	}
-	task, err := a.loadTask(uuid)
+	task, err := a.loadTask(ctx, uuid)
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +372,7 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 			// nested beneath it. cp.path is the task's container path from
 			// v_container_paths (root slug excluded).
 			var containerPath string
-			perr := a.db.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", containerUUID).Scan(&containerPath)
+			perr := a.db.QueryRowContext(ctx, "SELECT path FROM v_container_paths WHERE uuid = ?", containerUUID).Scan(&containerPath)
 			switch {
 			case perr == sql.ErrNoRows:
 
@@ -458,7 +458,7 @@ func (a *API) TaskList(ctx context.Context, p TaskListParams) (*WrkqTaskListResu
 		args = append(args, *page.LimitParam)
 	}
 
-	rows, err := a.db.Query(query, args...)
+	rows, err := a.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, NewInternalError(err)
 	}
@@ -626,7 +626,7 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 	}
 	if len(fields) == 0 {
 
-		return a.loadTask(uuid)
+		return a.loadTask(ctx, uuid)
 	}
 	// A new requester principal without a scope drops a stored scope that
 	// names a different agent, keeping the pair consistent.
@@ -676,7 +676,7 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 		}
 		return nil, mapStoreError(err, p.Task)
 	}
-	return a.loadTask(uuid)
+	return a.loadTask(ctx, uuid)
 }
 
 // TaskMove moves a root task subtree to an existing target container.
@@ -717,7 +717,7 @@ func (a *API) TaskMove(ctx context.Context, p TaskMoveParams) (*WrkqTask, error)
 		if _, merr := a.store.Tasks.MoveWithViaAttribution(attr, uuid, targetUUID, ifMatch, "rpc"); merr != nil {
 			return nil, mapStoreError(merr, p.Task)
 		}
-		return a.loadTask(uuid)
+		return a.loadTask(ctx, uuid)
 	}
 
 	targetProjectUUID, targetSlug, rerr := a.resolveTaskMoveTarget(uuid, p.TargetPath)
@@ -751,7 +751,7 @@ func (a *API) TaskMove(ctx context.Context, p TaskMoveParams) (*WrkqTask, error)
 	if _, uerr := a.store.Tasks.UpdateFieldsWithViaAttribution(attr, uuid, fields, ifMatch, "rpc"); uerr != nil {
 		return nil, mapStoreError(uerr, p.Task)
 	}
-	return a.loadTask(uuid)
+	return a.loadTask(ctx, uuid)
 }
 
 func (a *API) resolveTaskMoveTarget(taskUUID, targetPath string) (string, string, error) {
@@ -810,7 +810,7 @@ func (a *API) TaskAcknowledge(ctx context.Context, p TaskAcknowledgeParams) (*Wr
 	}
 
 	if acknowledgedAt.Valid && strings.TrimSpace(acknowledgedAt.String) != "" {
-		return a.loadTask(uuid)
+		return a.loadTask(ctx, uuid)
 	}
 
 	if !p.Force && state != string(domain.StateCompleted) && state != string(domain.StateCancelled) {
@@ -828,7 +828,7 @@ func (a *API) TaskAcknowledge(ctx context.Context, p TaskAcknowledgeParams) (*Wr
 	if _, uerr := a.store.Tasks.UpdateFieldsWithViaAttribution(attr, uuid, map[string]any{"acknowledged_at": now}, 0, "rpc"); uerr != nil {
 		return nil, mapStoreError(uerr, p.Task)
 	}
-	return a.loadTask(uuid)
+	return a.loadTask(ctx, uuid)
 }
 
 // TaskDelete disposes of a task per the caller-owned-confirmation invariant
@@ -878,10 +878,10 @@ func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, er
 		if _, aerr := a.store.Tasks.ArchiveWithViaAttribution(attr, uuid, 0, "rpc"); aerr != nil {
 			return nil, mapStoreError(aerr, p.Task)
 		}
-		return a.loadTask(uuid)
+		return a.loadTask(ctx, uuid)
 	case "purge":
 
-		snapshot, serr := a.loadTask(uuid)
+		snapshot, serr := a.loadTask(ctx, uuid)
 		if serr != nil {
 			return nil, serr
 		}
@@ -907,7 +907,7 @@ func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, er
 	default:
 
 		if state == string(domain.StateDeleted) {
-			return a.loadTask(uuid)
+			return a.loadTask(ctx, uuid)
 		}
 		now := time.Now().UTC().Format(time.RFC3339)
 
@@ -917,7 +917,7 @@ func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, er
 		}, 0, "rpc"); uerr != nil {
 			return nil, mapStoreError(uerr, p.Task)
 		}
-		return a.loadTask(uuid)
+		return a.loadTask(ctx, uuid)
 	}
 }
 
@@ -1044,7 +1044,7 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 	if rerr := a.cascadeRestoreSubtasks(uuid, targetState, attr); rerr != nil {
 		return nil, rerr
 	}
-	return a.loadTask(uuid)
+	return a.loadTask(ctx, uuid)
 }
 
 // restoreTaskTx clears the archived/deleted markers and sets the target state for
@@ -1406,8 +1406,8 @@ func (a *API) resolveTaskUUID(selector string) (string, error) {
 }
 
 // loadTask reads a task by UUID into a WrkqTask DTO.
-func (a *API) loadTask(uuid string) (*WrkqTask, error) {
-	row := a.db.QueryRow(
+func (a *API) loadTask(ctx context.Context, uuid string) (*WrkqTask, error) {
+	row := a.db.QueryRowContext(ctx, 
 		"SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.campaign_uuid, t.state, t.priority, t.kind, t.description, t.specification, t.outcome, "+
 			"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, "+
 			"t.assignee_principal_ref, t.requester_principal_ref, t.requester_scope_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, "+
@@ -1433,7 +1433,7 @@ func (a *API) loadTask(uuid string) (*WrkqTask, error) {
 		task.CausedBy = causedBy
 	}
 	if task.SubtaskOwnerUUID == "" {
-		rows, err := a.db.Query("SELECT id,slug,title,state,COALESCE(claimed_by_principal_ref,'') FROM tasks WHERE subtask_owner_uuid=? ORDER BY slug", uuid)
+		rows, err := a.db.QueryContext(ctx, "SELECT id,slug,title,state,COALESCE(claimed_by_principal_ref,'') FROM tasks WHERE subtask_owner_uuid=? ORDER BY slug", uuid)
 		if err != nil {
 			return nil, NewInternalError(err)
 		}
