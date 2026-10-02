@@ -5,6 +5,8 @@ package workrpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"runtime/debug"
 	"sync/atomic"
@@ -63,8 +65,12 @@ func (b *readBound) run(ctx context.Context, method string, handler Handler, par
 	case <-ctx.Done():
 	}
 
+	why := fmt.Sprintf("exceeded the %s read deadline", b.deadline)
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		why = fmt.Sprintf("caller went away after %s", time.Since(start).Round(time.Millisecond))
+	}
 	n := b.abandoned.Add(1)
-	log.Printf("workrpc: %s exceeded the %s read deadline; abandoned (%d abandoned reads running)", method, b.deadline, n)
+	log.Printf("workrpc: %s %s; abandoned (%d abandoned reads running)", method, why, n)
 	go func() {
 		<-done
 		cancel()

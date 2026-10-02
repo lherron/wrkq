@@ -24,7 +24,7 @@ func (a *API) ContainerTaskCounts(
 		return nil, err
 	}
 
-	tx, err := a.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := a.db.BeginRead(ctx)
 	if err != nil {
 		return nil, NewInternalError(err)
 	}

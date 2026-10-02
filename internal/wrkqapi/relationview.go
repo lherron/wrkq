@@ -4,7 +4,6 @@ package wrkqapi
 
 import (
 	"context"
-	"database/sql"
 )
 
 // RelationListView is the server-owned COMPATIBILITY list projection for
@@ -20,7 +19,7 @@ func (a *API) RelationListView(ctx context.Context, p RelationListViewParams) ([
 	if err != nil {
 		return nil, err
 	}
-	tx, err := a.db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := a.db.BeginRead(ctx)
 	if err != nil {
 		return nil, NewInternalError(err)
 	}

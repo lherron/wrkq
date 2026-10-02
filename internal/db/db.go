@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"errors"
@@ -19,6 +20,13 @@ var migrationsFS embed.FS
 // DB wraps a SQLite database connection
 type DB struct {
 	*sql.DB
+	// read is a second pool for read-only transactions. go-sqlite3 ignores
+	// sql.TxOptions.ReadOnly and opens every transaction with the DSN's
+	// _txlock, which on the main pool is IMMEDIATE: a read-only transaction
+	// there takes the writer lock, so concurrent reads queue on it behind
+	// each other and every write (T-09997). This pool begins DEFERRED and is
+	// query_only, so its transactions are snapshot reads that cannot write.
+	read *sql.DB
 	path string
 }
 
@@ -69,10 +77,32 @@ func Open(path string) (*DB, error) {
 		}
 	}
 
+	read, err := sql.Open("sqlite3", path+sep+"_foreign_keys=on&_busy_timeout=5000&_txlock=deferred&_query_only=true")
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to open read pool: %w", err)
+	}
+
 	// DB.path stays the clean path (no DSN params) so Path() and any consumer
 	// that re-derives a DSN from it (e.g. workflow.withImmediateTx) does not
 	// inherit doubly-encoded query parameters.
-	return &DB{DB: db, path: path}, nil
+	return &DB{DB: db, read: read, path: path}, nil
+}
+
+// BeginRead starts a read-only snapshot transaction that never takes the
+// SQLite writer lock. Use it instead of BeginTx(ctx, &sql.TxOptions{ReadOnly:
+// true}), which go-sqlite3 runs as BEGIN IMMEDIATE on the main pool.
+func (db *DB) BeginRead(ctx context.Context) (*sql.Tx, error) {
+	return db.read.BeginTx(ctx, nil)
+}
+
+// Close closes both pools.
+func (db *DB) Close() error {
+	rerr := db.read.Close()
+	if err := db.DB.Close(); err != nil {
+		return err
+	}
+	return rerr
 }
 
 // IsBusy reports whether err (anywhere in its chain) is a SQLite busy/locked
