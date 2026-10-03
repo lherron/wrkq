@@ -5,7 +5,7 @@ package workflow
 // suspension_test.go — T-06260. Suspension as a first-class condition on a
 // workflow instance, plus the suspended-write gate on all three write paths.
 //
-// Contract (WRKF_SIMPLIFICATION.md §1–§3):
+// Contract (architecture/contracts/WRKF_SIMPLIFICATION.md §1–§3):
 //   - A template suspend outcome records a suspension (id, reason, timestamp,
 //     cause pointer) without changing status/phase/outcome. The normal
 //     transition still advances revision.

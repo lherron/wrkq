@@ -192,7 +192,7 @@ type PromiseSubjectRef struct {
 }
 
 // PromisePayload is the typed promise webhook body defined by
-// WRKQ_PROMISES.md. Changes is the event delta, while Promise is the committed
+// architecture/contracts/WRKQ_PROMISES.md. Changes is the event delta, while Promise is the committed
 // post-mutation projection.
 type PromisePayload struct {
 	Event      string                 `json:"event"`

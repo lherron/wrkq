@@ -3,7 +3,7 @@
 Tracking doc for the RPC-backed production `wrkq` CLI. The temporary direct-store
 and mirror oracle binaries have been retired; retained coverage is now expressed
 as production RPC command contract tests. Design and rationale live in
-`rpcwrkqcli.md`. This file is the command-by-command coverage matrix and the
+`architecture/archive/rpcwrkqcli.md`. This file is the command-by-command coverage matrix and the
 standing record of retained, local-only, and sunset surfaces.
 
 ## Status legend

@@ -35,7 +35,7 @@ consumers:
   - container-scoped webhook subscribers
   - "@wrkq/client"
 source:
-  - WRKQ_PROMISES.md
+  - architecture/contracts/WRKQ_PROMISES.md
   - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
   - architecture/records/invariants/wrkq.mutation.caller-owned-confirmation.yaml
   - architecture/records/invariants/wrkq.rpc.remote-transport-locator.yaml
