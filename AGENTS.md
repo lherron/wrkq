@@ -128,7 +128,7 @@ Conventional Commits with optional scopes (`fix(mcp): ...`); mention affected co
 - [Search index operations](internal/search/README.md) — FTS5, dense vectors, llama-server operating notes, and canonical launch args.
 - [Domain model operations](internal/domain/README.md) — resources, addressing, optimistic concurrency, attachments, comments, and migrations.
 - [wrkq product/domain/CLI/daemon spec](docs/SPEC.md) — canonical product and command contract.
-- [wrkf JSON-RPC stdio contract](docs/wrkf-rpc.md) — frozen machine contract for wrkf RPC.
+- [wrkq/wrkf RPC machine contract](docs/wrkq-wrkf-rpc.md) — maintained wire contract; [wrkf recovery guide](docs/wrkf-rpc.md) explains clients and recovery.
 - [wrkq change validation](docs/change-validation.md) — when to run verify / verify-full / install+smoke and where the wrkf template fits.
 - [Agent-enablement changelog](docs/enablement-changelog.md) — target-local retro carrier for sensor/workflow changes.
 - [Rule-authoring template](docs/rule-template.md) — author any new build-failing rule deliberately with a 7-field candidate and when-to-use policy.

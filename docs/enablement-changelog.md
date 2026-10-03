@@ -4,6 +4,17 @@ Target-local retro carrier for wrkq's agent-enablement sensors, workflow
 mechanisms, and documentation carriers. Add one dated entry after a pass changes
 the loop. Keep release notes elsewhere.
 
+## 2026-10-03 — Documentation review at final paths (T-10123)
+
+Corrected validation-gate coverage, rot-sensor scope, diff/watch semantics, and
+the RPC recovery/client guide against implementation. Historical plans/specs
+and greenfield samples moved to task attachments with byte-for-byte readback;
+active architecture sources now point to the maintained unified RPC contract.
+The campaign webhook reference remains current without a cosmetic edit.
+Validation is `just verify` plus installed CLI readback and attachment round trips.
+This pass stays target-local; current pages receive review facts rather than
+date-only commits.
+
 ## 2026-07-22 — Canonical adoption probe follows the supported store boundary
 
 - **Changed:** `scripts/check-wrkf-adoption.sh` now reads the canonical adoption

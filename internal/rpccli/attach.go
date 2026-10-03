@@ -31,7 +31,7 @@ const attachByteChunkBytes = 1 << 20
 // `put` of a real file against a REMOTE server move attachment CONTENT across the
 // RPC boundary as base64 PROTOCOL DATA (chunked) via wrkq.attachment.getBytes /
 // wrkq.attachment.addBytes — never a host path (T-05103, daedalus OPTION 1;
-// remote real-file put per rpc-cli-cutover-plan step 7, T-08374). Raw
+// remote real-file put per T-08374; cutover provenance: T-10124 / ATT-00099). Raw
 // bytes are emitted ONLY here, after RPC-frame decode; the server stdout stays
 // JSON-RPC-pure.
 func newAttachCmd() *cobra.Command {

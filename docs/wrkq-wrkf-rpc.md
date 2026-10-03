@@ -2,7 +2,7 @@
 
 Status: authoritative  
 Protocol version: **2026-06-30**  
-Replaces: `docs/wrkf-rpc.md` (version 2026-06-01)  
+Companion: [wrkf recovery and client guide](docs/wrkf-rpc.md)
 Implementation target: `internal/workrpc`
 
 ---

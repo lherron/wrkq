@@ -26,6 +26,6 @@ These existing guards show the template in action without retro-fitting every ru
 | --- | --- | --- |
 | [suppression-lint](../cmd/suppression-lint/main.go) | Suppression comments must use a sanctioned `ARCH-EXCEPTION(T-12345): reason` channel rather than bare disables. | Keeps suppression visible and reviewable before additional guards drain trust. |
 | [layer-boundary](../cmd/layer-boundary/main.go) | Forbidden architecture edges, including transitive import chains, fail with the observed path and fix guidance. | Prevents package-boundary drift that direct-import greps miss. |
-| [rot-sensor](../cmd/rot-sensor/main.go) | Stale rot markers and expired exception leases fail instead of letting prose claims lie silently. | Turns known stale carriers into a visible maintenance signal. |
+| [rot-sensor](../cmd/rot-sensor/main.go) | When workflow tests pass, stale TDD comment markers in `internal/workflow/**/*_test.go` fail unless the comment group carries a ticketed `ARCH-EXCEPTION` with a reason. | Stops obsolete red-phase claims from surviving green tests. |
 | [surface-guard](../cmd/surface-guard/main.go) | New public surface requires contract evidence or an explicit reviewed exception. | Keeps green tests from hiding untested API expansion. |
 | [doc-links](../cmd/doc-link-check/main.go) | Router markdown links, `@path` references, and known-extension inline paths must resolve. | Keeps always-loaded docs discoverable and reachable. |

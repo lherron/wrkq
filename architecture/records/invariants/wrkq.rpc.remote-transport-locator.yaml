@@ -61,7 +61,7 @@ enforced_by: >
   local handoff control.
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the locator parser, transport selection, or wrkqd/nodeauth authentication call site"
 source:
-  - docs/rpc-cli-cutover-plan.md
+  - docs/wrkq-wrkf-rpc.md # current contract; historical cutover plan: T-10124 / ATT-00099
   - internal/config/config.go
   - pkg/client/transport.go
   - pkg/client/local.go

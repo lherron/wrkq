@@ -13,7 +13,7 @@ provenance: authored
 This page explains three cross-cutting wrkq mechanisms that are easy to
 confuse with each other or with adjacent systems: handoffs, the search/index
 subsystem, and the event-log/monitor/watch/diff family. Command syntax lives
-in `/docs/wrkq/cli-reference`.
+in [the CLI reference](wrkq-cli-reference.md).
 
 ## Handoffs
 
@@ -98,8 +98,8 @@ or around it, and they answer different questions:
 | Command | Question it answers | Shape |
 | --- | --- | --- |
 | `wrkq log <ref>` | "What happened to this one task/container over time?" | Paginated history, `--patch` for field-level diffs, `--since`/`--until` date filtering. |
-| `wrkq diff <A> [B]` | "What's different between these two tasks (or two versions)?" | Unified-diff-style comparison, `--unified N` context lines. |
-| `wrkq watch [PATH...]` | "Tail the raw event log live." | Unfiltered (or `--since`-bounded) event stream; `--ndjson`; `--follow` (default true). |
+| `wrkq diff <A> <B>` | "Which fields differ between these two tasks?" | JSON field changes for non-TTY output; human field comparison for a TTY. Single-task working-copy comparison is unimplemented; the accepted `--unified` flag does not affect output. |
+| `wrkq watch [PATH...]` | "Tail the raw event log live." | Optional selectors filter the stream; `--since` is an event-ID cursor; `--ndjson`; `--follow` (default true). |
 | `wrkq monitor watch [TASK...]` | "Stream typed, filterable events for specific tasks, built for automation." | NDJSON or compact format, `--event-type`, `--scope`, `--state-only`, `--last N` replay, `--until` condition, `--timeout`/`--stall-after`. Emits exactly one terminal line before exit. |
 | `wrkq monitor wait [TASK...]` | "Block a script until a condition holds, then exit." | Same condition evaluator and exit-code contract as `monitor watch --until`; no event streaming to stdout — it's a barrier. |
 
@@ -121,11 +121,15 @@ building your own consumer.
 
 Every mutation is attributed to a principal ref (`agent:<id>`), resolved with
 this precedence: `--principal-ref`/`--as` flag > `WRKQ_PRINCIPAL_REF` env >
-validated ASP scope (`ASP_SCOPE_REF`/`ASP_HANDLE`/`ASP_AGENT_ID`+`ASP_PROJECT`)
+validated runtime scope (`AGENT_SCOPE_REF`, then
+`ASP_SCOPE_REF`/`ASP_HANDLE`/`ASP_AGENT_ID`+`ASP_PROJECT`)
 reduced to `agent:<id>` > `default_principal_ref` config. wrkq validates
 principal *syntax* only — it does not authenticate, does not create actor
 rows for ordinary writes, and treats `WRKQ_ACTOR`/`WRKQ_ACTOR_ID`/bare slugs/
-`system:*` as non-attributing legacy/display-cache inputs. Runtime ASP scope
+`system:*` as non-attributing legacy/display-cache inputs. Remote daemon bearer
+credentials authenticate transport access and, for node-token credentials,
+establish logical node identity; they do not turn caller-supplied principal
+attribution into authenticated agent identity. Runtime ASP scope
 provenance (the fuller `scope_ref`) is recorded separately from the reduced
 principal — passing a full ScopeRef as a principal input keeps only the agent
 identity.

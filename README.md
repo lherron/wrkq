@@ -189,8 +189,9 @@ wrkf attaches workflow instances to wrkq tasks without replacing the task
 lifecycle. Templates are validated and installed by id, version and hash
 (`wrkf workflow`); agents act through runs (`wrkf action`, `wrkf next`), record
 evidence and resolve obligations, and supervisors recover stuck instances.
-`wrkf rpc` serves the frozen JSON-RPC stdio contract in
-[docs/wrkf-rpc.md](docs/wrkf-rpc.md).
+`wrkf rpc` serves the unified JSON-RPC stdio contract in
+[docs/wrkq-wrkf-rpc.md](docs/wrkq-wrkf-rpc.md); the
+[wrkf recovery guide](docs/wrkf-rpc.md) covers clients and recovery.
 
 ## Running the daemon
 
@@ -263,7 +264,7 @@ contracts. See [AGENTS.md](AGENTS.md) for agent-specific working rules.
 - [docs/wrkq-operations.md](docs/wrkq-operations.md): database location,
   backups, daemon deployment
 - [docs/wrkc-reference.md](docs/wrkc-reference.md): rooms and obligations
-- [docs/wrkf-rpc.md](docs/wrkf-rpc.md): wrkf JSON-RPC contract
+- [docs/wrkf-rpc.md](docs/wrkf-rpc.md): wrkf RPC recovery and client guide
 
 ## License
 

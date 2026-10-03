@@ -6,9 +6,9 @@ checks remain the source of truth; do not copy their flags or behavior here.
 ## Fast inner loop
 
 Run `just verify` for normal implementation feedback before commit. Its recipe
-in [Justfile](Justfile) chains the current fast guards: suppression-lint,
+in [Justfile](Justfile) chains the current fast guards: fitkit-s6, suppression-lint,
 layer-boundary, lint, test, rot-sensor, surface-guard, doc-links,
-architecture-records, and verify-rpc.
+architecture-records, sync-downstream-test, install-probe-test, and verify-rpc.
 
 This is the default bar for scoped code and documentation changes, including the
 S1-S4 and S8 guard surfaces.

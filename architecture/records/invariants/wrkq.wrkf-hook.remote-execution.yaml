@@ -29,7 +29,7 @@ enforced_by: >
   remote CLI catalog-override refusal, external-method lock isolation, and the
   server-owned hook ceiling below the HTTP response timeout.
 source:
-  - docs/wrkf-remote-transport-migration-spec.md
+  - docs/wrkq-wrkf-rpc.md # current contract; ratified migration provenance: T-06754 / ATT-00102
   - internal/workflow/service.go
   - internal/workflow/ledger.go
   - internal/workflow/hook_catalog_pinning_test.go
