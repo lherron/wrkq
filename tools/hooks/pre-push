@@ -20,10 +20,24 @@
 # Suppression is a real hole by design: the compensating control is the
 # supervisor's merge gate outside the container, not this hook.
 
+# Measurement only: never replaces a gate or consumes its stdin.
+hook_timing=$(python3 tools/hooks/hook-duration.py --start pre-push </dev/null 2>/dev/null) || hook_timing=''
+hook_result=''
+hook_settled() {
+  hook_rc=$?
+  trap - 0
+  if [ -n "$hook_timing" ]; then
+    python3 tools/hooks/hook-duration.py --finish "$hook_timing" "$hook_rc" "$hook_result" </dev/null >/dev/null 2>&1 || true
+  fi
+  exit "$hook_rc"
+}
+trap hook_settled 0
+
 refs=$(cat)
 if [ "${LEFTHOOK:-}" = "0" ] || [ "${WRKQ_SKIP_VERIFY_HOOK:-}" = "1" ]; then
   echo "pre-push: verify suppressed (LEFTHOOK=0 / WRKQ_SKIP_VERIFY_HOOK=1)" >&2
   command -v wrkp >/dev/null 2>&1 && printf "%s\n" "$refs" | wrkp git push "$@" --payload-extra verifySuppressed=true || true
+  hook_result='skipped'
   exit 0
 fi
 

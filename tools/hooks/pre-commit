@@ -1,0 +1,29 @@
+#!/bin/sh
+
+# Pre-commit hook for wrkq
+# Runs gitleaks and golangci-lint before allowing commit
+
+# Measurement only: never replaces a gate or consumes its stdin.
+hook_timing=$(python3 tools/hooks/hook-duration.py --start pre-commit </dev/null 2>/dev/null) || hook_timing=''
+hook_result=''
+hook_settled() {
+  hook_rc=$?
+  trap - 0
+  if [ -n "$hook_timing" ]; then
+    python3 tools/hooks/hook-duration.py --finish "$hook_timing" "$hook_rc" "$hook_result" </dev/null >/dev/null 2>&1 || true
+  fi
+  exit "$hook_rc"
+}
+trap hook_settled 0
+
+set -e
+
+echo "Running gitleaks to check for secrets..."
+gitleaks protect --staged --redact
+echo "Gitleaks scan passed."
+
+echo "Running golangci-lint..."
+golangci-lint run
+echo "Lint passed."
+
+echo "All pre-commit checks passed."

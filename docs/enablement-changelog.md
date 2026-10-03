@@ -32,3 +32,13 @@ the loop. Keep release notes elsewhere.
   graduates from this pass; the adoption probe is too wrkq/wrkf-specific.
 - **Carrier lesson:** usage probes belong in the slow backstop when they inspect
   real runtime state; the fast gate stays deterministic and repo-local.
+
+## 2026-10-03 — Hook duration measurement (T-10096)
+
+Added advisory whole-hook timing and detached hook.settled publication to the
+existing pre-commit/pre-push paths. Original gates, order, status, stdin and
+suppression semantics remain intact under `wrkq.verify-gate`. The isolated
+34-case shell matrix proves failures, skips and publisher isolation, including
+inherited GIT_* removal; `just verify` remains the landing gate. No new enforced
+rule or service activation. Historical backfill is zero; the resident owns
+measurement assessment and workflow closure. This instrument stays target-local.
