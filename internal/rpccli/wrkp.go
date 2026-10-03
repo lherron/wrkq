@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -294,7 +295,7 @@ func newWrkpLogCmd() *cobra.Command {
 			// descending cursor a plain `wrkp log --porcelain` prints pages
 			// back into history instead.
 			forward := !follow && wrkpCursorAscending(after)
-			jsonEntries := []timelineEntry{}
+			heldEntries := []timelineEntry{}
 			containerSet := ""
 			// previousCursor and followIdleNoticed exist only for the
 			// empty-window notice below: one detects that a tail has caught up,
@@ -361,9 +362,12 @@ func newWrkpLogCmd() *cobra.Command {
 				}
 				containerPath = view.Container.Path
 				// A bounded --json read is ONE array however many pages it
-				// took; it is written when the read stops.
-				if mode == "json" && !follow {
-					jsonEntries = append(jsonEntries, view.Entries...)
+				// took; it is written when the read stops. A bounded human read
+				// is held too: it is fetched newest-first so --limit keeps the
+				// most recent entries, but printed oldest-first, in the order
+				// --follow prints the same window.
+				if !follow && (mode == "json" || (mode == "human" && !forward)) {
+					heldEntries = append(heldEntries, view.Entries...)
 				} else if err := renderWrkpEntries(cmd, view.Entries, mode, styled); err != nil {
 					return err
 				}
@@ -406,7 +410,7 @@ func newWrkpLogCmd() *cobra.Command {
 				}
 				if forward {
 					if cursor == "" {
-						return renderWrkpEntries(cmd, jsonEntries, mode, styled)
+						return renderWrkpEntries(cmd, heldEntries, mode, styled)
 					}
 					// A tail cursor always comes back, so the read is caught up
 					// when a page leaves it where it was; a page of only
@@ -417,7 +421,7 @@ func newWrkpLogCmd() *cobra.Command {
 					if porcelain && cursor != "" {
 						fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", cursor)
 					}
-					return renderWrkpEntries(cmd, jsonEntries, mode, styled)
+					return renderWrkpEntries(cmd, heldEntries, mode, styled)
 				}
 				if !follow {
 					// A raw-scan page may consume only excluded rows. Keep advancing
@@ -433,10 +437,10 @@ func newWrkpLogCmd() *cobra.Command {
 						fmt.Fprintln(cmd.ErrOrStderr(),
 							wrkpEmptyWindowNotice(cmd.Context(), tr, project, containerPath, since, false))
 					}
-					if mode == "json" {
-						return renderWrkpEntries(cmd, jsonEntries, mode, styled)
+					if mode == "human" {
+						slices.Reverse(heldEntries)
 					}
-					return nil
+					return renderWrkpEntries(cmd, heldEntries, mode, styled)
 				}
 				select {
 				case <-cmd.Context().Done():

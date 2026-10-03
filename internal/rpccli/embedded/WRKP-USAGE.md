@@ -77,7 +77,9 @@ observability can never block a commit or push. Diagnostics are one-line
 
 ## Reading forward from a cursor
 
-A plain `wrkp log` reads newest-first, and the `next_cursor` that
+A plain `wrkp log` reads newest-first (`--limit N` keeps the N most recent;
+the human timeline prints that window oldest-first, as `--follow` would, while
+`--json`/`--ndjson` keep newest-first), and the `next_cursor` that
 `--porcelain` writes to stderr pages further back into history. To read what
 changed SINCE a point, start from a forward cursor:
 
