@@ -13,7 +13,7 @@ provenance: authored
 This page explains three cross-cutting wrkq mechanisms that are easy to
 confuse with each other or with adjacent systems: handoffs, the search/index
 subsystem, and the event-log/monitor/watch/diff family. Command syntax lives
-in [the CLI reference](wrkq-cli-reference.md).
+in [the CLI reference](/docs/wrkq/cli-reference).
 
 ## Handoffs
 
