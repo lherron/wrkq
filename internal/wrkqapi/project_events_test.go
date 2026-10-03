@@ -1548,3 +1548,57 @@ func TestAscendingSinceSeekKeepsAnEmptyWindowUsable(t *testing.T) {
 			cur.AfterEventID, maxEvent)
 	}
 }
+
+// Selection must commute with paging and preserve the entire public entry,
+// including affiliation, across both independently fenced sources.
+func TestTimelineTaskSelectionMatchesUnfilteredPages(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	project := createProjectEventContainer(t, s, "selection", "project", nil)
+	task := createTimelineTask(t, s, project.UUID, "target", "open", "")
+	other := createTimelineTask(t, s, project.UUID, "other", "open", "")
+	for _, id := range []string{task.ID, other.ID, task.ID} {
+		state := "in_progress"
+		if _, err := api.TaskUpdate(context.Background(), TaskUpdateParams{Task: id, Patch: TaskPatch{State: &state}}); err != nil {
+			t.Fatal(err)
+		}
+		postProjectEvent(t, api, ProjectEventPostParams{Task: id})
+		if _, err := api.RoomSay(context.Background(), RoomSayParams{Ref: id, ScopeRef: "clod@selection:primary", PrincipalRef: "agent:clod", To: []string{"cody@selection:primary", "astra@selection:primary"}, Body: "selected message"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, order := range []string{"asc", "desc"} {
+		read := func(selector string) []WrkqTimelineEntry {
+			t.Helper()
+			params := ContainerTimelineViewParams{Container: project.UUID, Scope: "subtree", EntriesOnly: true, AllTypes: true, Order: order, Limit: 1, Task: selector}
+			entries := []WrkqTimelineEntry{}
+			for page := 0; ; page++ {
+				if page > 100 {
+					t.Fatal("timeline did not drain")
+				}
+				view, err := api.ContainerTimelineView(context.Background(), params)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, entry := range view.Entries {
+					if entry.TaskUUID == task.UUID {
+						entries = append(entries, entry)
+					}
+				}
+				if view.NextCursor == "" {
+					break
+				}
+				params.Cursor = view.NextCursor
+			}
+			return entries
+		}
+		want, got := read(""), read(task.ID)
+		if len(want) == 0 {
+			t.Fatal("empty comparison")
+		}
+		wantJSON, _ := json.Marshal(want)
+		gotJSON, _ := json.Marshal(got)
+		if string(wantJSON) != string(gotJSON) {
+			t.Fatalf("%s filtered entries differ: got %s want %s", order, gotJSON, wantJSON)
+		}
+	}
+}

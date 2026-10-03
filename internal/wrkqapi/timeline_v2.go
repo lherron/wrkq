@@ -318,13 +318,13 @@ func (a *API) containerTimelineViewV2(
 	var projectRows []timelineRawProjectEvent
 	var eventTruncated, projectTruncated bool
 	if eventEligible {
-		eventRows, eventTruncated, err = loadTimelineRawEvents(ctx, tx, eventLow, eventHigh, desc, eventTypes, since, before)
+		eventRows, eventTruncated, err = loadTimelineRawEvents(ctx, tx, eventLow, eventHigh, desc, eventTypes, since, before, selectedTasks, affiliation, containerUUID)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if projectEligible {
-		projectRows, projectTruncated, err = loadTimelineRawProjectEvents(ctx, tx, projectLow, projectHigh, desc, filters, since, before)
+		projectRows, projectTruncated, err = loadTimelineRawProjectEvents(ctx, tx, projectLow, projectHigh, desc, filters, since, before, selectedTasks, affiliation, containerUUID)
 		if err != nil {
 			return nil, err
 		}
@@ -536,7 +536,7 @@ func hydrateTimelineAddressees(ctx context.Context, tx *sql.Tx, entries []WrkqTi
 	return nil
 }
 
-func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, desc bool, types []string, since, before *time.Time) ([]timelineRawEvent, bool, error) {
+func loadTimelineRawEvents(ctx context.Context, tx timelineQueryer, low, high int64, desc bool, types []string, since, before *time.Time, selectedTasks, affiliation map[string]bool, root string) ([]timelineRawEvent, bool, error) {
 	// The envelope joins are guarded on event_type, so a non-envelope row costs
 	// one NULL probe. The `env` join carries the fan-out collapse in its own ON
 	// clause: a say to N addressees writes N rows sharing one group_id whose
@@ -576,9 +576,71 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 		  LEFT JOIN v_task_paths env_tp ON env_tp.uuid = env_task.uuid
 		 WHERE e.id > ? AND e.id <= ?
 		 ORDER BY e.id %s LIMIT ?`, desc)
-	if len(types) > 0 {
+	if len(selectedTasks) == 0 && len(types) > 0 {
 		query = strings.Replace(query, "FROM event_log e", "FROM event_log e INDEXED BY event_log_type_time_idx", 1)
 	}
+
+	// Resource identities let SQLite seek event_log_resource_idx for each task,
+	// comment and envelope rather than hydrate every global event since the floor.
+	// Comments remain addressable through their immutable payload after deletion.
+	if len(selectedTasks) > 0 {
+		tasks, taskArgs := timelineSelectionList(selectedTasks)
+		predicate += ` AND e.id IN (
+   SELECT id FROM event_log INDEXED BY event_log_resource_idx
+    WHERE resource_type = 'task' AND resource_uuid IN (` + tasks + `)
+   UNION ALL
+   SELECT ev.id FROM comments c CROSS JOIN event_log ev INDEXED BY event_log_resource_idx
+    ON ev.resource_type = 'comment' AND ev.resource_uuid = c.uuid
+    WHERE c.task_uuid IN (` + tasks + `)
+   UNION ALL
+   SELECT ev.id FROM envelopes en CROSS JOIN event_log ev INDEXED BY event_log_resource_idx
+    ON ev.resource_type = 'envelope' AND ev.resource_uuid = en.uuid
+    WHERE en.task_uuid IN (` + tasks + `)
+   UNION ALL
+   SELECT ev.id FROM rooms r CROSS JOIN envelopes en ON en.room_uuid = r.uuid
+    CROSS JOIN event_log ev INDEXED BY event_log_resource_idx
+    ON ev.resource_type = 'envelope' AND ev.resource_uuid = en.uuid
+    WHERE r.task_uuid IN (` + tasks + `)
+   UNION ALL
+   SELECT ev.id FROM event_log ev INDEXED BY event_log_type_time_idx
+    WHERE ev.event_type = 'comment.created'
+     AND json_extract(ev.payload, '$.task_id') IN (` + tasks + `)
+     AND NOT EXISTS (SELECT 1 FROM comments c WHERE c.uuid = ev.resource_uuid)
+  )`
+		for i := 0; i < 5; i++ {
+			extra = append(extra, taskArgs...)
+		}
+	}
+	// Unsupported raw events retain their capped cursor advancement.
+	// Moves affiliate to both immutable endpoints. Envelope affiliation comes
+	// from the owned room or stamped project endpoints, including all siblings.
+	affiliated, affiliationArgs := timelineSelectionList(affiliation)
+	predicate += ` AND (
+  e.event_type NOT IN ('comment.created', 'envelope.created', 'task.outcome_set',
+   'task.archived', 'task.deleted', 'task.restored', 'task.purged',
+   'container.campaign_state_changed', 'task.created', 'task.updated',
+   'task.moved', 'task.claimed', 'task.claim_released')
+  OR json_extract(e.payload, '$.campaign_uuid') = ?
+  OR json_extract(e.payload, '$.container_uuid') IN (` + affiliated + `)
+  OR (e.event_type = 'task.moved' AND (
+   json_extract(e.payload, '$.oldContainerUuid') IN (` + affiliated + `)
+   OR json_extract(e.payload, '$.newContainerUuid') IN (` + affiliated + `)))
+  OR (e.event_type = 'envelope.created' AND (
+   COALESCE(rm.container_uuid, room_task.project_uuid) IN (` + affiliated + `)
+   OR room_task.campaign_uuid = ?
+   OR (rm.kind IN ('adhoc', 'project') AND (
+    env.from_project_uuid = ? OR EXISTS (
+     SELECT 1 FROM envelopes sibling
+      WHERE (sibling.group_id = COALESCE(env.group_id, env.id)
+       OR (sibling.group_id IS NULL AND sibling.id = COALESCE(env.group_id, env.id)))
+       AND sibling.to_project_uuid = ?)))))
+ )`
+	extra = append(extra, root)
+	for i := 0; i < 4; i++ {
+		extra = append(extra, affiliationArgs...)
+	}
+	extra = append(extra, root, root, root)
+
 	query = strings.Replace(query, " ORDER BY e.id", predicate+" ORDER BY e.id", 1)
 	args := append([]any{low, high}, extra...)
 	args = append(args, monitorMaxPageLimit)
@@ -611,12 +673,23 @@ func loadTimelineRawEvents(ctx context.Context, tx *sql.Tx, low, high int64, des
 	return result, len(result) == monitorMaxPageLimit, nil
 }
 
-func loadTimelineRawProjectEvents(ctx context.Context, tx *sql.Tx, low, high int64, desc bool, filters []string, since, before *time.Time) ([]timelineRawProjectEvent, bool, error) {
+func loadTimelineRawProjectEvents(ctx context.Context, tx timelineQueryer, low, high int64, desc bool, filters []string, since, before *time.Time, selectedTasks, affiliation map[string]bool, root string) ([]timelineRawProjectEvent, bool, error) {
 	predicate, extra := timelineProjectPredicate(filters, since, before)
 	query := timelineOrdered(timelineProjectEventsRawQuery, desc)
-	if len(filters) > 0 {
+	if len(selectedTasks) == 0 && len(filters) > 0 {
 		query = strings.Replace(query, "FROM project_events pe", "FROM project_events pe INDEXED BY project_events_type_time_idx", 1)
 	}
+
+	if len(selectedTasks) > 0 {
+		tasks, args := timelineSelectionList(selectedTasks)
+		predicate += " AND pe.task_uuid IN (" + tasks + ")"
+		extra = append(extra, args...)
+		query = strings.Replace(query, "FROM project_events pe", "FROM project_events pe INDEXED BY project_events_task_idx", 1)
+	}
+	affiliated, affiliationArgs := timelineSelectionList(affiliation)
+	predicate += " AND (pe.container_uuid IN (" + affiliated + ") OR pe.campaign_uuid = ?)"
+	extra = append(extra, affiliationArgs...)
+	extra = append(extra, root)
 	query = strings.Replace(query, " ORDER BY pe.id", predicate+" ORDER BY pe.id", 1)
 	args := append([]any{low, high}, extra...)
 	args = append(args, monitorMaxPageLimit)
@@ -1258,4 +1331,18 @@ func (a *API) resolveUnadornedProject(ctx context.Context, raw, field string) (s
 		return "", NewValidationError("project must resolve to an unadorned project", map[string]any{"field": field, "reason": "subtree_requires_unadorned_project"})
 	}
 	return uuid, nil
+}
+
+// Stable bind ordering keeps selection sets independent of map iteration.
+func timelineSelectionList(values map[string]bool) (string, []any) {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	args := make([]any, 0, len(keys))
+	for _, key := range keys {
+		args = append(args, key)
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", len(keys)), ","), args
 }
