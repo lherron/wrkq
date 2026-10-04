@@ -4,7 +4,7 @@ status: active
 owner_project: wrkq
 scope: monitor + watch live-tailing crossing the wrkq/wrkf RPC boundary
 predicate: >
-  The `wrkq monitor watch|wait`, `wrkq watch` (+ `monitor watch --raw`), and
+  The `wrkq monitor watch|wait` (+ `monitor watch --raw`, which replaced the retired `wrkq watch`), and
   `wrkf watch` live-tailing
   surfaces cross the client↔server RPC boundary as BOUNDED POLLING read models — there
   is NO server push / subscribe / long-lived stream in RPC v1 (daedalus ruling #10211).
@@ -21,12 +21,12 @@ predicate: >
   control flow: the blocking poll loop + interval, the monotonic high-water cursor carried
   across polls, the timeout/stall clocks, the per-event NDJSON lines, EXACTLY ONE terminal
   NDJSON record before exit, the exit codes (0=met, 1=timeout/stall, 2=selector/usage,
-  3=stream), the deprecation warning (watch), and human/NDJSON rendering. eventsView and
+  3=stream), and human/NDJSON rendering. eventsView and
   stateView are TWO independent snapshots, so the terminal decision is intentionally
   RACE-TOLERANT (a met condition may be observed before the matching event is paged in);
   tests assert race-tolerantly. The JSON-RPC server stdout stays JSON-RPC-pure — the
   per-event / terminal NDJSON is emitted ONLY by production wrkq after RPC-frame decode. The
-  raw tail (watch / monitor --raw) uses WrkqWatchEvent (legacy watchEvent shape:
+  raw tail (monitor --raw) uses WrkqWatchEvent (legacy watchEvent shape:
   INCLUDES resource_id, STRING timestamp, nullable resource_uuid, and no actor
   fields), DISTINCT from WrkqLogEvent.
 

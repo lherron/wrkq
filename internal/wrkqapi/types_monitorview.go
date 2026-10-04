@@ -63,7 +63,7 @@ type WrkqWatchEvent struct {
 }
 
 // WrkqHistoryTailView is the bounded ASCENDING raw event_log read model for
-// `wrkq watch` / `wrkq monitor watch --raw`. It is a SIBLING of HistoryListView in
+// `wrkq monitor watch --raw` (formerly also the retired `wrkq watch`). It is a SIBLING of HistoryListView in
 // the `history` namespace (generic audit-log tailing) but uses the legacy
 // watchEvent row shape (NOT WrkqLogEvent). The server advances over
 // `e.id > since_cursor` (ASC) up to `limit`, hydrates actor slug/id + resource_id,

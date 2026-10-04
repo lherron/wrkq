@@ -507,8 +507,8 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > registering it changes the method catalog and `protocolSchemaHash`).
 
 > **`wrkq.monitor.eventsView` / `wrkq.monitor.stateView` / `wrkq.history.tailView`**
-> back the live-tailing surfaces `wrkq monitor watch|wait` and `wrkq watch`
-> (+ `monitor watch --raw`). Daedalus ruled (#10211) monitor + watch IN SCOPE as
+> back the live-tailing surfaces `wrkq monitor watch|wait` (+ `monitor watch
+> --raw`, which replaced the retired `wrkq watch`). Daedalus ruled (#10211) monitor + watch IN SCOPE as
 > **BOUNDED POLLING over RPC — NO server push/subscribe/stream in v1**
 > (`wrkq.wrkf-rpc.bounded-polling-streaming` arch record, shared by both). The
 > SERVER owns only stateless bounded read models; the CLIENT (production wrkq) owns the
