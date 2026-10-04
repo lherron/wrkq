@@ -75,7 +75,6 @@ type ContainerEntry struct {
 	Description           string  `json:"description,omitempty"`
 	ParentUUID            string  `json:"parent_uuid,omitempty"`
 	SortIndex             int64   `json:"sort_index,omitempty"`
-	SectionUUID           *string `json:"section_uuid,omitempty"`
 	WebhookURLs           *string `json:"webhook_urls,omitempty"`
 	Root                  *string `json:"root,omitempty"`
 	Specification         *string `json:"specification,omitempty"`

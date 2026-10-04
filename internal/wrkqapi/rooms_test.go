@@ -650,32 +650,6 @@ func TestPairRoomSayNotices(t *testing.T) {
 	}
 }
 
-// TestRoomLifecycleVerbsRefuseWithANamedError proves the burn-in shim: an old
-// client calling close or reopen gets `room_lifecycle_removed` by name rather
-// than a bare method-not-found, and nothing is mutated.
-func TestRoomLifecycleVerbsRefuseWithANamedError(t *testing.T) {
-	f := newRoomFixture(t)
-	ctx := context.Background()
-	f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "hello", PrincipalRef: "agent:clod"})
-
-	for verb, call := range map[string]func() (*WrkqRoom, error){
-		"close":  func() (*WrkqRoom, error) { return f.api.RoomClose(ctx, RoomLifecycleParams{Room: f.loneTaskID}) },
-		"reopen": func() (*WrkqRoom, error) { return f.api.RoomReopen(ctx, RoomLifecycleParams{Room: f.loneTaskID}) },
-	} {
-		_, err := call()
-		de := assertDomainCode(t, CodeValidation, err)
-		if !strings.Contains(de.Error(), "room_lifecycle_removed") {
-			t.Fatalf("%s refusal does not name the removal: %q", verb, de.Error())
-		}
-		if fmt.Sprint(de.Data()) == "" || !strings.Contains(fmt.Sprint(de.Data()), "room_lifecycle_removed") {
-			t.Fatalf("%s refusal data does not carry the reason: %v", verb, de.Data())
-		}
-	}
-
-	// The say path is untouched by the refusal.
-	f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "still fine", PrincipalRef: "agent:clod"})
-}
-
 // TestHideAffectsTheDefaultListingAndNothingElse pins the label's whole reach:
 // it changes what `RoomList` shows by default and never touches say, delivery,
 // or obligations.

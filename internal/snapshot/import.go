@@ -481,11 +481,11 @@ func importContainers(tx *sql.Tx, snap *Snapshot) error {
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO containers (uuid, id, slug, title, kind, description, parent_uuid, sort_index,
-		                        section_uuid, webhook_urls, root, specification, labels, campaign_state,
+		                        webhook_urls, root, specification, labels, campaign_state,
 		                        etag, created_at, updated_at, archived_at,
 		                        created_by_principal_ref, created_by_scope_ref,
 		                        updated_by_principal_ref, updated_by_scope_ref)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -496,7 +496,7 @@ func importContainers(tx *sql.Tx, snap *Snapshot) error {
 		c := snap.Containers[uuid]
 		if _, err := stmt.Exec(uuid, c.ID, c.Slug, c.Title, c.Kind, c.Description,
 			nullableSnapshotString(c.ParentUUID), c.SortIndex,
-			nullableSnapshotPointer(c.SectionUUID), nullableSnapshotPointer(c.WebhookURLs),
+			nullableSnapshotPointer(c.WebhookURLs),
 			nullableSnapshotPointer(c.Root), nullableSnapshotPointer(c.Specification),
 			nullableSnapshotPointer(c.Labels), nullableSnapshotPointer(c.CampaignState),
 			c.ETag, c.CreatedAt, c.UpdatedAt, nullableSnapshotString(c.ArchivedAt),
@@ -528,13 +528,13 @@ func restoreRootContainer(tx *sql.Tx, root ContainerEntry) error {
 	}
 	if _, err := tx.Exec(`
 		UPDATE containers
-		   SET id = ?, title = ?, description = ?, sort_index = ?, section_uuid = ?,
+		   SET id = ?, title = ?, description = ?, sort_index = ?,
 		       webhook_urls = ?, root = ?, specification = ?, labels = ?, campaign_state = ?,
 		       etag = ?, created_at = ?, updated_at = ?,
 		       created_by_principal_ref = ?, created_by_scope_ref = ?,
 		       updated_by_principal_ref = ?, updated_by_scope_ref = ?
 		 WHERE uuid = ?`,
-		root.ID, root.Title, root.Description, root.SortIndex, nullableSnapshotPointer(root.SectionUUID),
+		root.ID, root.Title, root.Description, root.SortIndex,
 		nullableSnapshotPointer(root.WebhookURLs), nullableSnapshotPointer(root.Root),
 		nullableSnapshotPointer(root.Specification), nullableSnapshotPointer(root.Labels),
 		nullableSnapshotPointer(root.CampaignState),

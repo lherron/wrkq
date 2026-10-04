@@ -1993,12 +1993,12 @@ func insertWorkflowMutationEventWithID(tx *sql.Tx, eventType, id, instanceID, ac
 func (s *Service) ShowCheckRun(id string) (*CheckRun, error) {
 	var c CheckRun
 	var exit sql.NullInt64
-	var hook, outcome, code, summary, facts, actor, role, runID, completed sql.NullString
+	var hook, outcome, code, summary, facts, actor, role, completed sql.NullString
 	err := s.db.QueryRow(`
 		SELECT id, instance_id, transition_id, check_id, COALESCE(hook_id,''), input_hash, exit_code, verdict,
-		       outcome, code, summary, facts_json, COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), started_at, completed_at
+		       outcome, code, summary, facts_json, COALESCE(principal_ref, actor, ''), COALESCE(role,''), started_at, completed_at
 		FROM workflow_check_runs WHERE id = ?
-	`, id).Scan(&c.ID, &c.InstanceID, &c.TransitionID, &c.CheckID, &hook, &c.InputHash, &exit, &c.Verdict, &outcome, &code, &summary, &facts, &actor, &role, &runID, &c.StartedAt, &completed)
+	`, id).Scan(&c.ID, &c.InstanceID, &c.TransitionID, &c.CheckID, &hook, &c.InputHash, &exit, &c.Verdict, &outcome, &code, &summary, &facts, &actor, &role, &c.StartedAt, &completed)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("check run not found: %s", id)
@@ -2014,7 +2014,7 @@ func (s *Service) ShowCheckRun(id string) (*CheckRun, error) {
 	if facts.Valid {
 		c.Facts = json.RawMessage(facts.String)
 	}
-	c.PrincipalRef, c.Role, c.RunID, c.CompletedAt = actor.String, role.String, runID.String, completed.String
+	c.PrincipalRef, c.Role, c.CompletedAt = actor.String, role.String, completed.String
 	return &c, nil
 }
 
@@ -2025,7 +2025,7 @@ func (s *Service) ListCheckRuns(taskSelector, transitionID string) ([]CheckRun, 
 	}
 	query := `
 		SELECT id, instance_id, transition_id, check_id, COALESCE(hook_id,''), input_hash, exit_code, verdict,
-		       outcome, code, summary, facts_json, COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), started_at, completed_at
+		       outcome, code, summary, facts_json, COALESCE(principal_ref, actor, ''), COALESCE(role,''), started_at, completed_at
 		FROM workflow_check_runs WHERE instance_id = ?`
 	args := []interface{}{inst.ID}
 	if transitionID != "" {
@@ -2042,8 +2042,8 @@ func (s *Service) ListCheckRuns(taskSelector, transitionID string) ([]CheckRun, 
 	for rows.Next() {
 		var c CheckRun
 		var exit sql.NullInt64
-		var hook, outcome, code, summary, facts, actor, role, runID, completed sql.NullString
-		if err := rows.Scan(&c.ID, &c.InstanceID, &c.TransitionID, &c.CheckID, &hook, &c.InputHash, &exit, &c.Verdict, &outcome, &code, &summary, &facts, &actor, &role, &runID, &c.StartedAt, &completed); err != nil {
+		var hook, outcome, code, summary, facts, actor, role, completed sql.NullString
+		if err := rows.Scan(&c.ID, &c.InstanceID, &c.TransitionID, &c.CheckID, &hook, &c.InputHash, &exit, &c.Verdict, &outcome, &code, &summary, &facts, &actor, &role, &c.StartedAt, &completed); err != nil {
 			return nil, err
 		}
 		c.HookID = hook.String
@@ -2055,7 +2055,7 @@ func (s *Service) ListCheckRuns(taskSelector, transitionID string) ([]CheckRun, 
 		if facts.Valid {
 			c.Facts = json.RawMessage(facts.String)
 		}
-		c.PrincipalRef, c.Role, c.RunID, c.CompletedAt = actor.String, role.String, runID.String, completed.String
+		c.PrincipalRef, c.Role, c.CompletedAt = actor.String, role.String, completed.String
 		out = append(out, c)
 	}
 	return out, rows.Err()

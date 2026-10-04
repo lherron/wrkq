@@ -53,7 +53,6 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkqRoomShowParams":              dtoType[wrkqapi.RoomShowParams](),
 	"WrkqRoomListParams":              dtoType[wrkqapi.RoomListParams](),
 	"WrkqRoomLogViewParams":           dtoType[wrkqapi.RoomLogViewParams](),
-	"WrkqRoomLifecycleParams":         dtoType[wrkqapi.RoomLifecycleParams](),
 	"WrkqRoomLabelParams":             dtoType[wrkqapi.RoomLabelParams](),
 	"WrkqRoomMemberParams":            dtoType[wrkqapi.RoomMemberParams](),
 	"WrkqRoomMembersViewParams":       dtoType[wrkqapi.RoomMembersViewParams](),

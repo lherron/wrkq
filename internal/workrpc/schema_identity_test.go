@@ -81,7 +81,8 @@ import (
 // T-09978 adds requesterPrincipalRef/requesterScopeRef to task create, patch,
 // task, cat and find DTOs, and the timeline entry's claim and requester details.
 // T-10087 adds allTypes to timeline reads to include quiet turn.* facts.
-const pinnedProtocolSchemaHash = "sha256:5b816d328ccccacad982de5d27fd65325321264062d79aa250f967910b0e3540"
+// T-10158 removes retired room verbs, section data and inert workflow fields.
+const pinnedProtocolSchemaHash = "sha256:1dc50502964c1221e097978d05d52bb23d299c6dbd0eeeea30f32326d1a4c1ec"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -100,9 +101,9 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"methods", len(MethodCatalog()), 184},
+		{"methods", len(MethodCatalog()), 182},
 		{"errorCodes", len(ErrorCodeCatalog()), 27},
-		{"dtos", len(dtoCatalog), 158},
+		{"dtos", len(dtoCatalog), 157},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

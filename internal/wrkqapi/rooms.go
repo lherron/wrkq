@@ -1196,32 +1196,6 @@ func (a *API) EnvelopeMemberPage(ctx context.Context, p EnvelopeMemberPageParams
 	return result, nil
 }
 
-// RoomClose and RoomReopen are REMOVED. Rooms have no lifecycle that can gate
-// traffic (T-07612 rev 3), so there is nothing left for either verb to do. They
-// stay registered for one burn-in window returning a typed, named refusal —
-// old clients get `room_lifecycle_removed` rather than a bare method-not-found
-// — and wave 5 deletes them.
-func (a *API) RoomClose(ctx context.Context, p RoomLifecycleParams) (*WrkqRoom, error) {
-	return nil, roomLifecycleRemoved(ctx, "close", p.Room)
-}
-
-func (a *API) RoomReopen(ctx context.Context, p RoomLifecycleParams) (*WrkqRoom, error) {
-	return nil, roomLifecycleRemoved(ctx, "reopen", p.Room)
-}
-
-func roomLifecycleRemoved(ctx context.Context, verb, room string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return NewValidationError(
-		"room_lifecycle_removed: rooms have no lifecycle, so there is nothing to "+verb+
-			"; a say into any room you can resolve always writes",
-		map[string]any{
-			"reason": "room_lifecycle_removed", "verb": verb, "room": room,
-			"replacement": "wrkc hide|unhide changes the default listing only",
-		})
-}
-
 // RoomHide removes a room from the DEFAULT listing. RoomUnhide is its inverse.
 // The label is not an ACL and not a gate: any principal may set it, the room
 // still accepts says, and its obligations gate and wake unchanged.

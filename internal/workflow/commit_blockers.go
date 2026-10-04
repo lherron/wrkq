@@ -265,14 +265,14 @@ func evidenceStaleForTask(e Evidence, currentTaskHash string) bool {
 func latestCheckFor(database *db.DB, instanceID, transitionID, checkID string) (CheckRun, bool) {
 	var c CheckRun
 	var exit sql.NullInt64
-	var hook, outcome, code, summary, facts, actor, role, runID, completed sql.NullString
+	var hook, outcome, code, summary, facts, actor, role, completed sql.NullString
 	err := database.QueryRow(`
 		SELECT id, instance_id, transition_id, check_id, COALESCE(hook_id,''), input_hash, exit_code, verdict,
-		       outcome, code, summary, facts_json, COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), started_at, completed_at
+		       outcome, code, summary, facts_json, COALESCE(principal_ref, actor, ''), COALESCE(role,''), started_at, completed_at
 		FROM workflow_check_runs
 		WHERE instance_id = ? AND transition_id = ? AND check_id = ?
 		ORDER BY started_at DESC, id DESC LIMIT 1
-	`, instanceID, transitionID, checkID).Scan(&c.ID, &c.InstanceID, &c.TransitionID, &c.CheckID, &hook, &c.InputHash, &exit, &c.Verdict, &outcome, &code, &summary, &facts, &actor, &role, &runID, &c.StartedAt, &completed)
+	`, instanceID, transitionID, checkID).Scan(&c.ID, &c.InstanceID, &c.TransitionID, &c.CheckID, &hook, &c.InputHash, &exit, &c.Verdict, &outcome, &code, &summary, &facts, &actor, &role, &c.StartedAt, &completed)
 	if err != nil {
 		return c, false
 	}
@@ -289,7 +289,6 @@ func latestCheckFor(database *db.DB, instanceID, transitionID, checkID string) (
 	}
 	c.PrincipalRef = actor.String
 	c.Role = role.String
-	c.RunID = runID.String
 	c.CompletedAt = completed.String
 	return c, true
 }

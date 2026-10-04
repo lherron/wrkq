@@ -106,7 +106,6 @@ type Container struct {
 	Title                 *string       `json:"title,omitempty" db:"title"`
 	ParentUUID            *string       `json:"parent_uuid,omitempty" db:"parent_uuid"`
 	Kind                  ContainerKind `json:"kind" db:"kind"`
-	SectionUUID           *string       `json:"section_uuid,omitempty" db:"section_uuid"`
 	SortIndex             int           `json:"sort_index" db:"sort_index"`
 	WebhookURLs           *string       `json:"webhook_urls,omitempty" db:"webhook_urls"`
 	Root                  *string       `json:"root" db:"root"`

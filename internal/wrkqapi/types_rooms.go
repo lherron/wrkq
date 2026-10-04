@@ -322,15 +322,6 @@ type EnvelopeMemberPageParams struct {
 	ScopeRef                  string `json:"scopeRef,omitempty"`
 }
 
-// RoomLifecycleParams is retained ONLY by the close/reopen burn-in shims, which
-// accept it and refuse with room_lifecycle_removed. Wave 5 deletes both.
-type RoomLifecycleParams struct {
-	Room         string `json:"room"`
-	IfMatch      int64  `json:"ifMatch,omitempty"`
-	PrincipalRef string `json:"principalRef,omitempty"`
-	ScopeRef     string `json:"scopeRef,omitempty"`
-}
-
 // RoomLabelParams sets or clears the `hidden` discovery label. Any principal
 // may call it: what a listing shows is not an ownership boundary.
 type RoomLabelParams struct {

@@ -848,8 +848,6 @@ export interface WrkfActionClaimPrefer {
 
 export interface WrkfRunnerCapability {
   handlerContract?: string;
-  handlerId?: string;
-  handlerVersion?: string;
   actions?: string[];
   roles?: string[];
   sideEffectClasses?: string[];
@@ -882,8 +880,6 @@ export interface WrkfWorkflowRunAttempt {
   agentRef?: string;
   scopeRef?: string;
   handlerContract?: string;
-  handlerId?: string;
-  handlerVersion?: string;
   externalRunRef?: string;
   workspaceRef?: string;
   source?: WrkfActionSourceBinding;

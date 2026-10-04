@@ -517,7 +517,7 @@ func latestRunForSemanticKey(tx *sql.Tx, instanceID, semanticKey string) (*claim
 	row := tx.QueryRow(`
 		SELECT id, instance_id, COALESCE(semantic_action_key,''), COALESCE(action,''), role, COALESCE(attempt,1),
 		       status, COALESCE(agent_ref, principal_ref, actor, ''), COALESCE(scope_ref,''), COALESCE(handler_contract,''),
-		       COALESCE(handler_id,''), COALESCE(handler_version,''), COALESCE(external_run_ref,''), COALESCE(workspace_ref,''),
+		       COALESCE(external_run_ref,''), COALESCE(workspace_ref,''),
 		       COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_identity,''),
 		       started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
 		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(owner_generation,0),
@@ -541,7 +541,7 @@ func claimedRunByIDTx(tx *sql.Tx, id string) (*claimedRun, error) {
 	row := tx.QueryRow(`
 		SELECT id, instance_id, COALESCE(semantic_action_key,''), COALESCE(action,''), role, COALESCE(attempt,1),
 		       status, COALESCE(agent_ref, principal_ref, actor, ''), COALESCE(scope_ref,''), COALESCE(handler_contract,''),
-		       COALESCE(handler_id,''), COALESCE(handler_version,''), COALESCE(external_run_ref,''), COALESCE(workspace_ref,''),
+		       COALESCE(external_run_ref,''), COALESCE(workspace_ref,''),
 		       COALESCE(source_run_id,''), COALESCE(source_evidence_id,''), COALESCE(source_identity,''),
 		       started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
 		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,''), COALESCE(owner_generation,0),
@@ -563,7 +563,7 @@ func scanClaimedRun(scanner runRowScanner) (*claimedRun, error) {
 	var r claimedRun
 	err := scanner.Scan(
 		&r.ID, &r.InstanceID, &r.SemanticActionKey, &r.Action, &r.Role, &r.Attempt,
-		&r.Status, &r.AgentRef, &r.ScopeRef, &r.HandlerContract, &r.HandlerID, &r.HandlerVersion,
+		&r.Status, &r.AgentRef, &r.ScopeRef, &r.HandlerContract,
 		&r.ExternalRunRef, &r.WorkspaceRef, &r.SourceRunID, &r.SourceEvidenceID, &r.SourceIdentity,
 		&r.StartedAt, &r.CompletedAt, &r.TerminalSummary, &r.LeaseOwner, &r.LeaseToken,
 		&r.LeaseExpiresAt, &r.HeartbeatAt, &r.OwnerGeneration, &r.SupersededByRunID, &r.SideEffectClassesJSON, &r.PredecessorRunID,
@@ -673,8 +673,6 @@ func workflowRunAttemptFromClaimed(run *claimedRun) WorkflowRunAttempt {
 		AgentRef:          run.AgentRef,
 		ScopeRef:          run.ScopeRef,
 		HandlerContract:   run.HandlerContract,
-		HandlerID:         run.HandlerID,
-		HandlerVersion:    run.HandlerVersion,
 		ExternalRunRef:    run.ExternalRunRef,
 		WorkspaceRef:      run.WorkspaceRef,
 		Source:            claimedRunSource(run),

@@ -122,8 +122,6 @@ type ActionClaimPrefer struct {
 
 type RunnerCapability struct {
 	HandlerContract   string   `json:"handlerContract,omitempty"`
-	HandlerID         string   `json:"handlerId,omitempty"`
-	HandlerVersion    string   `json:"handlerVersion,omitempty"`
 	Actions           []string `json:"actions,omitempty"`
 	Roles             []string `json:"roles,omitempty"`
 	SideEffectClasses []string `json:"sideEffectClasses,omitempty"`
@@ -195,8 +193,6 @@ type WorkflowRunAttempt struct {
 	AgentRef          string               `json:"agentRef,omitempty"`
 	ScopeRef          string               `json:"scopeRef,omitempty"`
 	HandlerContract   string               `json:"handlerContract,omitempty"`
-	HandlerID         string               `json:"handlerId,omitempty"`
-	HandlerVersion    string               `json:"handlerVersion,omitempty"`
 	ExternalRunRef    string               `json:"externalRunRef,omitempty"`
 	WorkspaceRef      string               `json:"workspaceRef,omitempty"`
 	Source            *ActionSourceBinding `json:"source,omitempty"`
@@ -249,8 +245,6 @@ type claimedRun struct {
 	AgentRef              string
 	ScopeRef              string
 	HandlerContract       string
-	HandlerID             string
-	HandlerVersion        string
 	ExternalRunRef        string
 	WorkspaceRef          string
 	SourceRunID           string

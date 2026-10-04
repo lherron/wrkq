@@ -399,7 +399,6 @@ type Event struct {
 	TaskDocHash      string          `json:"taskDocHash,omitempty"`
 	IdempotencyKey   string          `json:"idempotencyKey,omitempty"`
 	Result           string          `json:"result,omitempty"`
-	RejectionCode    string          `json:"rejectionCode,omitempty"`
 	Payload          json.RawMessage `json:"payload,omitempty"`
 	CreatedAt        string          `json:"createdAt"`
 }
@@ -589,7 +588,6 @@ type CheckRun struct {
 	Facts        json.RawMessage `json:"facts,omitempty"`
 	PrincipalRef string          `json:"principal_ref,omitempty"`
 	Role         string          `json:"role,omitempty"`
-	RunID        string          `json:"runId,omitempty"`
 	StartedAt    string          `json:"startedAt"`
 	CompletedAt  string          `json:"completedAt,omitempty"`
 }
