@@ -287,32 +287,36 @@ install *flags:
         # not a clean restart leaves the daemon armed, so it sets install_armed and
         # the recipe exits non-zero once the rest of the install has run.
         armed_msg="    The daemon stays ARMED: its next respawn will be SIGKILLed until it is restarted on the new image."
+        # Never migrate under a serving daemon: 000069 corrupted the canonical store that way (T-10158).
+        offline_mig="launchctl bootout gui/$(id -u)/$label  (wait until launchctl print fails)  &&  wrkqadm --db DB migrate  &&  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/$label.plist  &&  wrkq server health"
         if ! job_db="$(printf '%s\n' "$job_print" | bash scripts/resolve-job-db.sh 2>&1)"; then
           echo "    ✗ NOT restarting: could not resolve the job's database ($job_db)."
           echo "$armed_msg"
           echo "    Resolve the DB by hand from:  launchctl print gui/$(id -u)/$label"
-          echo "    then:  wrkqadm --db <path> migrate --dry-run  (migrate if pending)  &&  wrkq server restart"
+          echo "    then:  wrkqadm --db <path> migrate --dry-run; if pending, never migrate under the serving daemon:"
+          echo "      ${offline_mig//DB/<path>}"
           echo ""
           install_armed="unresolved job database"
         elif [ ! -f "$job_db" ]; then
           echo "    ✗ NOT restarting: the job's database $job_db does not exist."
           echo "$armed_msg"
           echo "    Check the job with:  launchctl print gui/$(id -u)/$label"
-          echo "    then:  wrkqadm --db <path> migrate  &&  wrkq server restart"
+          echo "    then, with the daemon stopped:  ${offline_mig//DB/<path>}"
           echo ""
           install_armed="job database $job_db missing"
         elif ! dry_run="$(~/.local/bin/wrkqadm --db "$job_db" migrate --dry-run 2>&1)"; then
           echo "    ✗ NOT restarting: the pending-migration probe failed on $job_db:"
           printf '%s\n' "$dry_run" | sed 's/^/      /'
           echo "$armed_msg"
-          echo "    Fix that, then:  wrkqadm --db $job_db migrate  &&  wrkq server restart"
+          echo "    Fix that, then (daemon stopped):  ${offline_mig//DB/$job_db}"
           echo ""
           install_armed="migration probe failed on $job_db"
         elif pending="$(printf '%s\n' "$dry_run" | awk '/^Total: [1-9]/{print}')" && [ -n "$pending" ]; then
           echo "    ✗ NOT restarting: the new wrkqd carries a migration $job_db has not applied ($pending)."
           echo "    An unmigrated daemon exits 1 on start and launchd respawns into the same failure."
           echo "$armed_msg"
-          echo "    Back up $job_db, then:  wrkqadm --db $job_db migrate  &&  wrkq server restart"
+          echo "    Back up $job_db, then migrate OFFLINE (never under the serving daemon):"
+          echo "      ${offline_mig//DB/$job_db}"
           echo ""
           install_armed="pending migrations on $job_db"
         elif ! printf '%s\n' "$dry_run" | grep -q '^No pending migrations'; then
