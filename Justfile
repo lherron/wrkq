@@ -525,15 +525,10 @@ architecture-records *args:
 hooks-install:
   #!/usr/bin/env bash
   set -euo pipefail
-  # Git does not track .git/hooks, so a fresh clone has no pre-push hook and
-  # fitkit-s6 fails with hook.pre-push.missing — on laptops and CI exactly as in
-  # the devbox container. This bootstrap makes the gate satisfiable from a virgin
-  # clone (T-06894, ruling T-06894/C-12337).
-  #
-  # NON-CLOBBERING ON PURPOSE. An existing hook is left untouched, so a hook that
-  # someone edited to skip verify is still caught by fitkit-s6 rather than being
-  # silently repaired. Bootstrapping absence is not the same as overwriting
-  # divergence, and only the first is safe to automate.
+  # Git does not track .git/hooks, so a fresh clone has no hooks until this runs.
+  # NON-CLOBBERING ON PURPOSE: an existing hook is left untouched. Bootstrapping
+  # absence is not the same as overwriting divergence, and only the first is
+  # safe to automate.
   hook_dir="$(git rev-parse --git-path hooks)"
   mkdir -p "$hook_dir"
   for name in pre-push post-commit; do
@@ -546,10 +541,6 @@ hooks-install:
     chmod +x "$hook"
     echo "hooks-install: installed .git/hooks/$name from tools/hooks/$name"
   done
-
-# Run local fitkit S6 guard: pre-push hook must delegate to just verify.
-fitkit-s6: hooks-install
-  node tools/fitkit/s6-hook-runs-verify.mjs --root .
 
 # Emit machine-readable per-predicate verify evidence: json, ndjson, recipe, predicate_id, exit_code, diagnostic.
 verify-evidence-summary format="":
@@ -567,7 +558,7 @@ test-verbose:
   go test -v -tags "{{go_tags}}" ./...
 
 # Verify code quality (suppression meta-lint + layer boundary + lint + test + rot sensor + surface guard + doc links + architecture records + downstream sync + install probe + @wrkq/client unit+integration RPC)
-verify summary="": fitkit-s6 suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records sync-downstream-test install-probe-test verify-rpc
+verify summary="": suppression-lint layer-boundary lint test rot-sensor surface-guard doc-links architecture-records sync-downstream-test install-probe-test verify-rpc
   @just verify-evidence-summary "{{summary}}"
   @echo "✓ All checks passed"
 

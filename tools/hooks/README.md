@@ -1,9 +1,10 @@
 # Hook duration measurement
 
 `pre-commit` mirrors the existing local gitleaks → golangci-lint gate.
-`pre-push` retains its bare `just verify`, stdin capture, suppression variables,
-and best-effort `wrkp git push` reporting. Exit traps record passed, failed, or
-skipped whole-hook runs without changing gate status. No gates are added.
+`pre-push` runs no gate: `just verify` runs after the push on mini's
+self-hosted runner (T-10161). It keeps best-effort `wrkp git push` reporting.
+Exit traps record passed, failed, or skipped whole-hook runs without changing
+gate status.
 
 Both hooks call `hook-duration.py` from the repository root. Python 3 is optional
 for the gate: an unavailable interpreter/helper disables measurement only.

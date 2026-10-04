@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const predicates = [
-  "fitkit-s6",
   "suppression-lint",
   "layer-boundary",
   "lint",

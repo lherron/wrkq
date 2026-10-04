@@ -61,7 +61,8 @@ sys.exit(int(os.environ['GATE_RC']))
         proc = subprocess.run(['sh', str(root / 'tools/hooks' / hook), 'origin', 'remote'],
                               cwd=root, env=env, input=REFS, text=True, capture_output=True, timeout=5)
         elapsed = time.monotonic() - start
-        expected_rc = 0 if skip else (leak_rc or gate_rc)
+        # pre-push no longer runs a gate (verify is post-push, T-10161): it always passes.
+        expected_rc = 0 if skip or hook == 'pre-push' else (leak_rc or gate_rc)
         assert proc.returncode == expected_rc, (hook, proc.returncode, expected_rc, proc.stderr)
         trace = (root / 'trace').read_text().splitlines() if (root / 'trace').exists() else []
         if hook == 'pre-commit':
@@ -69,9 +70,9 @@ sys.exit(int(os.environ['GATE_RC']))
             if not leak_rc:
                 expected += ['golangci-lint run']
         else:
-            expected = [] if skip else ['just verify']
-            if (skip or not gate_rc) and publisher != 'missing':
-                expected += ['wrkp git push origin remote' + (' --payload-extra verifySuppressed=true' if skip else '')]
+            expected = []
+            if publisher != 'missing':
+                expected += ['wrkp git push origin remote']
                 assert (root / 'refs').read_text() == REFS
         assert trace == expected, (trace, expected)
         if not measurement:
@@ -109,15 +110,12 @@ sys.exit(int(os.environ['GATE_RC']))
 
 results = []
 for publisher in ('ok', 'missing', 'fail', 'hang'):
-    for hook in ('pre-commit', 'pre-push'):
-        for rc in (0, 7):
-            results.append(run_case(hook, gate_rc=rc, publisher=publisher))
-    results.append(run_case('pre-commit', leak_rc=9, publisher=publisher))
-    for skip in [('LEFTHOOK', '0'), ('WRKQ_SKIP_VERIFY_HOOK', '1')]:
-        results.append(run_case('pre-push', publisher=publisher, skip=skip))
-for hook in ('pre-commit', 'pre-push'):
     for rc in (0, 7):
-        results.append(run_case(hook, gate_rc=rc, measurement=False))
+        results.append(run_case('pre-commit', gate_rc=rc, publisher=publisher))
+    results.append(run_case('pre-commit', leak_rc=9, publisher=publisher))
+    results.append(run_case('pre-push', publisher=publisher))
+for rc in (0, 7):
+    results.append(run_case('pre-commit', gate_rc=rc, measurement=False))
 results.append(run_case('pre-commit', leak_rc=9, measurement=False))
-results.append(run_case('pre-push', skip=('LEFTHOOK', '0'), measurement=False))
+results.append(run_case('pre-push', measurement=False))
 print(json.dumps({'passed': len(results), 'cases': results}, indent=2))

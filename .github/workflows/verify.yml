@@ -1,8 +1,8 @@
 name: Verify
 
-# DISABLED: verification now runs locally via the pre-push git hook (`just verify`).
-# Kept as manual-only (workflow_dispatch) so it can be re-enabled by restoring the
-# push/pull_request triggers below.
+# DISABLED: `just verify` runs after each push to main on mini's self-hosted
+# runner (post-push-verify.yml, T-10161). Kept as manual-only (workflow_dispatch)
+# so it can be re-enabled by restoring the push/pull_request triggers below.
 on:
   workflow_dispatch:
   # push:

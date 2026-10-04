@@ -41,7 +41,6 @@ describe("verify evidence summary recipe contract", () => {
       verify.dependencies.map((dependency) => dependency.recipe),
       "verify must keep the existing human predicate order unchanged",
     ).toEqual([
-      "fitkit-s6",
       "suppression-lint",
       "layer-boundary",
       "lint",
