@@ -269,8 +269,6 @@ CREATE TABLE workflow_events (
   actor TEXT,
   role TEXT,
   run_id TEXT,
-  causation_id TEXT,
-  correlation_id TEXT,
   observed_revision INTEGER,
   next_revision INTEGER NOT NULL,
   task_doc_etag TEXT,
@@ -337,11 +335,6 @@ CREATE TABLE workflow_check_runs (
   started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   completed_at TEXT
 , principal_ref TEXT);
-CREATE TABLE workflow_check_run_evidence (
-  check_run_id TEXT NOT NULL REFERENCES workflow_check_runs(id) ON DELETE CASCADE,
-  evidence_id TEXT NOT NULL REFERENCES workflow_evidence(id) ON DELETE CASCADE,
-  PRIMARY KEY (check_run_id, evidence_id)
-);
 CREATE TABLE workflow_obligations (
   id TEXT PRIMARY KEY,
   instance_id TEXT NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
@@ -841,7 +834,6 @@ CREATE INDEX tasks_updated_idx   ON tasks(updated_at);
 CREATE INDEX tasks_project_idx   ON tasks(project_uuid);
 CREATE INDEX tasks_slug_idx      ON tasks(slug);
 CREATE INDEX tasks_parent_task_idx ON tasks(parent_task_uuid) WHERE parent_task_uuid IS NOT NULL;
-CREATE INDEX tasks_assignee_idx ON tasks(assignee_actor_uuid) WHERE assignee_actor_uuid IS NOT NULL;
 CREATE INDEX tasks_assignee_principal_idx ON tasks(assignee_principal_ref) WHERE assignee_principal_ref IS NOT NULL;
 CREATE INDEX tasks_kind_idx ON tasks(kind);
 CREATE INDEX tasks_deleted_at_idx ON tasks(deleted_at) WHERE deleted_at IS NOT NULL;
@@ -849,9 +841,6 @@ CREATE INDEX tasks_requested_by_idx ON tasks(requested_by_project_id);
 CREATE INDEX tasks_assigned_idx ON tasks(assigned_project_id);
 CREATE INDEX tasks_ack_pending_idx ON tasks(requested_by_project_id, state, acknowledged_at)
   WHERE acknowledged_at IS NULL;
-CREATE INDEX tasks_cp_run_id_idx ON tasks(cp_run_id);
-CREATE INDEX tasks_cp_session_id_idx ON tasks(cp_session_id);
-CREATE INDEX tasks_cp_work_item_id_idx ON tasks(cp_work_item_id);
 CREATE INDEX tasks_created_by_principal_idx ON tasks(created_by_principal_ref)
   WHERE created_by_principal_ref IS NOT NULL;
 CREATE INDEX tasks_updated_by_principal_idx ON tasks(updated_by_principal_ref)
@@ -950,7 +939,6 @@ CREATE TABLE task_causes (
   caused_by_task_uuid TEXT NOT NULL REFERENCES tasks(uuid) ON DELETE RESTRICT,
   position INTEGER NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  created_by_actor_uuid TEXT REFERENCES actors(uuid) ON DELETE SET NULL,
   created_by_principal_ref TEXT NOT NULL,
   created_by_scope_ref TEXT,
   PRIMARY KEY (task_uuid, caused_by_task_uuid),
@@ -1070,7 +1058,6 @@ CREATE TABLE comments (
 );
 CREATE INDEX idx_comments_task_created ON comments(task_uuid, created_at, id);
 CREATE INDEX idx_comments_container_created ON comments(container_uuid, created_at, id);
-CREATE INDEX idx_comments_actor_created ON comments(actor_uuid, created_at) WHERE actor_uuid IS NOT NULL;
 CREATE INDEX idx_comments_principal_created ON comments(created_by_principal_ref, created_at)
   WHERE created_by_principal_ref IS NOT NULL;
 CREATE TRIGGER comments_ai_touch_task
@@ -1324,7 +1311,6 @@ CREATE TABLE IF NOT EXISTS "rooms" (
   state TEXT NOT NULL DEFAULT 'open'
     CHECK (state IN ('open', 'closed', 'archived')),
   closed_at TEXT,
-  reopened_at TEXT,
 
   last_activity_at TEXT NOT NULL
     DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
@@ -1365,8 +1351,6 @@ CREATE UNIQUE INDEX rooms_task_idx
   ON rooms(task_uuid) WHERE task_uuid IS NOT NULL;
 CREATE UNIQUE INDEX rooms_container_idx
   ON rooms(container_uuid) WHERE container_uuid IS NOT NULL;
-CREATE INDEX rooms_adhoc_idle_idx
-  ON rooms(last_activity_at) WHERE kind = 'adhoc' AND state = 'open';
 CREATE TRIGGER rooms_ai_friendly
 AFTER INSERT ON rooms
 WHEN NEW.kind = 'adhoc' AND (NEW.id IS NULL OR NEW.id = '')

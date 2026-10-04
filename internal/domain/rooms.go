@@ -112,8 +112,8 @@ const (
 //
 // A room carries NO lifecycle state. `work` and `activity` are computed at read
 // time from the work and from LastActivity, and neither can refuse a say. The
-// `state`, `closed_at`, and `reopened_at` columns survive the rev-3 amendment
-// unread until wave 5 drops them, which is why they are not scanned here.
+// Historical `state` and `closed_at` columns remain unread and retained.
+// T-10158 removes `reopened_at`; none of these columns may gate traffic.
 type Room struct {
 	UUID                  string   `json:"uuid" db:"uuid"`
 	ID                    *string  `json:"id,omitempty" db:"id"`

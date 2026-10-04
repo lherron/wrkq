@@ -92,9 +92,9 @@ func (e *EnvelopeRuntimeMismatchError) Error() string {
 	return fmt.Sprintf("cannot fail envelope %s from runtime %s: newest presentation belongs to another runtime", e.Envelope, e.Runtime)
 }
 
-// roomColumns deliberately omits state / closed_at / reopened_at: rooms have no
-// lifecycle after the T-07612 rev 3 amendment, and reading a column nothing may
-// act on is how a dropped gate grows back. Wave 5 drops them from the schema.
+// roomColumns omits the retained historical state and closed_at columns.
+// Rooms have no lifecycle after the T-07612 rev 3 amendment. T-10158 removes
+// reopened_at; neither retained history column may gate traffic.
 const roomColumns = `
 	uuid, id, kind, task_uuid, container_uuid,
 	last_activity_at, opened_by_principal_ref, opened_at, meta,
