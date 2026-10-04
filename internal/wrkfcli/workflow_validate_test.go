@@ -14,6 +14,7 @@ import (
 )
 
 func TestWorkflowValidateCLIEnforcesSuspensionReasonReferences(t *testing.T) {
+	t.Setenv("WRKF_PRINCIPAL_REF", "agent:workflow-validate-test")
 	dbPath := filepath.Join(t.TempDir(), "workflow-validate.db")
 	database, err := db.Open(dbPath)
 	if err != nil {

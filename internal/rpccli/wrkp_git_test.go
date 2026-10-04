@@ -424,21 +424,30 @@ func TestWrkpGitG7ProjectResolution(t *testing.T) {
 	}
 }
 
-func TestWrkpGitG8WrkqHookPostsLastAndOnlyAfterGate(t *testing.T) {
+func TestWrkpGitG8WrkqHookPostsBestEffortWithoutVerify(t *testing.T) {
 	prePush, err := os.ReadFile(filepath.Join("..", "..", "tools", "hooks", "pre-push"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	source := string(prePush)
 	positions := []int{
-		strings.Index(source, "refs=$(cat)"),
-		strings.Index(source, "\njust verify\n"),
-		strings.LastIndex(source, `wrkp git push "$@"`),
-		strings.LastIndex(source, "exit $rc"),
+		strings.Index(source, "--start pre-push </dev/null"),
+		strings.Index(source, "trap hook_settled 0"),
+		strings.LastIndex(source, `command -v wrkp >/dev/null 2>&1 && wrkp git push "$@" || true`),
+		strings.LastIndex(source, "exit 0"),
 	}
 	for i, position := range positions {
 		if position < 0 || (i > 0 && position <= positions[i-1]) {
-			t.Fatalf("hook order %v does not prove capture → gate → post → exit", positions)
+			t.Fatalf("hook order %v does not prove timing → trap → best-effort post → success", positions)
+		}
+	}
+	for _, line := range strings.Split(source, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(line, "just verify") || strings.Contains(line, "refs=$(cat)") {
+			t.Fatalf("pre-push must leave verification to post-push and ref stdin to wrkp: %s", line)
 		}
 	}
 	postCommit, err := os.Stat(filepath.Join("..", "..", "tools", "hooks", "post-commit"))

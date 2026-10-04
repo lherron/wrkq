@@ -113,6 +113,7 @@ func runAttachCLI(t *testing.T, args ...string) (string, string, error) {
 // and server share a filesystem in-test, so the host-path call would also have
 // SUCCEEDED, and a success-only check would not distinguish the two paths.
 func TestAttachPutRemoteFileUsesByteTransfer(t *testing.T) {
+	t.Setenv("WRKQ_PRINCIPAL_REF", "agent:attach-test")
 	dbPath, taskID := migratedDBWithTask(t)
 	attachDir := t.TempDir()
 	remote := startRemoteAttachServer(t, dbPath, attachDir)
@@ -163,6 +164,7 @@ func TestAttachPutRemoteFileUsesByteTransfer(t *testing.T) {
 // naming the caller's own path. Previously the server reported "no such file or
 // directory" about a path it alone had looked for.
 func TestAttachPutRemoteMissingFileFailsCallerSide(t *testing.T) {
+	t.Setenv("WRKQ_PRINCIPAL_REF", "agent:attach-test")
 	dbPath, taskID := migratedDBWithTask(t)
 	remote := startRemoteAttachServer(t, dbPath, t.TempDir())
 
