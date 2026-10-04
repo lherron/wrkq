@@ -13,7 +13,7 @@ provenance: authored
 This page explains three cross-cutting wrkq mechanisms that are easy to
 confuse with each other or with adjacent systems: handoffs, the search/index
 subsystem, and the event-log/monitor/watch/diff family. Command syntax lives
-in [the CLI reference](/docs/wrkq/cli-reference).
+in [the CLI reference](wrkq-cli-reference.md).
 
 ## Handoffs
 
@@ -99,7 +99,7 @@ or around it, and they answer different questions:
 | --- | --- | --- |
 | `wrkq log <ref>` | "What happened to this one task/container over time?" | Paginated history, `--patch` for field-level diffs, `--since`/`--until` date filtering. |
 | `wrkq diff <A> <B>` | "Which fields differ between these two tasks?" | JSON field changes for non-TTY output; human field comparison for a TTY. Single-task working-copy comparison is unimplemented; the accepted `--unified` flag does not affect output. |
-| `wrkq watch [PATH...]` | "Tail the raw event log live." | Optional selectors filter the stream; `--since` is an event-ID cursor; `--ndjson`; `--follow` (default true). |
+| `wrkq monitor watch --raw` | "Tail the raw event log live." | Whole-log NDJSON tail; `--since` is an event-ID cursor; `--timeout`/`--stall-after` end it with the monitor terminal line. Replaces the retired `wrkq watch`. |
 | `wrkq monitor watch [TASK...]` | "Stream typed, filterable events for specific tasks, built for automation." | NDJSON or compact format, `--event-type`, `--scope`, `--state-only`, `--last N` replay, `--until` condition, `--timeout`/`--stall-after`. Emits exactly one terminal line before exit. |
 | `wrkq monitor wait [TASK...]` | "Block a script until a condition holds, then exit." | Same condition evaluator and exit-code contract as `monitor watch --until`; no event streaming to stdout — it's a barrier. |
 
@@ -113,9 +113,10 @@ make it the right primitive for scripted sequencing, e.g.:
 wrkq monitor wait T-00001 --until state=completed --timeout 30m
 ```
 
-`wrkq watch` is the lower-level, closer-to-the-wire primitive: it tails the
-literal event log with no task-condition semantics, useful for debugging or
-building your own consumer.
+`wrkq monitor watch --raw` is the lower-level, closer-to-the-wire primitive: it
+tails the literal event log with no task-condition semantics, useful for
+debugging or building your own consumer. It replaces `wrkq watch`, which now
+only exits 2 and names it.
 
 ## Attribution vs. authentication
 

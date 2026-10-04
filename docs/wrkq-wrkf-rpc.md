@@ -515,7 +515,7 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > blocking poll loop, the interval, the monotonic high-water cursor carried across
 > polls, the timeout/stall clocks, the per-event NDJSON lines, EXACTLY ONE terminal
 > NDJSON record, the exit codes (0=met, 1=timeout/stall, 2=selector/usage,
-> 3=stream), the `watch` deprecation warning, and human/NDJSON rendering. These read
+> 3=stream), and human/NDJSON rendering. These read
 > the generic `event_log` table (NOT `workflow_events`; `wrkf.event.query` is a
 > distinct substrate).
 > - **`wrkq.monitor.eventsView`** is the bounded ASCENDING filtered event page for
@@ -548,8 +548,8 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 >   exist"). Because eventsView + stateView are TWO independent snapshots, the
 >   client's terminal decision is intentionally RACE-TOLERANT.
 > - **`wrkq.history.tailView`** is a SIBLING of `wrkq.history.listView` in the
->   `history` namespace (generic audit-log tailing) backing `wrkq watch` /
->   `monitor watch --raw`: a bounded ASCENDING raw `event_log` page with actor
+>   `history` namespace (generic audit-log tailing) backing
+>   `monitor watch --raw` (the retired `wrkq watch` used it too): a bounded ASCENDING raw `event_log` page with actor
 >   slug/id + `resource_id` hydration. Params: `{ cursor, limit? }` →
 >   `WrkqHistoryTailView{ items: WrkqWatchEvent[], high_water }`. It MUST NOT reuse
 >   `WrkqLogEvent` — `WrkqWatchEvent` is the legacy watchEvent row shape, which

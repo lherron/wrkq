@@ -548,7 +548,7 @@ machine-oriented output and no width/ANSI formatting where applicable.
 Primary task/container surface:
 
 `projects`, `ls`, `tree`, `find`, `search`, `index`, `stat`, `cat`, `touch`,
-`set`, `apply`, `diff`, `log`, `watch`, `mkdir`, `archive`, `unarchive`,
+`set`, `apply`, `diff`, `log`, `mkdir`, `archive`, `unarchive`,
 `rmdir`, `mv`, `cp`, `rm`, `restore`, `container`, `rename-container`, `comment`, `attach`, `relation`,
 `check`, `ack`, `handoff`, `agent-context`, `whoami`, `webhook`, `server`,
 `usage`, `agent-info`, `version`, `completion`.

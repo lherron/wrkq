@@ -223,10 +223,10 @@ as the state mutation; the claim token/generation travel via
 ## Monitoring and streaming
 
 ```bash
-# Raw event-log tail
-wrkq watch                          # all events
-wrkq watch --since 100
-wrkq watch --ndjson
+# Raw event-log tail (replaces the retired `wrkq watch`)
+wrkq monitor watch --raw                        # all new events, NDJSON
+wrkq monitor watch --raw --since 100            # from event ID 100
+wrkq monitor watch --raw --since 0 --stall-after 1s   # replay, then stop
 
 # Structured per-task monitor stream (built for the Claude Monitor tool)
 wrkq monitor watch T-04466 --state-only --until state=completed --timeout 30m
