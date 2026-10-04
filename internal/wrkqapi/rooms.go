@@ -2712,5 +2712,11 @@ func mapRoomStoreError(err error, selector string) error {
 			"expectedEtag": mismatch.Expected, "currentEtag": mismatch.Actual,
 		})
 	}
+	var invalid *domain.InvalidValueError
+	if errors.As(err, &invalid) {
+		return NewValidationError(invalid.Error(), map[string]any{
+			"field": invalid.Field, "value": invalid.Value, "allowed": invalid.Allowed,
+		})
+	}
 	return NewInternalError(err)
 }

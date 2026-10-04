@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -212,13 +213,26 @@ type EnvelopePresentation struct {
 	PresentedByPrincipalRef string  `json:"presented_by_principal_ref" db:"presented_by_principal_ref"`
 }
 
+// InvalidValueError is a value outside a closed vocabulary. It is the caller's
+// mistake, so the RPC layer reports it as WRKQ_VALIDATION, never as an internal
+// error (T-10234).
+type InvalidValueError struct {
+	Field   string
+	Value   string
+	Allowed []string
+}
+
+func (e *InvalidValueError) Error() string {
+	return fmt.Sprintf("invalid %s %q: must be one of: %s", e.Field, e.Value, strings.Join(e.Allowed, ", "))
+}
+
 // ValidateRoomKind validates the stored room kind vocabulary.
 func ValidateRoomKind(kind RoomKind) error {
 	switch kind {
 	case RoomKindCampaign, RoomKindTask, RoomKindProject, RoomKindAdhoc:
 		return nil
 	default:
-		return fmt.Errorf("invalid room kind %q: must be one of: campaign, task, project, adhoc", kind)
+		return &InvalidValueError{Field: "room kind", Value: string(kind), Allowed: []string{"campaign", "task", "project", "adhoc"}}
 	}
 }
 
@@ -228,7 +242,7 @@ func ValidateEnvelopeObligation(obligation EnvelopeObligation) error {
 	case EnvelopeObligationReplyRequired, EnvelopeObligationFYI, EnvelopeObligationNone:
 		return nil
 	default:
-		return fmt.Errorf("invalid envelope obligation %q: must be one of: reply_required, fyi, none", obligation)
+		return &InvalidValueError{Field: "envelope obligation", Value: string(obligation), Allowed: []string{"reply_required", "fyi", "none"}}
 	}
 }
 
@@ -240,7 +254,7 @@ func ValidateEnvelopeState(state EnvelopeState) error {
 		EnvelopeStateWithdrawn:
 		return nil
 	default:
-		return fmt.Errorf("invalid envelope state %q: must be one of: pending, presented, acked, deferred, failed, expired, withdrawn", state)
+		return &InvalidValueError{Field: "envelope state", Value: string(state), Allowed: []string{"pending", "presented", "acked", "deferred", "failed", "expired", "withdrawn"}}
 	}
 }
 
@@ -250,7 +264,7 @@ func ValidateEnvelopeDelivery(delivery EnvelopeDelivery) error {
 	case EnvelopeDeliveryQueue, EnvelopeDeliveryHold:
 		return nil
 	default:
-		return fmt.Errorf("invalid envelope delivery %q: must be one of: queue, hold", delivery)
+		return &InvalidValueError{Field: "envelope delivery", Value: string(delivery), Allowed: []string{"queue", "hold"}}
 	}
 }
 
@@ -261,7 +275,7 @@ func ValidateEnvelopeFailureReason(reason EnvelopeFailureReason) error {
 		EnvelopeFailureUndeliverable, EnvelopeFailureLegacy:
 		return nil
 	default:
-		return fmt.Errorf("invalid envelope failure reason %q: must be one of: runtime_terminated, ignored, undeliverable, legacy", reason)
+		return &InvalidValueError{Field: "envelope failure reason", Value: string(reason), Allowed: []string{"runtime_terminated", "ignored", "undeliverable", "legacy"}}
 	}
 }
 
