@@ -18,8 +18,8 @@
 **Attribution, not auth:** every mutating command requires a canonical caller
 principal (`agent:<id>`), supplied by `--principal-ref` / `--as`, the product's
 principal env, a valid runtime scope, or config `default_principal_ref`.
-`WRKQ_ACTOR`, `WRKQ_ACTOR_ID`, `WRKF_ACTOR`, bare slugs, actor IDs/UUIDs, and
-`default_actor` are legacy compatibility inputs and never caller authority.
+`WRKQ_ACTOR`, `WRKQ_ACTOR_ID`, `WRKF_ACTOR`, bare slugs, actor IDs/UUIDs
+are retired inputs and never caller authority.
 Resolution lives in `internal/attribution/`.
 
 ## Concurrency

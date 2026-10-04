@@ -222,7 +222,7 @@ func TestResolveIgnoresLegacyActorSources(t *testing.T) {
 	t.Setenv("WRKQ_ACTOR", "legacy-actor")
 	t.Setenv("WRKQ_ACTOR_ID", "A-00001")
 
-	_, err := Resolve(ResolveOptions{Config: &config.Config{DefaultActor: "legacy-config"}})
+	_, err := Resolve(ResolveOptions{Config: &config.Config{}})
 	if err == nil {
 		t.Fatal("expected legacy-only actor sources to be ignored")
 	}

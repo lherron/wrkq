@@ -51,12 +51,11 @@ func TestWrkfPrincipalDefaultExplicitFlagOverridesAgentScopeRef(t *testing.T) {
 	}
 }
 
-func TestWrkfPrincipalDefaultUsesCanonicalConfigAndIgnoresLegacyDefaultActor(t *testing.T) {
+func TestWrkfPrincipalDefaultUsesCanonicalConfig(t *testing.T) {
 	t.Run("canonical default_principal_ref", func(t *testing.T) {
 		clearWrkfAuthorityEnv(t)
 		got, err := wrkfPrincipalDefault(testPrincipalCmd(t, nil), &config.Config{
 			DefaultPrincipalRef: "agent:config-principal",
-			DefaultActor:        "legacy-config-actor",
 		})
 		if err != nil {
 			t.Fatalf("wrkfPrincipalDefault failed: %v", err)
@@ -66,11 +65,9 @@ func TestWrkfPrincipalDefaultUsesCanonicalConfigAndIgnoresLegacyDefaultActor(t *
 		}
 	})
 
-	t.Run("legacy default_actor only", func(t *testing.T) {
+	t.Run("no default principal", func(t *testing.T) {
 		clearWrkfAuthorityEnv(t)
-		_, err := wrkfPrincipalDefault(testPrincipalCmd(t, nil), &config.Config{
-			DefaultActor: "legacy-config-actor",
-		})
+		_, err := wrkfPrincipalDefault(testPrincipalCmd(t, nil), &config.Config{})
 		assertPrincipalReplacementDiagnostic(t, err)
 	})
 }

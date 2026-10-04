@@ -24,12 +24,8 @@ type Config struct {
 	RemoteEndpoint      string       `yaml:"remote_endpoint"`
 	AttachDir           string       `yaml:"attach_dir"`
 	AttachmentsMaxMB    int          `yaml:"attachments_max_mb"`
-	DefaultActor        string       `yaml:"default_actor"`
 	DefaultPrincipalRef string       `yaml:"default_principal_ref"`
 	ProjectRoot         string       `yaml:"project_root"`
-	LogLevel            string       `yaml:"log_level"`
-	Output              string       `yaml:"output"`
-	Pager               string       `yaml:"pager"`
 	Search              SearchConfig `yaml:"search"`
 }
 
@@ -103,7 +99,6 @@ func LoadWithDBOverride(override string, pathOnly bool) (*Config, error) {
 func load() (*Config, *DBEnvConflictError, error) {
 	cfg := &Config{
 		AttachmentsMaxMB: 50,
-		LogLevel:         "info",
 		Search: SearchConfig{
 			Enabled:          true,
 			DenseProvider:    "llama-cpp",
@@ -182,15 +177,6 @@ func load() (*Config, *DBEnvConflictError, error) {
 		if _, err := fmt.Sscanf(maxMB, "%d", &parsed); err == nil && parsed >= 0 {
 			cfg.AttachmentsMaxMB = parsed
 		}
-	}
-	if logLevel := os.Getenv("WRKQ_LOG_LEVEL"); logLevel != "" {
-		cfg.LogLevel = logLevel
-	}
-	if output := os.Getenv("WRKQ_OUTPUT"); output != "" {
-		cfg.Output = output
-	}
-	if pager := os.Getenv("WRKQ_PAGER"); pager != "" {
-		cfg.Pager = pager
 	}
 	if defaultPrincipalRef := os.Getenv("WRKQ_PRINCIPAL_REF"); defaultPrincipalRef != "" {
 		cfg.DefaultPrincipalRef = defaultPrincipalRef

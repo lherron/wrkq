@@ -15,7 +15,7 @@ predicate: >
 
   The runtime never maps to agent:wrkq-system, never accepts system:*,
   actor UUID, A-* friendly IDs, bare caller slugs, WRKQ_ACTOR, WRKQ_ACTOR_ID,
-  WRKF_ACTOR, or config default_actor as caller attribution, never reads the
+  or WRKF_ACTOR as caller attribution, never reads the
   actors table for attribution, and never writes *_actor_uuid columns. Legacy
   wrkf workflow actors are never wrkq-core caller attribution defaults.
   `wrkq.projectEvent.post` is the sole exception: attribution is optional and

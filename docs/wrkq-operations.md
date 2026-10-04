@@ -206,7 +206,7 @@ no authentication. Resolution precedence for mutating commands:
 4. `default_principal_ref` in `~/.config/wrkq/config.yaml`.
 
 Explicitly **not** attribution sources: bare slugs, actor UUIDs, `A-*` actor
-IDs, `system:*`, `WRKQ_ACTOR`, `WRKQ_ACTOR_ID`, `default_actor` — these are
+IDs, `system:*`, `WRKQ_ACTOR`, `WRKQ_ACTOR_ID` — these are
 legacy/display-cache inputs only. Passing a full ScopeRef as a principal
 input keeps only the reduced agent identity; the fuller runtime scope
 provenance is recorded separately via `scope_ref`.

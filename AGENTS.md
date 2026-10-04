@@ -96,7 +96,7 @@ Key authority and transport inputs:
   a runtime and are forwarded by holder-guarded completion.
 - `WRKQ_PRINCIPAL_REF` supplies mutation attribution; legacy `WRKQ_ACTOR` and
   `WRKQ_ACTOR_ID` are not caller authority.
-- `WRKQ_ATTACH_DIR`, `WRKQ_OUTPUT`, and `WRKQ_PROJECT_ROOT` retain their normal
+- `WRKQ_ATTACH_DIR` and `WRKQ_PROJECT_ROOT` retain their normal
   storage/output/project roles.
 
 Secrets belong in environment variables or `_FILE` inputs. Never commit

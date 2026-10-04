@@ -103,7 +103,6 @@ Key variables:
 | `WRKQ_ACTOR` / `WRKF_ACTOR` | Legacy actor/display-cache inputs; ignored for caller authority. |
 | `WRKQ_PROJECT_ROOT` | Default project/container path for relative task paths. |
 | `ASP_PROJECT` | Runtime project fallback when `WRKQ_PROJECT_ROOT` is not explicitly exported. |
-| `WRKQ_OUTPUT` | Default output mode. |
 | `WRKQ_SEARCH_*` | Search sidecar and dense embedding configuration. |
 
 Database defaults:
@@ -144,7 +143,7 @@ Principal attribution for mutating commands:
 
 wrkq validates principal syntax but never creates actors or requires an actor
 row for ordinary writes. Bare slugs, actor UUIDs, `A-*` actor IDs, `system:*`,
-`WRKQ_ACTOR`, `WRKQ_ACTOR_ID`, `WRKF_ACTOR`, and `default_actor` are not caller
+`WRKQ_ACTOR`, `WRKQ_ACTOR_ID`, and `WRKF_ACTOR` are not caller
 attribution sources. Passing a full ScopeRef as a principal input keeps only
 the agent identity; runtime/task/project provenance must travel through
 `scope_ref` and delivery fields.
