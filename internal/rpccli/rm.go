@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/lherron/wrkq/internal/bulk"
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -174,7 +175,7 @@ func runRm(cmd *cobra.Command, args []string, f rmFlags) error {
 		}
 		if !found {
 			if !f.nullglob {
-				return fmt.Errorf("target not found: %s", arg)
+				return clifunnel.NotFound("target", arg)
 			}
 			continue
 		}

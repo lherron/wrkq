@@ -1,12 +1,14 @@
 package rpccli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/spf13/cobra"
@@ -226,7 +228,8 @@ wrkc has no HRC dependency: every verb works with every HRC daemon down.`,
 
 // ExecuteWrkc runs the wrkc CLI.
 func ExecuteWrkc() error {
-	return NewWrkcRootCmd().Execute()
+	return clifunnel.Execute(context.Background(), NewWrkcRootCmd(), os.Args[1:],
+		clifunnel.Options{NotFoundHint: wrkcNotFoundHint})
 }
 
 // wrkcScopeRef resolves the caller's own scope handle: the --scope-ref flag when

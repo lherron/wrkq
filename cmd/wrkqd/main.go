@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,7 +14,14 @@ import (
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "version" {
-		if err := printVersion(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+		usageOut := io.Writer(os.Stderr)
+		if helpRequested(os.Args[2:]) {
+			usageOut = os.Stdout
+		}
+		if err := printVersion(os.Args[2:], os.Stdout, usageOut); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return
+			}
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(2)
 		}
@@ -34,6 +42,15 @@ func main() {
 	unsafeNoToken := flag.Bool("unsafe-no-token", false, "Allow non-loopback listen without a token (dev only)")
 	nodeTokens := flag.String("node-tokens", os.Getenv("WRKQD_NODE_TOKENS"), "Per-node bearer tokens (nodeId=token,nodeId=token); supersedes --token")
 	nodeTokensFile := flag.String("node-tokens-file", os.Getenv("WRKQD_NODE_TOKENS_FILE"), "File of per-node bearer tokens, one nodeId=token per line")
+	// CLI standard §1: -h/--help anywhere is inert. The flag package stops at
+	// the first positional and would take "--help" as a value of a string flag,
+	// so `wrkqd foo --help` or `wrkqd -db --help` would start a daemon. Scan
+	// first; help goes to stdout and exits 0.
+	if helpRequested(os.Args[1:]) {
+		flag.CommandLine.SetOutput(os.Stdout)
+		flag.Usage()
+		return
+	}
 	flag.Parse()
 
 	opts := wrkqd.DaemonOptions{
@@ -88,4 +105,18 @@ func printVersion(args []string, out, errOut io.Writer) error {
 	fmt.Fprintf(out, "  protocol:        %s\n", workrpc.ProtocolVersion)
 	fmt.Fprintf(out, "  protocol schema: %s\n", workrpc.ProtocolSchemaHash())
 	return nil
+}
+
+// helpRequested reports whether a help flag appears anywhere before a "--"
+// terminator, in any spelling the flag package accepts.
+func helpRequested(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "--":
+			return false
+		case "-h", "-help", "--help", "--h":
+			return true
+		}
+	}
+	return false
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/spf13/cobra"
@@ -350,7 +351,7 @@ func rmdirResolve(ctx context.Context, tr Transport, path string) (id, resolvedP
 	raw, serr := tr.Call(ctx, "wrkq.container.show", map[string]string{"path": path})
 	if serr != nil {
 		if isNotFound(serr) {
-			return "", "", "", fmt.Errorf("container not found: %s", path)
+			return "", "", "", clifunnel.NotFound("container", path)
 		}
 		return "", "", "", errors.New(rpcMessage(serr))
 	}

@@ -1,9 +1,12 @@
 package rpccli
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -146,12 +149,14 @@ func NewRootCmdFor(commandName string) *cobra.Command {
 
 // Execute runs the mirror root command.
 func Execute() error {
-	return NewRootCmd().Execute()
+	return ExecuteAs("wrkq")
 }
 
-// ExecuteAs runs the RPC-backed CLI under a specific executable name.
+// ExecuteAs runs the RPC-backed CLI under a specific executable name, through
+// the shared help/error funnel (CLI standard §1, §4).
 func ExecuteAs(commandName string) error {
-	return NewRootCmdFor(commandName).Execute()
+	return clifunnel.Execute(context.Background(), NewRootCmdFor(commandName), os.Args[1:],
+		clifunnel.Options{NotFoundHint: wrkqNotFoundHint})
 }
 
 func newStubCmd(mc mirroredCommand) *cobra.Command {

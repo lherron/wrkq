@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -110,7 +111,7 @@ func statResolve(cmd *cobra.Command, tr Transport, ref string) (statMetadata, er
 
 	cshow, cerr := tr.Call(cmd.Context(), "wrkq.container.show", map[string]string{"path": ref})
 	if cerr != nil {
-		return statMetadata{}, fmt.Errorf("path not found: %s", ref)
+		return statMetadata{}, clifunnel.NotFound("path", ref)
 	}
 	var c struct {
 		UUID  string `json:"uuid"`

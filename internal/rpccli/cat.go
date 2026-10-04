@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
@@ -111,9 +112,9 @@ func runCat(cmd *cobra.Command, args []string, noFrontmatter, excludeComments, a
 		if err != nil {
 			if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
 				if explicitPromiseSelector {
-					return fmt.Errorf("promise not found: %s", ref)
+					return clifunnel.NotFound("promise", ref)
 				}
-				return fmt.Errorf("task not found: %s", sref)
+				return clifunnel.NotFound("task", sref)
 			}
 			return err
 		}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -188,7 +189,7 @@ func runRestore(cmd *cobra.Command, arg string, f restoreFlags) error {
 				return errors.New(rpcMessage(cerr))
 			}
 			// Neither task nor container: legacy emits "not found: <arg>".
-			return fmt.Errorf("not found: %s", arg)
+			return clifunnel.NotFound("", arg)
 		}
 		return errors.New(rpcMessage(rerr))
 	}

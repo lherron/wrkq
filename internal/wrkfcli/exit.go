@@ -1,5 +1,7 @@
 package wrkfcli
 
+import "errors"
+
 type cliExitError struct {
 	code     int
 	err      error
@@ -29,14 +31,16 @@ func ExitCodeForError(err error) int {
 	if err == nil {
 		return 0
 	}
-	if e, ok := err.(cliExitError); ok {
+	var e cliExitError
+	if errors.As(err, &e) {
 		return e.code
 	}
 	return 1
 }
 
 func errorAlreadyReported(err error) bool {
-	if e, ok := err.(cliExitError); ok {
+	var e cliExitError
+	if errors.As(err, &e) {
 		return e.reported
 	}
 	return false

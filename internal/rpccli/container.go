@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/style"
 	"github.com/lherron/wrkq/internal/webhooksub"
 	"github.com/spf13/cobra"
@@ -375,7 +376,7 @@ func runContainerCat(cmd *cobra.Command, args []string, asJSON, ndjson, porcelai
 		if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
 			// Legacy container cat surfaces the raw selectors.ResolveContainer error
 			// ("container not found: <ref>"), not the generic "path not found".
-			return fmt.Errorf("container not found: %s", sref)
+			return clifunnel.NotFound("container", sref)
 		}
 		return err
 	}

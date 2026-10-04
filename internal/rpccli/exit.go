@@ -1,5 +1,7 @@
 package rpccli
 
+import "errors"
+
 // exit.go mirrors internal/rpccli/exit.go's exit-code error mechanism so the
 // mirror binary reproduces the legacy CLI's DISTINCT process exit codes (e.g.
 // handoff's 2/3/4/5/6) and its "structured error already written to stderr"
@@ -40,7 +42,8 @@ func ExitCodeForError(err error) int {
 	if err == nil {
 		return 0
 	}
-	if e, ok := err.(cliExitError); ok {
+	var e cliExitError
+	if errors.As(err, &e) {
 		return e.code
 	}
 	return 1
@@ -49,7 +52,8 @@ func ExitCodeForError(err error) int {
 // ErrorAlreadyReported reports whether a command already wrote its own structured
 // error to stderr (so main.go must not reprint a generic "Error:" line).
 func ErrorAlreadyReported(err error) bool {
-	if e, ok := err.(cliExitError); ok {
+	var e cliExitError
+	if errors.As(err, &e) {
 		return e.reported
 	}
 	return false

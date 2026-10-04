@@ -416,7 +416,16 @@ func checkSequenceDriftAdm(database *db.DB) []checkResultAdm {
 func checkAttachmentsAdm(database *db.DB, attachDir string) []checkResultAdm {
 	var results []checkResultAdm
 
-	// Check attach_dir exists
+	// Check attach_dir exists. An empty path is unconfigured, not missing:
+	// "not found: " with a blank path points nowhere.
+	if attachDir == "" {
+		results = append(results, checkResultAdm{
+			Name:    "attach_dir_exists",
+			Status:  "error",
+			Message: "Attachment directory is not configured; set WRKQ_ATTACH_DIR or attach_dir in the wrkq config",
+		})
+		return results
+	}
 	info, err := os.Stat(attachDir)
 	if err != nil || !info.IsDir() {
 		results = append(results, checkResultAdm{

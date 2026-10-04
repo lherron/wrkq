@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -77,7 +78,7 @@ func runAck(cmd *cobra.Command, args []string, force bool) error {
 // wording ("task not found: <ref>").
 func ackResolveError(ref string, err error) error {
 	if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
-		return fmt.Errorf("task not found: %s", ref)
+		return clifunnel.NotFound("task", ref)
 	}
 	return err
 }

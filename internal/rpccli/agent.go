@@ -37,7 +37,7 @@ remains reachable without a wrkq change:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bin, err := exec.LookPath("hrcchat")
 			if err != nil {
-				return exitError(1, fmt.Errorf("hrcchat not found on PATH: %w", err))
+				return exitError(1, fmt.Errorf("hrcchat not found on PATH: %w; wrkq agent hands off to hrcchat, which ships with hrc-runtime — install it there (just install) or put hrcchat on PATH", err))
 			}
 
 			promptArgs := args
@@ -94,9 +94,5 @@ remains reachable without a wrkq change:
 }
 
 func isStdinTTY() bool {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (info.Mode() & os.ModeCharDevice) != 0
+	return isReaderTTY(os.Stdin)
 }

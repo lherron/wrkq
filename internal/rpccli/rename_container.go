@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/spf13/cobra"
 )
@@ -94,7 +95,7 @@ func runRenameContainer(cmd *cobra.Command, ref, newSlug string, f renameContain
 	raw, serr := tr.Call(ctx, "wrkq.container.show", map[string]string{"path": containerSelector})
 	if serr != nil {
 		if isNotFound(serr) {
-			return fmt.Errorf("container not found: %s", containerSelector)
+			return clifunnel.NotFound("container", containerSelector)
 		}
 		return errors.New(rpcMessage(serr))
 	}

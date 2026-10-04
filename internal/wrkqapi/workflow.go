@@ -155,10 +155,15 @@ func (a *API) WorkflowSyncMeta(ctx context.Context, p WorkflowSyncMetaParams) (*
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if a.db == nil {
+	if a.wf == nil {
 		return nil, NewInternalError(errWorkflowUnavailable)
 	}
-	count, err := workflow.NewService(a.db).SyncMeta(p.Task, defaultString(p.Actor, a.defaultPrincipalRef))
+	if p.Task != "" {
+		if _, err := a.resolveTaskUUID(p.Task); err != nil {
+			return nil, err
+		}
+	}
+	count, err := a.wf.TaskSyncMeta(ctx, p.Task, defaultString(p.Actor, a.defaultPrincipalRef))
 	if err != nil {
 		return nil, err
 	}

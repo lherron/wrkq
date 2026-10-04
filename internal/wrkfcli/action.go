@@ -135,8 +135,9 @@ func actionCmd() *cobra.Command {
 func actionStartCmd() *cobra.Command {
 	opts := actionStartOptions{}
 	cmd := &cobra.Command{
-		Use:  "start TASK --action ACTION",
-		Args: cobra.ExactArgs(1),
+		Use:   "start TASK --action ACTION",
+		Short: "Start an action run on a task",
+		Args:  cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if opts.action == "" {
 				return fmt.Errorf("--action is required")
@@ -176,8 +177,9 @@ func actionStartCmd() *cobra.Command {
 func actionNextCmd() *cobra.Command {
 	opts := actionNextOptions{}
 	cmd := &cobra.Command{
-		Use:  "next [TASK]",
-		Args: cobra.MaximumNArgs(1),
+		Use:   "next [TASK]",
+		Short: "Show the next executable action for a task or instance",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			task := ""
 			if len(args) > 0 {
@@ -214,7 +216,8 @@ func actionNextCmd() *cobra.Command {
 func actionClaimCmd() *cobra.Command {
 	opts := actionClaimOptions{}
 	cmd := &cobra.Command{
-		Use: "claim [TASK]",
+		Use:   "claim [TASK]",
+		Short: "Claim the next executable action and return its fenced run",
 		Long: `Claim the next executable action and return its fenced run binding.
 
 The success response includes the values needed by settle:
@@ -278,8 +281,9 @@ Follow error.fix and retry with --prior-run when predecessor review is required.
 func actionBindCmd() *cobra.Command {
 	opts := actionBindOptions{}
 	cmd := &cobra.Command{
-		Use:  "bind ACTION_RUN --external-run-ref hrc:RUNID",
-		Args: cobra.ExactArgs(1),
+		Use:   "bind ACTION_RUN --external-run-ref hrc:RUNID",
+		Short: "Bind an external HRC run ref to an action run",
+		Args:  cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if opts.externalRunRef == "" {
 				return fmt.Errorf("--external-run-ref is required")
@@ -307,8 +311,9 @@ func actionBindCmd() *cobra.Command {
 func actionCompleteCmd() *cobra.Command {
 	opts := actionCompleteOptions{}
 	cmd := &cobra.Command{
-		Use:  "complete ACTION_RUN",
-		Args: cobra.ExactArgs(1),
+		Use:   "complete ACTION_RUN",
+		Short: "Complete an action run",
+		Args:  cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			out, err := rpcCall[wrkfapi.ActionCompleteResult](cmd, a, "wrkf.action.complete", wrkfapi.ActionCompleteParams{
 				ActionRunID: args[0],
@@ -338,7 +343,8 @@ func actionCompleteCmd() *cobra.Command {
 func actionSettleCmd() *cobra.Command {
 	opts := actionSettleOptions{}
 	cmd := &cobra.Command{
-		Use: "settle ACTION_RUN --result RESULT --owner-token TOKEN --owner-generation N",
+		Use:   "settle ACTION_RUN --result RESULT --owner-token TOKEN --owner-generation N",
+		Short: "Settle an action run with a result using its owner token",
 		Long: `Settle a claimed action run with its current fenced authority.
 
 The success response shape is:
@@ -384,8 +390,9 @@ binding.authority.ownerGeneration from the claim response.`,
 func actionFailCmd() *cobra.Command {
 	opts := actionFailOptions{}
 	cmd := &cobra.Command{
-		Use:  "fail ACTION_RUN --run-summary SUMMARY",
-		Args: cobra.ExactArgs(1),
+		Use:   "fail ACTION_RUN --run-summary SUMMARY",
+		Short: "Record a failed action run with a summary",
+		Args:  cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			if opts.runSummary == "" {
 				return fmt.Errorf("--run-summary is required")
@@ -415,7 +422,8 @@ func actionFailCmd() *cobra.Command {
 func actionHeartbeatCmd() *cobra.Command {
 	opts := actionHeartbeatOptions{}
 	cmd := &cobra.Command{
-		Use: "heartbeat ACTION_RUN --lease-token TOKEN",
+		Use:   "heartbeat ACTION_RUN --lease-token TOKEN",
+		Short: "Extend an action run's lease using its lease token",
 		Long: `Extend an active action lease and return the updated action run.
 
 The success response includes:
@@ -448,8 +456,9 @@ ACTION_RUN and --lease-token.`,
 
 func actionShowCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:  "show ACTION_RUN",
-		Args: cobra.ExactArgs(1),
+		Use:   "show ACTION_RUN",
+		Short: "Show an action run",
+		Args:  cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			run, err := rpcCall[wrkfapi.ActionRun](cmd, a, "wrkf.action.show", wrkfapi.ActionShowParams{ActionRunID: args[0]})
 			if err != nil {
@@ -463,8 +472,9 @@ func actionShowCmd() *cobra.Command {
 func actionListCmd() *cobra.Command {
 	opts := actionListOptions{}
 	cmd := &cobra.Command{
-		Use:  "list TASK",
-		Args: cobra.ExactArgs(1),
+		Use:   "list TASK",
+		Short: "List action runs for a task",
+		Args:  cobra.ExactArgs(1),
 		RunE: withTransport(func(a *app, cmd *cobra.Command, args []string) error {
 			result, err := rpcCall[wrkfapi.ActionListResult](cmd, a, "wrkf.action.list", wrkfapi.ActionListParams{
 				Task:                   args[0],

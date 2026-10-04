@@ -250,6 +250,20 @@ func (api *API) TaskRefresh(ctx context.Context, taskSelector, actor string) (*w
 	return inst, nil
 }
 
+// TaskSyncMeta rewrites the task-owned workflow projection for one task, or
+// for every instance when taskSelector is empty, with typed errors (a task
+// without a workflow is WRKF_NOT_FOUND, not an internal error).
+func (api *API) TaskSyncMeta(ctx context.Context, taskSelector, actor string) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	count, err := api.service.SyncMeta(taskSelector, actor)
+	if err != nil {
+		return count, normalizeError(err)
+	}
+	return count, nil
+}
+
 func (api *API) Next(ctx context.Context, taskSelector, role string) (*workflow.NextActionResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -688,6 +702,12 @@ func normalizeError(err error) error {
 		return err
 	}
 	if errors.Is(err, sql.ErrNoRows) {
+		// Keep the kind and ref a wrapping layer already named ("task not found:
+		// <sel>: sql: no rows…"); a bare ErrNoRows is all that stays generic.
+		if strings.Contains(strings.ToLower(err.Error()), " not found") {
+			kind, ref := splitNotFound(err.Error())
+			return NewNotFoundError(ref, kind)
+		}
 		return NewNotFoundError("", "")
 	}
 	var coded codedError
@@ -769,9 +789,19 @@ func splitNotFound(msg string) (kind string, ref string) {
 	kind = "resource"
 	if i := strings.Index(strings.ToLower(msg), " not found"); i > 0 {
 		kind = strings.TrimSpace(msg[:i])
+		if j := strings.LastIndex(kind, ": "); j >= 0 {
+			kind = strings.TrimSpace(kind[j+2:])
+		}
 	}
-	if i := strings.LastIndex(msg, ":"); i >= 0 && i+1 < len(msg) {
-		ref = strings.TrimSpace(msg[i+1:])
+	// The ref is the token right after "not found: ", not the tail after the
+	// last colon: a wrapped cause ("…: sql: no rows in result set") is not a ref.
+	lower := strings.ToLower(msg)
+	if i := strings.Index(lower, " not found: "); i >= 0 {
+		ref = msg[i+len(" not found: "):]
+		if j := strings.Index(ref, ": "); j >= 0 {
+			ref = ref[:j]
+		}
+		ref = strings.TrimSpace(ref)
 	}
 	return kind, ref
 }

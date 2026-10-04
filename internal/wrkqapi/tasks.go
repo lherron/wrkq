@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -219,6 +220,17 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		Via:                   "rpc",
 	})
 	if err != nil {
+		if isUniqueViolation(err) {
+			// Never leak "UNIQUE constraint failed: tasks.project_uuid, tasks.slug":
+			// name the colliding task and the two ways forward.
+			where := strings.TrimSpace(p.Path)
+			if where == "" {
+				where = slug
+			}
+			return nil, NewConflictError(fmt.Sprintf(
+				"a task with slug %q already exists at %s; pick another slug, or inspect the existing task with: wrkq cat %s",
+				slug, where, where), map[string]any{"slug": slug})
+		}
 		return nil, mapStoreError(err, "")
 	}
 
@@ -241,7 +253,9 @@ func (a *API) resolveCreateTarget(p TaskCreateParams) (projectUUID, slug string,
 	case strings.TrimSpace(p.Path) != "":
 		parentUUID, finalSlug, _, rerr := selectors.ResolveParentContainer(a.db, p.Path)
 		if rerr != nil {
-			return "", "", NewNotFoundError(p.Path, "container")
+			// The missing thing is the parent container, not the task path being
+			// created: name the parent so the caller creates the right thing.
+			return "", "", NewNotFoundError(parentContainerPath(p.Path), "container")
 		}
 		slug = finalSlug
 		if parentUUID != nil {
@@ -1407,7 +1421,7 @@ func (a *API) resolveTaskUUID(selector string) (string, error) {
 
 // loadTask reads a task by UUID into a WrkqTask DTO.
 func (a *API) loadTask(ctx context.Context, uuid string) (*WrkqTask, error) {
-	row := a.db.QueryRowContext(ctx, 
+	row := a.db.QueryRowContext(ctx,
 		"SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.campaign_uuid, t.state, t.priority, t.kind, t.description, t.specification, t.outcome, "+
 			"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, "+
 			"t.assignee_principal_ref, t.requester_principal_ref, t.requester_scope_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, "+
@@ -1562,4 +1576,18 @@ func mapStoreError(err error, selector string) error {
 	default:
 		return NewInternalError(err)
 	}
+}
+
+// parentContainerPath is the container part of a task create path
+// ("proj/inbox/slug" -> "proj/inbox"); a bare slug is returned unchanged.
+func parentContainerPath(taskPath string) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(taskPath), "/")
+	if i := strings.LastIndex(trimmed, "/"); i > 0 {
+		return trimmed[:i]
+	}
+	return trimmed
+}
+
+func isUniqueViolation(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "unique constraint failed")
 }

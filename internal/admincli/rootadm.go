@@ -1,6 +1,10 @@
 package admincli
 
 import (
+	"context"
+	"os"
+
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -16,7 +20,7 @@ These operations should not be exposed to agents.`,
 
 // ExecuteAdmin runs the admin root command
 func ExecuteAdmin() error {
-	return rootAdmCmd.Execute()
+	return clifunnel.Execute(context.Background(), rootAdmCmd, os.Args[1:], clifunnel.Options{})
 }
 
 func init() {

@@ -11,7 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -228,6 +230,10 @@ func validateInitializeResponse(res json.RawMessage, requestErr error, profile P
 		if mismatch, ok := protocolMismatchFromInitializeError(requestErr); ok {
 			return mismatch
 		}
+		var unreachable *UnreachableError
+		if errors.As(requestErr, &unreachable) {
+			return unreachable
+		}
 		return fmt.Errorf("rpc.initialize: %w", requestErr)
 	}
 	return validateInitializeResult(res, profile)
@@ -323,6 +329,42 @@ func NewSubprocess(ctx context.Context, binaryPath, dbPath string, extraEnv []st
 	return c, nil
 }
 
+// UnreachableError is a transport failure talking to a remote wrkqd: no HTTP
+// response came back. It is translated once, here at the client, so every
+// command names the endpoint, whether a retry is safe, and the next command
+// (CLI standard §11) instead of a raw dial error.
+type UnreachableError struct {
+	Endpoint string // host:port, as given in the rpc:// locator
+	Method   string
+	// Sent is false when the connection itself failed, so nothing reached the
+	// daemon; true when the request may have been delivered before the failure.
+	Sent bool
+	Err  error
+}
+
+func newUnreachableError(rpcURL, method string, err error) *UnreachableError {
+	endpoint := strings.TrimSuffix(strings.TrimPrefix(rpcURL, "http://"), "/v1/rpc")
+	var op *net.OpError
+	dialFailed := errors.As(err, &op) && op.Op == "dial"
+	return &UnreachableError{Endpoint: endpoint, Method: method, Sent: !dialFailed, Err: err}
+}
+
+func (e *UnreachableError) Error() string {
+	cause := e.Err
+	var urlErr *url.Error
+	if errors.As(cause, &urlErr) {
+		cause = urlErr.Err
+	}
+	retry := "nothing reached the daemon, so retrying is safe"
+	if e.Sent {
+		retry = "the request may have reached the daemon; check its effect before retrying a write"
+	}
+	return fmt.Sprintf("wrkq daemon unreachable at rpc://%s during %s (%v); %s. Check the daemon with: wrkq server health --addr %s  or point --db/WRKQ_DB at a running daemon",
+		e.Endpoint, e.Method, cause, retry, e.Endpoint)
+}
+
+func (e *UnreachableError) Unwrap() error { return e.Err }
+
 type remoteTransport struct {
 	mu      sync.Mutex
 	client  *http.Client
@@ -389,7 +431,7 @@ func (t *remoteTransport) request(ctx context.Context, method string, params any
 	}
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("remote workrpc request %s: %w", method, err)
+		return nil, newUnreachableError(t.url, method, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var rpcResp workrpc.Response

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/spf13/cobra"
 )
@@ -37,7 +38,7 @@ func newRelationLsCmd() *cobra.Command {
 			raw, err := tr.Call(cmd.Context(), "wrkq.relation.listView", map[string]string{"task": sref})
 			if err != nil {
 				if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
-					return fmt.Errorf("failed to resolve task: task not found: %s", sref)
+					return clifunnel.NotFoundf("failed to resolve task", "task", sref)
 				}
 				return err
 			}
@@ -174,7 +175,7 @@ func relTaskIDUUID(cmd *cobra.Command, tr Transport, ref string) (string, string
 	raw, err := tr.Call(cmd.Context(), "wrkq.task.show", map[string]string{"task": ref})
 	if err != nil {
 		if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
-			return "", "", fmt.Errorf("task not found: %s", ref)
+			return "", "", clifunnel.NotFound("task", ref)
 		}
 		return "", "", err
 	}

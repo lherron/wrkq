@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
 )
@@ -77,7 +78,8 @@ func NewWrkpRootCmd() *cobra.Command {
 func ExecuteWrkp() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	err := NewWrkpRootCmd().ExecuteContext(ctx)
+	err := clifunnel.Execute(ctx, NewWrkpRootCmd(), os.Args[1:],
+		clifunnel.Options{NotFoundHint: wrkpNotFoundHint})
 	if errors.Is(err, context.Canceled) {
 		return nil
 	}

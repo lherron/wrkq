@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -174,7 +175,7 @@ func runMvTask(cmd *cobra.Command, tr Transport, src, dst, actor string, flags m
 func runMvContainer(cmd *cobra.Command, tr Transport, src, dst, actor string, flags mvFlags, dstIsContainer bool) error {
 	if _, err := tr.Call(cmd.Context(), "wrkq.container.show", map[string]string{"path": src}); err != nil {
 		if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
-			return fmt.Errorf("source not found: %s", src)
+			return clifunnel.NotFound("source", src)
 		}
 		return err
 	}

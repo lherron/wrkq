@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 const labelValueForms = "comma-separated labels or a JSON array of strings"
@@ -97,21 +99,22 @@ func readStdinValue(label string, stdin io.Reader, claims *stdinClaims) ([]byte,
 		return nil, fmt.Errorf("failed to read from stdin: %w", err)
 	}
 	if len(data) == 0 {
-		return nil, fmt.Errorf("stdin is empty")
+		return nil, fmt.Errorf("stdin is empty: %s needs content; pipe it in or use a heredoc (<<'EOF')", label)
 	}
 	return data, nil
 }
 
+// isReaderTTY reports whether r is an interactive terminal. It asks the
+// terminal driver rather than testing for a character device: /dev/null (and a
+// closed stdin, which the Go runtime reopens as /dev/null) is a character device
+// but not a terminal, and must read as empty input, never as "stdin is a
+// terminal" (CLI standard §8).
 func isReaderTTY(r io.Reader) bool {
 	f, ok := r.(*os.File)
 	if !ok {
 		return false
 	}
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return (info.Mode() & os.ModeCharDevice) != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // parseLabelValue owns CLI acquisition for every task/campaign --labels write

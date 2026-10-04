@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/spf13/cobra"
 )
@@ -176,7 +177,7 @@ Invalid selectors fail with exit code 2 before any streaming.
 			// Legacy returns the --format error directly (exit 2) WITHOUT a caller-side
 			// stderr line, so only main's "Error:" line appears (single-print).
 			if format != "" && format != "ndjson" && format != "compact" {
-				return monitorUsageErrorQuiet(errOut, fmt.Errorf("invalid --format %q: choose ndjson or compact", format))
+				return monitorUsageError(errOut, fmt.Errorf("invalid --format %q: choose ndjson or compact", format))
 			}
 
 			// Scope each selector through the project-root scoper (legacy semantics);
@@ -199,7 +200,7 @@ Invalid selectors fail with exit code 2 before any streaming.
 			// Legacy returns the --scope error directly (exit 2) WITHOUT a caller-side
 			// stderr line (single-print).
 			if scope != "" {
-				return monitorUsageErrorQuiet(errOut, errors.New("--scope is not implemented yet"))
+				return monitorUsageError(errOut, errors.New("--scope is not implemented yet"))
 			}
 			principalRef, err := actorFlag(cmd)
 			if err != nil {
@@ -411,9 +412,8 @@ func monitorClockExitCode(condition string) int {
 func monitorFollowLoop(ctx context.Context, tr Transport, encoder *json.Encoder, opts monitorStreamOpts) (monitorTerminalResult, []string, int, error) {
 	// Eager selector validation BEFORE any streaming, matching legacy
 	// resolveMonitorSelectors: the server resolves the scoped selectors and a bad
-	// one returns WRKQ_VALIDATION (exit 2). Legacy prints the raw error caller-side
-	// THEN main adds "Error:" (double-print), and fails before the feed starts. A
-	// probe eventsView at the current high-water surfaces that resolution error
+	// one returns WRKQ_VALIDATION (exit 2), printed once, and fails before the
+	// feed starts. A probe eventsView at the current high-water surfaces that resolution error
 	// without emitting any events.
 	if len(opts.scopedTasks) > 0 {
 		if _, _, perr := monitorPollEvents(ctx, tr, opts, int64(1)<<62); perr != nil {
@@ -646,21 +646,11 @@ func monitorErrExitCode(err error) int {
 	return 3
 }
 
-// monitorUsageError reproduces legacy's selector/usage failure stderr: the raw
-// error line, then main's "Error: <err>" line, then exit 2. Returns nil so the
-// mirror's main does not add a second "Error:" line. Used for the selector /
-// --until-no-selector / duration / missing-until paths that legacy prints
-// caller-side BEFORE returning the exit error (double-print).
+// monitorUsageError prints one "Error: <err>" line and exits 2. The legacy CLI
+// printed the bare error first as well (a double print that read as two
+// failures); with the legacy CLI retired, every monitor usage error prints once.
+// Returns nil so the main funnel does not add a second "Error:" line.
 func monitorUsageError(errOut io.Writer, err error) error {
-	fmt.Fprintln(errOut, err)
-	monitorExit(errOut, 2, err)
-	return nil
-}
-
-// monitorUsageErrorQuiet reproduces legacy's --format / --scope failure: the error
-// is returned directly (exit 2) with NO caller-side stderr line, so ONLY main's
-// "Error: <err>" line appears (single-print).
-func monitorUsageErrorQuiet(errOut io.Writer, err error) error {
 	monitorExit(errOut, 2, err)
 	return nil
 }
@@ -684,6 +674,9 @@ func monitorStreamErrorExit(errOut io.Writer, err error) error {
 // was NOT pre-reported: print "Error: <err>" to stderr and os.Exit(code). The mirror
 // command returns nil after calling this so the mirror main never adds its own line.
 func monitorExit(errOut io.Writer, code int, err error) {
+	// monitor exits here rather than through main, so apply the funnel's
+	// not-found hint itself (CLI standard §4).
+	err = clifunnel.Decorate(nil, err, clifunnel.Options{NotFoundHint: wrkqNotFoundHint})
 	if f, ok := errOut.(*os.File); ok {
 		fmt.Fprintf(f, "Error: %v\n", err)
 	} else {

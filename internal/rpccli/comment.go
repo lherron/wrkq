@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/render"
 	"github.com/lherron/wrkq/internal/scope"
@@ -110,7 +111,7 @@ func newCommentLsCmd() *cobra.Command {
 								break
 							}
 						}
-						return fmt.Errorf("failed to resolve task %s: task not found: %s", orig, failed)
+						return clifunnel.NotFoundf("failed to resolve task "+orig, "task", failed)
 					}
 					// Legacy surfaces the raw error (e.g. malformed cursor) without
 					// a domain-code prefix.
@@ -398,7 +399,7 @@ func newCommentCatCmd() *cobra.Command {
 						// stripped ref, in both error messages.
 						switch re.DomainID {
 						case "WRKQ_NOT_FOUND":
-							return fmt.Errorf("comment not found: %s", orig)
+							return clifunnel.NotFound("comment", orig)
 						case "WRKQ_VALIDATION":
 							return fmt.Errorf("invalid comment reference: %s (expected friendly ID like C-00001 or UUID)", orig)
 						}
