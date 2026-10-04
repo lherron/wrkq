@@ -393,3 +393,36 @@ func assertNotID(t *testing.T, handoffs []Handoff, unwantedID string) {
 		}
 	}
 }
+
+// Repeated sequence synchronization must neither create duplicate identities nor
+// lower a high-water mark when an older handoff is restored.
+func TestSyncHandoffSequenceKeepsOneHighWaterRow(t *testing.T) {
+	database := setupTestDB(t)
+	for _, highWater := range []int{17, 9, 21, 21} {
+		tx, err := database.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := syncHandoffSequence(context.Background(), tx, highWater); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		var count, stored int
+		if err := database.QueryRow(`SELECT COUNT(*), MAX(seq) FROM sqlite_sequence WHERE name = 'handoff_seq'`).Scan(&count, &stored); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("sync(%d) created %d sequence rows, want one", highWater, count)
+		}
+		want := 17
+		if highWater == 21 {
+			want = 21
+		}
+		if stored != want {
+			t.Fatalf("sync(%d) stored %d, want high-water %d", highWater, stored, want)
+		}
+	}
+}

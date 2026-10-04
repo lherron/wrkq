@@ -480,7 +480,7 @@ func normalizeOptionalHandoffStatus(status string) (string, error) {
 }
 
 func syncHandoffSequence(ctx context.Context, tx *sql.Tx, seq int) error {
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO sqlite_sequence(name, seq) VALUES ('handoff_seq', 0)`); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sqlite_sequence(name, seq) SELECT 'handoff_seq', 0 WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'handoff_seq')`); err != nil {
 		return fmt.Errorf("failed to initialize handoff sequence: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
