@@ -189,7 +189,20 @@ wrkqadm doctor --fix           # auto-repair issues where supported
 
 `wrkqadm migrate` applies any pending migrations (embedded from
 `internal/db/migrations`); `wrkqadm init` initializes a fresh database and
-config.
+config. Applying migrations (including init) refuses a serving database before
+opening SQLite. `migrate --dry-run` and `--status` use `mode=ro`/`query_only`
+connections and remain available while the daemon serves. The typed
+`MIGRATION_DATABASE_SERVING` error names the daemon PID or loaded launchd job
+and prints the bootout → wait unloaded/process exited → migrate → bootstrap
+sequence. No live-migration override is provided.
+
+The guard uses the job's resolved database and `lsof` to detect existing daemons,
+plus a persistent `<db>.migration-lock` lease to exclude startup during
+migration. Do not remove that sidecar while a process holds it. Symlink and
+relative paths share the resolved lease. Applying migrations and daemon startup
+refuse hardlinked databases and URI/query DSNs, which can split SQLite WAL or
+lease identity. Inspection failures fail closed. Disable legacy standalone launchers before migrating:
+a future pre-guard binary cannot participate in the new lease protocol.
 
 ## Actor attribution
 
@@ -263,19 +276,18 @@ writing nothing to the log. Only a bootout/bootstrap cycle re-derives it.
 That also means an install without a restart leaves a healthy-looking daemon
 armed to die on its next respawn — keepalive, a crash, a reboot, or anyone's
 restart, unbounded time later. When `just install` replaces a `wrkqd` that a
-running job still holds, it restarts the job itself if the job's database has no
-pending migrations. It reads that database from the job, not the caller's shell:
-the job's `--db` program argument, else `WRKQ_DB` / `WRKQ_DB_PATH` in the job's
-own launchd environment (`scripts/resolve-job-db.sh`). If the database cannot be
-resolved, is missing, fails the dry-run probe, or has pending migrations, it
-does not restart. It prints the remediation and exits non-zero after the rest of
-the install has run. Migrate only with the daemon stopped: `launchctl bootout`
-the job, wait until `launchctl print` no longer finds it, run `wrkqadm --db
-<path> migrate`, then `launchctl bootstrap` the plist and check `wrkq server
-health`. Never migrate under a serving daemon: on 2026-10-04 that corrupted
-the canonical store (T-10158). `wrkq server stop` refuses under launchd.
-`wrkq server status` reports `binaryStale`, and `wrkq server health` fails on
-it. On the canonical node, install and restart together.
+running job still holds, its read-only migration probe permits an automatic
+restart when there are no pending migrations. It resolves the database from the
+job's own `--db` or launchd environment, not the caller's shell
+(`scripts/resolve-job-db.sh`). If resolution or the probe fails, or migrations
+are pending, it leaves the daemon armed and exits non-zero after installing.
+For a migration release, take a backup, boot out the job and wait for it to
+unload and its process to exit, then run `just install`, `wrkqadm --db <path>
+migrate`, bootstrap the plist, and check `wrkq server health`. Never apply
+migrations under a serving daemon: that preceded canonical-store corruption on
+2026-10-04 (T-10158). `wrkq server stop` refuses under launchd. `wrkq server
+status` reports `binaryStale`, and `wrkq server health` fails on it. Only the
+authorized service operator activates the canonical daemon.
 
 `wrkq server health` resolves the daemon's token the way the CLI transport does
 (`WRKQD_TOKEN`, else `WRKQD_TOKEN_FILE`). On a node running per-node tokens an

@@ -69,6 +69,12 @@ func ServeDaemon(opts DaemonOptions) error {
 		return config.MissingDatabasePathError()
 	}
 
+	release, err := db.AcquireServingLease(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)

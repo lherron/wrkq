@@ -6,6 +6,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -26,8 +27,9 @@ type DB struct {
 	// there takes the writer lock, so concurrent reads queue on it behind
 	// each other and every write (T-09997). This pool begins DEFERRED and is
 	// query_only, so its transactions are snapshot reads that cannot write.
-	read *sql.DB
-	path string
+	read           *sql.DB
+	path           string
+	migrationLease *os.File
 }
 
 // Open opens a SQLite database at the given path and applies the connection
@@ -89,6 +91,30 @@ func Open(path string) (*DB, error) {
 	return &DB{DB: db, read: read, path: path}, nil
 }
 
+// OpenReadOnly opens migration diagnostics without changing the database's
+// journal mode or creating parent directories. mode=ro is the file-level
+// boundary; query_only additionally rejects writes through the connection.
+func OpenReadOnly(path string) (*DB, error) {
+	if path == "" || strings.Contains(path, "?") || strings.HasPrefix(path, "file:") {
+		return nil, fmt.Errorf("read-only diagnostics require a plain local file path")
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	uri := url.URL{Scheme: "file", Path: absolute}
+	uri.RawQuery = "mode=ro&_query_only=true&_busy_timeout=5000&_txlock=deferred"
+	reader, err := sql.Open("sqlite3", uri.String())
+	if err != nil {
+		return nil, err
+	}
+	if err := reader.Ping(); err != nil {
+		_ = reader.Close()
+		return nil, err
+	}
+	return &DB{DB: reader, read: reader, path: absolute}, nil
+}
+
 // BeginRead starts a read-only snapshot transaction that never takes the
 // SQLite writer lock. Use it instead of BeginTx(ctx, &sql.TxOptions{ReadOnly:
 // true}), which go-sqlite3 runs as BEGIN IMMEDIATE on the main pool.
@@ -98,6 +124,9 @@ func (db *DB) BeginRead(ctx context.Context) (*sql.Tx, error) {
 
 // Close closes both pools.
 func (db *DB) Close() error {
+	if db.migrationLease != nil {
+		defer func() { _ = db.migrationLease.Close() }()
+	}
 	rerr := db.read.Close()
 	if err := db.DB.Close(); err != nil {
 		return err
@@ -127,6 +156,11 @@ func (db *DB) Path() string {
 
 // Migrate runs all pending migrations
 func (db *DB) Migrate() error {
+	release, err := db.guardMigration()
+	if err != nil {
+		return err
+	}
+	defer release()
 	// Read migration files from embedded FS
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
@@ -188,6 +222,11 @@ func (db *DB) BeginTx() (*sql.Tx, error) {
 
 // MigrateWithInfo runs all pending migrations and returns the list of applied migrations
 func (db *DB) MigrateWithInfo() ([]string, error) {
+	release, err := db.guardMigration()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	// Read migration files from embedded FS
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {

@@ -293,7 +293,7 @@ install *flags:
           echo "    ✗ NOT restarting: could not resolve the job's database ($job_db)."
           echo "$armed_msg"
           echo "    Resolve the DB by hand from:  launchctl print gui/$(id -u)/$label"
-          echo "    then:  wrkqadm --db <path> migrate --dry-run; if pending, never migrate under the serving daemon:"
+          echo "    then:  wrkqadm --db <path> migrate --dry-run; if pending, use the OFFLINE sequence:"
           echo "      ${offline_mig//DB/<path>}"
           echo ""
           install_armed="unresolved job database"
@@ -323,7 +323,7 @@ install *flags:
           echo "    ✗ NOT restarting: unrecognized migration probe output for $job_db:"
           printf '%s\n' "$dry_run" | sed 's/^/      /'
           echo "$armed_msg"
-          echo "    Check by hand:  wrkqadm --db $job_db migrate --dry-run  then  wrkq server restart"
+          echo "    Check by hand with the daemon offline:  ${offline_mig//DB/$job_db}"
           echo ""
           install_armed="unrecognized migration probe output for $job_db"
         else
@@ -597,6 +597,7 @@ tree:
 # Run quick smoke test (build + wrkqd + merge + wrkf smoke scripts)
 smoke: build
   test/smoke-wrkqd.sh
+  python3 test/smoke-migration-guard.py
   test/smoke-mergeadm.sh
   test/smoke-wrkf.sh
   test/smoke-wrkf-rpc.sh
@@ -687,6 +688,7 @@ e2e: env-up
   set -euo pipefail
   echo "==> e2e: wrkq smoke suite"
   test/smoke-wrkqd.sh
+  python3 test/smoke-migration-guard.py
   test/smoke-mergeadm.sh
   test/smoke-wrkf.sh
   test/smoke-wrkf-rpc.sh

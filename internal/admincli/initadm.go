@@ -84,7 +84,7 @@ func runInitAdm(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open database (creates file if it doesn't exist)
-	database, err := db.Open(cfg.DBPath)
+	database, err := db.OpenForMigration(cfg.DBPath)
 	if err != nil {
 		return exitError(1, fmt.Errorf("failed to open database: %w", err))
 	}

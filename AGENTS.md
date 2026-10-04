@@ -35,10 +35,12 @@ do not rerun a timestamp-generating producer install merely to seed another
 node.
 
 On the canonical daemon node, install and restart together. If the change
-carries a migration, first take a file-level database backup, then run
-`just install`, `launchctl bootout` the job (wait until it is gone), `wrkqadm
-migrate`, and `launchctl bootstrap` the plist, in that order. Never migrate
-under a serving daemon: that corrupted the canonical store (T-10158).
+carries a migration, first take a file-level database backup, then
+`launchctl bootout` the job (wait until it and its process are gone),
+run `just install`, `wrkqadm migrate`, and `launchctl bootstrap` the plist,
+in that order. Applying migrations refuses a serving database; dry-run/status
+use read-only connections and remain available. Never migrate under a serving
+daemon: that corrupted the canonical store (T-10158).
 Restarting before migration can leave the daemon unable to start. Check
 `wrkq server health` afterward; `wrkq server status` reports `binaryStale`
 when the running daemon holds an older installed binary.

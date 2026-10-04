@@ -23,6 +23,9 @@ table. Each migration file (e.g., 000001_baseline.sql) is applied exactly once.
 This command is safe to run multiple times - it only applies migrations that
 haven't been applied yet.
 
+Stop the daemon and unload its launchd job before applying migrations.
+--dry-run and --status use a read-only connection and work while it serves.
+
 Use --dry-run to see which migrations would be applied without running them.
 Use --status to show the current migration status.`,
 		Args: cobra.NoArgs,
@@ -66,7 +69,12 @@ func runMigrateAdm(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open database
-	database, err := db.Open(cfg.DBPath)
+	var database *db.DB
+	if dryRun || status {
+		database, err = db.OpenReadOnly(cfg.DBPath)
+	} else {
+		database, err = db.OpenForMigration(cfg.DBPath)
+	}
 	if err != nil {
 		return exitError(1, fmt.Errorf("failed to open database: %w", err))
 	}
