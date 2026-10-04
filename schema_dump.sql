@@ -48,62 +48,6 @@ BEGIN
   UPDATE actors SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
    WHERE rowid = NEW.rowid;
 END;
-CREATE TABLE section_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
-CREATE TABLE sections (
-  uuid TEXT NOT NULL PRIMARY KEY
-        DEFAULT (
-          lower(
-            hex(randomblob(4)) || '-' ||
-            hex(randomblob(2)) || '-' ||
-            '4' || substr(hex(randomblob(2)),2) || '-' ||
-            substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' ||
-            hex(randomblob(6))
-          )
-        ),
-  id TEXT UNIQUE,
-  project_uuid TEXT NOT NULL REFERENCES "containers_old"(uuid) ON DELETE CASCADE,
-  slug TEXT NOT NULL
-       CHECK (slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' AND length(slug) <= 255),
-  title TEXT NOT NULL,
-  order_index INTEGER NOT NULL DEFAULT 0,
-  role TEXT NOT NULL DEFAULT 'ready',
-  is_default INTEGER NOT NULL DEFAULT 0,
-  wip_limit INTEGER,
-  meta TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-  archived_at TEXT,
-  UNIQUE(project_uuid, slug)
-);
-CREATE TRIGGER sections_role_check_insert
-BEFORE INSERT ON sections
-WHEN NEW.role NOT IN ('backlog', 'ready', 'active', 'review', 'done')
-BEGIN
-  SELECT RAISE(ABORT, 'Invalid section role: must be backlog, ready, active, review, or done');
-END;
-CREATE TRIGGER sections_role_check_update
-BEFORE UPDATE OF role ON sections
-WHEN NEW.role NOT IN ('backlog', 'ready', 'active', 'review', 'done')
-BEGIN
-  SELECT RAISE(ABORT, 'Invalid section role: must be backlog, ready, active, review, or done');
-END;
-CREATE TRIGGER sections_ai_friendly
-AFTER INSERT ON sections
-WHEN NEW.id IS NULL OR NEW.id = ''
-BEGIN
-  INSERT INTO section_seq (id) VALUES (NULL);
-  UPDATE sections
-     SET id = 'S-' || printf('%05d', last_insert_rowid())
-   WHERE rowid = NEW.rowid;
-END;
-CREATE TRIGGER sections_au_touch
-AFTER UPDATE ON sections
-BEGIN
-  UPDATE sections SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-   WHERE rowid = NEW.rowid;
-END;
-CREATE INDEX sections_project_idx ON sections(project_uuid);
-CREATE INDEX sections_role_idx ON sections(role);
 CREATE TABLE evidence_item_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE task_transition_seq(id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE workflow_templates (
@@ -163,7 +107,6 @@ CREATE TABLE containers (
   updated_by_scope_ref TEXT,
   kind TEXT NOT NULL DEFAULT 'directory',
   sort_index INTEGER NOT NULL DEFAULT 0,
-  section_uuid TEXT REFERENCES sections(uuid) ON DELETE SET NULL,
   webhook_urls TEXT
 , root TEXT, specification TEXT, labels TEXT, campaign_state TEXT
   CHECK (campaign_state IN ('draft','active','completed','cancelled')));
@@ -171,7 +114,6 @@ CREATE UNIQUE INDEX containers_unique_slug_in_parent
   ON containers(parent_uuid, slug) WHERE parent_uuid IS NOT NULL;
 CREATE UNIQUE INDEX containers_unique_root_slug
   ON containers(slug) WHERE parent_uuid IS NULL;
-CREATE INDEX containers_section_idx ON containers(section_uuid) WHERE section_uuid IS NOT NULL;
 CREATE UNIQUE INDEX containers_single_root ON containers(kind) WHERE kind = 'root';
 CREATE INDEX containers_created_by_principal_idx ON containers(created_by_principal_ref)
   WHERE created_by_principal_ref IS NOT NULL;
@@ -275,7 +217,6 @@ CREATE TABLE workflow_events (
   task_doc_hash TEXT,
   idempotency_key TEXT,
   result TEXT,
-  rejection_code TEXT,
   payload_json TEXT NOT NULL,
   prev_event_hash TEXT,
   event_hash TEXT,
@@ -309,7 +250,7 @@ CREATE TABLE workflow_runs (
   terminal_result TEXT,
   idempotency_key TEXT,
   request_hash TEXT
-, action TEXT, lease_owner TEXT, lease_token TEXT, lease_expires_at TEXT, heartbeat_at TEXT, principal_ref TEXT, semantic_action_key TEXT, attempt INTEGER NOT NULL DEFAULT 1, agent_ref TEXT, scope_ref TEXT, handler_contract TEXT, handler_id TEXT, handler_version TEXT, workspace_ref TEXT, source_run_id TEXT REFERENCES workflow_runs(id), source_evidence_id TEXT REFERENCES workflow_evidence(id), source_commit_sha TEXT, owner_generation INTEGER NOT NULL DEFAULT 0, source_identity TEXT, predecessor_run_id TEXT REFERENCES workflow_runs(id), superseded_by_run_id TEXT REFERENCES workflow_runs(id), side_effect_classes_json TEXT);
+, action TEXT, lease_owner TEXT, lease_token TEXT, lease_expires_at TEXT, heartbeat_at TEXT, principal_ref TEXT, semantic_action_key TEXT, attempt INTEGER NOT NULL DEFAULT 1, agent_ref TEXT, scope_ref TEXT, handler_contract TEXT, workspace_ref TEXT, source_run_id TEXT REFERENCES workflow_runs(id), source_evidence_id TEXT REFERENCES workflow_evidence(id), source_commit_sha TEXT, owner_generation INTEGER NOT NULL DEFAULT 0, source_identity TEXT, predecessor_run_id TEXT REFERENCES workflow_runs(id), superseded_by_run_id TEXT REFERENCES workflow_runs(id), side_effect_classes_json TEXT);
 CREATE UNIQUE INDEX workflow_runs_instance_idempotency_key_unique
 ON workflow_runs(instance_id, idempotency_key)
 WHERE idempotency_key IS NOT NULL;
@@ -331,7 +272,6 @@ CREATE TABLE workflow_check_runs (
   facts_json TEXT,
   actor TEXT,
   role TEXT,
-  run_id TEXT REFERENCES workflow_runs(id),
   started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   completed_at TEXT
 , principal_ref TEXT);
@@ -622,20 +562,20 @@ CREATE INDEX handoffs_agent_principal_idx ON handoffs(agent_principal_ref)
 CREATE INDEX handoffs_created_by_principal_idx ON handoffs(created_by_principal_ref)
   WHERE created_by_principal_ref IS NOT NULL;
 CREATE VIEW v_container_paths AS
-WITH RECURSIVE container_tree(uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, path, level) AS (
-  SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, slug AS path, 0 AS level
+WITH RECURSIVE container_tree(uuid, id, slug, title, parent_uuid, kind, sort_index, path, level) AS (
+  SELECT uuid, id, slug, title, parent_uuid, kind, sort_index, slug AS path, 0 AS level
     FROM containers
    WHERE parent_uuid = '00000000-0000-4000-8000-000000000001'
   UNION ALL
-  SELECT c.uuid, c.id, c.slug, c.title, c.parent_uuid, c.kind, c.section_uuid, c.sort_index,
+  SELECT c.uuid, c.id, c.slug, c.title, c.parent_uuid, c.kind, c.sort_index,
          ct.path || '/' || c.slug AS path,
          ct.level + 1 AS level
     FROM containers c
     JOIN container_tree ct ON c.parent_uuid = ct.uuid
 )
-SELECT uuid, id, slug, title, parent_uuid, kind, section_uuid, sort_index, path, level
+SELECT uuid, id, slug, title, parent_uuid, kind, sort_index, path, level
   FROM container_tree
-/* v_container_paths(uuid,id,slug,title,parent_uuid,kind,section_uuid,sort_index,path,level) */;
+/* v_container_paths(uuid,id,slug,title,parent_uuid,kind,sort_index,path,level) */;
 CREATE VIEW v_task_paths AS
 SELECT t.uuid,
        t.id,
