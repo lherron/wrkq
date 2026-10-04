@@ -13,10 +13,12 @@
 //     from a server WRKQ_NOT_FOUND/WRKF_NOT_FOUND, gets a hint naming the valid
 //     selector forms and the command that lists real candidates, in the
 //     binary's own vocabulary.
-//
-// The funnel only adds lines after the original message. The first line of
-// every error, and every exit code, is unchanged: callers that match on either
-// keep working (CLI standard §5, §13).
+//   - §5/§6: a mistyped subcommand under a group is an unknown-command usage
+//     error, not the group's help with exit 0. Every usage error exits 2
+//     (ExitCode).
+//   - §9: an unrecognized --output value is a usage error on every command.
+//   - §4: Report renders an error once, with its code in a dedicated field,
+//     structured under --json/--ndjson (T-10234).
 package clifunnel
 
 import (
@@ -24,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -37,20 +40,39 @@ type HintFunc func(kind, ref string) string
 // Options configures the funnel for one binary.
 type Options struct {
 	NotFoundHint HintFunc
+	// OutputModes is the binary's --output vocabulary. When set, a --output
+	// value outside it is a usage error on every command (§9).
+	OutputModes []string
 }
 
 // Execute runs root with args through the funnel: help-anywhere rewriting
 // before dispatch, and usage/not-found decoration of the returned error.
 func Execute(ctx context.Context, root *cobra.Command, args []string, opts Options) error {
-	Install(root)
+	install(root, opts.OutputModes)
 	root.SetArgs(HelpArgs(root, args))
+	// cobra answers a non-runnable group's leftover positional with the group's
+	// help and exit 0. Intercept that help so a typo fails as a usage error.
+	var typo error
+	help := root.HelpFunc()
+	root.SetHelpFunc(func(c *cobra.Command, a []string) {
+		if err := unknownSubcommand(c); err != nil {
+			typo = err
+			return
+		}
+		help(c, a)
+	})
 	cmd, err := root.ExecuteContextC(ctx)
+	if err == nil {
+		err = typo
+	}
 	return Decorate(cmd, err, opts)
 }
 
 // Install wires the funnel's flag-error rewriting and argument-count wrapping
 // into every command under root. It is idempotent.
-func Install(root *cobra.Command) {
+func Install(root *cobra.Command) { install(root, nil) }
+
+func install(root *cobra.Command, outputModes []string) {
 	root.SetFlagErrorFunc(flagError)
 	walk(root, func(c *cobra.Command) {
 		if c.Annotations[installedAnnotation] == "1" {
@@ -60,16 +82,68 @@ func Install(root *cobra.Command) {
 			c.Annotations = map[string]string{}
 		}
 		c.Annotations[installedAnnotation] = "1"
-		if c.Args != nil {
-			validate := c.Args
-			c.Args = func(cmd *cobra.Command, args []string) error {
+		// A nil Args on the root keeps cobra's own unknown-command check; on any
+		// other command it means "any args", which the wrapper preserves.
+		if c.Args == nil && !c.HasParent() {
+			return
+		}
+		validate := c.Args
+		c.Args = func(cmd *cobra.Command, args []string) error {
+			if validate != nil {
 				if err := validate(cmd, args); err != nil {
 					return &UsageError{Err: err, Cmd: cmd}
 				}
-				return nil
 			}
+			return checkOutputMode(cmd, outputModes)
 		}
 	})
+}
+
+// unknownSubcommand returns the usage error for a group invoked with a
+// positional that names none of its subcommands, or nil.
+func unknownSubcommand(c *cobra.Command) error {
+	if c.Runnable() || !c.HasAvailableSubCommands() || !c.HasParent() {
+		return nil
+	}
+	if f := c.Flags().Lookup("help"); f != nil && f.Changed {
+		return nil
+	}
+	positionals := c.Flags().Args()
+	if len(positionals) == 0 {
+		return nil
+	}
+	ue := &UsageError{Err: fmt.Errorf("unknown command %q for %q", positionals[0], c.CommandPath()), Cmd: c}
+	if c.SuggestionsMinimumDistance <= 0 {
+		c.SuggestionsMinimumDistance = 2 // cobra's own default for root typos
+	}
+	if s := c.SuggestionsFor(positionals[0]); len(s) > 0 {
+		ue.Suggestion = "Did you mean " + strings.Join(s, " or ") + "?"
+	}
+	return ue
+}
+
+// checkOutputMode refuses a --output value outside the binary's vocabulary.
+// Whether a recognized mode suits a given command stays that command's call.
+func checkOutputMode(cmd *cobra.Command, modes []string) error {
+	if len(modes) == 0 || cmd.DisableFlagParsing {
+		return nil
+	}
+	f := cmd.Flags().Lookup("output")
+	if f == nil || !f.Changed || slices.Contains(modes, f.Value.String()) {
+		return nil
+	}
+	return &UsageError{
+		Err: fmt.Errorf("invalid output mode %q: choose %s", f.Value.String(), choiceList(modes)),
+		Cmd: cmd,
+	}
+}
+
+// choiceList renders "a, b, or c" (CLI standard §9's unrecognized-mode shape).
+func choiceList(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + ", or " + items[len(items)-1]
 }
 
 const installedAnnotation = "clifunnel.installed"

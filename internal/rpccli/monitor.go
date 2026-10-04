@@ -169,10 +169,23 @@ Invalid selectors fail with exit code 2 before any streaming.
 			out := cmd.OutOrStdout()
 			errOut := cmd.ErrOrStderr()
 
-			// --raw delegates to the whole-log unfiltered tail (history.tailView),
-			// matching legacy runMonitorWatch's raw branch: NDJSON, follow=true.
+			timeout, err := parseMonitorDuration(timeoutStr, 0)
+			if err != nil {
+				return monitorUsageError(errOut, err)
+			}
+			stallAfter, err := parseMonitorDuration(stallAfterStr, 0)
+			if err != nil {
+				return monitorUsageError(errOut, err)
+			}
+			// --raw is the whole-log unfiltered tail (history.tailView) as NDJSON.
+			// Its clocks end the follow with the same terminal line and exit 0 as
+			// a bounded follow with no --until (T-10234).
 			if raw {
-				return watchTailLoop(cmd.Context(), tr, out, since, true, true)
+				result, err := watchTailLoop(cmd.Context(), tr, out, since, timeout, stallAfter)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(out).Encode(buildMonitorTerminalLine(result, nil))
 			}
 			// Legacy returns the --format error directly (exit 2) WITHOUT a caller-side
 			// stderr line, so only main's "Error:" line appears (single-print).
@@ -188,14 +201,6 @@ Invalid selectors fail with exit code 2 before any streaming.
 			}
 			if len(args) == 0 && until != "" {
 				return monitorUsageError(errOut, errors.New("monitor watch --until requires at least one selector"))
-			}
-			timeout, err := parseMonitorDuration(timeoutStr, 0)
-			if err != nil {
-				return monitorUsageError(errOut, err)
-			}
-			stallAfter, err := parseMonitorDuration(stallAfterStr, 0)
-			if err != nil {
-				return monitorUsageError(errOut, err)
 			}
 			// Legacy returns the --scope error directly (exit 2) WITHOUT a caller-side
 			// stderr line (single-print).
@@ -243,7 +248,7 @@ Invalid selectors fail with exit code 2 before any streaming.
 	cmd.Flags().StringVar(&timeoutStr, "timeout", "", "Maximum follow duration (e.g. 30m); bounds the follow with or without --until")
 	cmd.Flags().StringVar(&stallAfterStr, "stall-after", "", "Exit after this duration with no new events; applies with or without --until")
 	cmd.Flags().BoolVar(&stateOnly, "state-only", false, "Only emit lifecycle state-change events")
-	cmd.Flags().BoolVar(&raw, "raw", false, "Raw wrkq watch behavior (whole-log unfiltered tail)")
+	cmd.Flags().BoolVar(&raw, "raw", false, "Whole-log unfiltered tail as NDJSON (honors --since, --timeout, --stall-after)")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as NDJSON")
 	cmd.Flags().Int64Var(&since, "since", 0, "Start from event ID (overrides high-water default)")
 	cmd.Flags().Int64Var(&last, "last", 0, "Replay last N events before following")

@@ -79,12 +79,15 @@ func ExecuteWrkp() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	err := clifunnel.Execute(ctx, NewWrkpRootCmd(), os.Args[1:],
-		clifunnel.Options{NotFoundHint: wrkpNotFoundHint})
+		clifunnel.Options{NotFoundHint: wrkpNotFoundHint, OutputModes: wrkpOutputModes})
 	if errors.Is(err, context.Canceled) {
 		return nil
 	}
 	return err
 }
+
+// wrkpOutputModes is wrkp's --output vocabulary (§9).
+var wrkpOutputModes = []string{"human", "json", "ndjson", "porcelain", "yaml", "tsv"}
 
 func newWrkpPostCmd() *cobra.Command {
 	var eventType, summary, task, key, occurredAt string
@@ -265,12 +268,25 @@ func newWrkpCursorCmd() *cobra.Command {
 }
 
 func newWrkpLogCmd() *cobra.Command {
-	var after, since, before, task, typeList string
+	var after, since, before, task, typeList, timeoutStr, stallAfterStr string
 	var limit int
 	var follow, ndjson, porcelain, pretty, allTypes bool
 	cmd := &cobra.Command{
 		Use: "log [project]", Short: "Read the merged project timeline", Args: cobra.MaximumNArgs(1),
+		Long: `Read the merged project timeline, newest first, or follow it with --follow.
+
+A follow ends when --timeout (total duration) or --stall-after (time with no new
+entry) expires. It then writes one terminal record and exits 0: a
+{"type":"wrkp.log.terminal",...} line in json/ndjson modes, a "follow ended"
+line otherwise, both naming the cursor to resume from with --after. This is
+the termination contract of wrkq monitor watch without --until.
+
+Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			timeout, stallAfter, err := wrkpFollowClocks(cmd, follow, timeoutStr, stallAfterStr)
+			if err != nil {
+				return err
+			}
 			var beforeTime time.Time
 			if before != "" {
 				var err error
@@ -310,6 +326,8 @@ func newWrkpLogCmd() *cobra.Command {
 			if deliveredLimit <= 0 {
 				deliveredLimit = wrkpDefaultLimit
 			}
+			followStarted := time.Now()
+			lastEntry := followStarted
 			for {
 				readStarted := time.Now()
 				params := map[string]any{"container": project, "scope": "subtree", "entriesOnly": true, "tail": follow || forward}
@@ -374,6 +392,9 @@ func newWrkpLogCmd() *cobra.Command {
 					return err
 				}
 				delivered += len(view.Entries)
+				if len(view.Entries) > 0 {
+					lastEntry = time.Now()
+				}
 				if follow {
 					currentSet, err := wrkpSubtreeFingerprint(cmd.Context(), tr, view.Container.UUID)
 					if err != nil {
@@ -444,6 +465,12 @@ func newWrkpLogCmd() *cobra.Command {
 					}
 					return renderWrkpEntries(cmd, heldEntries, mode, styled)
 				}
+				if timeout > 0 && time.Since(followStarted) >= timeout {
+					return writeWrkpTerminal(cmd, mode, monitorResultTimeout, cursor)
+				}
+				if stallAfter > 0 && time.Since(lastEntry) >= stallAfter {
+					return writeWrkpTerminal(cmd, mode, monitorResultStall, cursor)
+				}
 				select {
 				case <-cmd.Context().Done():
 					return nil
@@ -460,10 +487,52 @@ func newWrkpLogCmd() *cobra.Command {
 	cmd.Flags().StringVar(&task, "task", "", "Task selector")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum delivered entries")
 	cmd.Flags().BoolVar(&follow, "follow", false, "Follow newly appended matching entries")
+	cmd.Flags().StringVar(&timeoutStr, "timeout", "", "End a --follow after this duration (e.g. 30m)")
+	cmd.Flags().StringVar(&stallAfterStr, "stall-after", "", "End a --follow after this long with no new entry")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output entries as NDJSON")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Write the next cursor to stderr")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force the styled timeline even when not a TTY")
 	return cmd
+}
+
+// wrkpFollowClocks parses --timeout and --stall-after. They bound a follow, so
+// either one without --follow is a usage error rather than a silent no-op.
+func wrkpFollowClocks(cmd *cobra.Command, follow bool, timeoutStr, stallAfterStr string) (time.Duration, time.Duration, error) {
+	if !follow && (timeoutStr != "" || stallAfterStr != "") {
+		return 0, 0, &clifunnel.UsageError{Err: errors.New("--timeout and --stall-after bound a --follow; add --follow or drop them"), Cmd: cmd}
+	}
+	timeout, err := parseMonitorDuration(timeoutStr, 0)
+	if err != nil {
+		return 0, 0, &clifunnel.UsageError{Err: fmt.Errorf("--timeout: %w", err), Cmd: cmd}
+	}
+	stallAfter, err := parseMonitorDuration(stallAfterStr, 0)
+	if err != nil {
+		return 0, 0, &clifunnel.UsageError{Err: fmt.Errorf("--stall-after: %w", err), Cmd: cmd}
+	}
+	return timeout, stallAfter, nil
+}
+
+// wrkpTerminalLine is monitor watch's terminal record under wrkp's own type,
+// plus the cursor a caller resumes from with --after.
+type wrkpTerminalLine struct {
+	monitorTerminalLine
+	Cursor string `json:"cursor,omitempty"`
+}
+
+// writeWrkpTerminal ends a follow that ran out its clock: one terminal record on
+// stdout with the data, exit 0 (the follow ended exactly as asked).
+func writeWrkpTerminal(cmd *cobra.Command, mode string, result monitorTerminalResult, cursor string) error {
+	line := wrkpTerminalLine{monitorTerminalLine: buildMonitorTerminalLine(result, nil), Cursor: cursor}
+	line.Type = "wrkp.log.terminal"
+	if mode == "json" || mode == "ndjson" {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(line)
+	}
+	resume := ""
+	if cursor != "" {
+		resume = "; resume with: wrkp log --follow --after " + cursor
+	}
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "follow ended: %s (%s)%s\n", line.Result, line.Reason, resume)
+	return err
 }
 
 func wrkpFollowDelay(before time.Time) time.Duration {
@@ -680,16 +749,18 @@ func wrkpRPCError(err error) error {
 	if !errors.As(err, &rpcErr) {
 		return err
 	}
-	message := rpcErr.Error()
+	// Keep the typed error so its domain code stays a field (CLI standard §4);
+	// only the message gains the server's reason.
+	annotated := *rpcErr
 	if len(rpcErr.Data) > 0 {
 		var data struct {
 			Reason string `json:"reason"`
 		}
 		if json.Unmarshal(rpcErr.Data, &data) == nil && data.Reason != "" {
-			message += " (" + data.Reason + ")"
+			annotated.Message += " (" + data.Reason + ")"
 		}
 	}
-	return errors.New(message)
+	return &annotated
 }
 
 func splitCommaValues(raw string) []string {

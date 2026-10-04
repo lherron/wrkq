@@ -620,7 +620,7 @@ func TestCampaignLifecycleCLICancelAndNudgeAreEventsNotComments(t *testing.T) {
 			t.Fatalf("terminalize last member: %v\n%s", err, out)
 		}
 		watchOut, err := runCampaignCLI(
-			t, f.dbPath, "watch", "--since", fmt.Sprint(before), "--ndjson", "--follow=false",
+			t, f.dbPath, "monitor", "watch", "--raw", "--since", fmt.Sprint(before), "--stall-after", "300ms",
 		)
 		if err != nil {
 			t.Fatalf("raw monitor replay: %v\n%s", err, watchOut)

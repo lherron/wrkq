@@ -129,7 +129,7 @@ func TestProductionCommandContract_BoundedMonitorAndWatch(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "watch", args: []string{"watch", "--since", "0", "--ndjson", "--follow=false"}, want: `"event_type"`},
+		{name: "monitor-watch-raw", args: []string{"monitor", "watch", "--raw", "--since", "0", "--stall-after", "300ms"}, want: `"event_type"`},
 		{name: "monitor-watch", args: []string{"monitor", "watch", "T-00001", "--until", "state=open", "--timeout", "1s", "--ndjson"}, want: `"result":"met"`},
 	} {
 		res := runCLI(t, bins.wrkq, dir, tc.args)

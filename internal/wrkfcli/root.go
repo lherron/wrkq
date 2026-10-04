@@ -111,8 +111,8 @@ func init() {
 }
 
 // errReported signals that a command error has already been rendered (as a
-// --json envelope on stdout); main.go uses IsReported to avoid printing the
-// text "Error: ..." line to stderr while still exiting non-zero.
+// --json envelope on stderr); main.go uses IsReported to avoid printing the
+// error a second time while still exiting non-zero.
 var errReported = errors.New("wrkf: error reported")
 
 // IsReported reports whether err was already rendered to the user.
@@ -121,23 +121,16 @@ func IsReported(err error) bool {
 }
 
 // renderJSONErrorEnvelope emits the structured {"error":{...}} envelope to
-// stdout (F1). It prefers the typed workflow ErrorDetail; otherwise it
-// synthesizes a best-effort envelope from any coded error.
+// stderr (F1; CLI standard §4, T-10234: errors never share stdout with data).
+// It prefers the typed workflow ErrorDetail; any other error goes through the
+// shared funnel's structure, so its code is a field and never message text.
 func renderJSONErrorEnvelope(cmd *cobra.Command, err error) {
-	detail, ok := wrkfapi.AsErrorDetail(err)
-	if !ok {
-		detail = wrkfapi.ErrorDetail{Code: codeFromError(err), Message: err.Error()}
+	if detail, ok := wrkfapi.AsErrorDetail(err); ok {
+		b, _ := json.MarshalIndent(map[string]any{"error": detail}, "", "  ")
+		fmt.Fprintln(cmd.ErrOrStderr(), string(b))
+		return
 	}
-	b, _ := json.MarshalIndent(map[string]any{"error": detail}, "", "  ")
-	fmt.Fprintln(cmd.OutOrStdout(), string(b))
-}
-
-func codeFromError(err error) string {
-	var coded interface{ Code() string }
-	if errors.As(err, &coded) && coded.Code() != "" {
-		return coded.Code()
-	}
-	return "WRKF_ERROR"
+	clifunnel.Report(cmd.ErrOrStderr(), err, clifunnel.ErrorJSON, "WRKF")
 }
 
 const wrkfPrincipalEnv = "WRKF_PRINCIPAL_REF"

@@ -1,6 +1,10 @@
 package admincli
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/lherron/wrkq/internal/clifunnel"
+)
 
 type cliExitError struct {
 	code     int
@@ -30,7 +34,7 @@ func ExitCodeForError(err error) int {
 	if errors.As(err, &e) {
 		return e.code
 	}
-	return 1
+	return clifunnel.ExitCode(err, 1)
 }
 
 // ErrorAlreadyReported reports whether a command already rendered its error.

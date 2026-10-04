@@ -1991,7 +1991,7 @@
               },
               {
                 "name": "raw",
-                "usage": "Raw wrkq watch behavior (whole-log unfiltered tail)",
+                "usage": "Whole-log unfiltered tail as NDJSON (honors --since, --timeout, --stall-after)",
                 "type": "bool",
                 "default": "false",
                 "hidden": false
@@ -3909,34 +3909,10 @@
       },
       {
         "name": "watch",
-        "use": "watch [PATH...]",
-        "short": "Stream change events from the event log",
+        "use": "watch",
+        "short": "Removed: use wrkq monitor watch --raw",
         "hidden": false,
-        "available": true,
-        "flags": [
-          {
-            "name": "follow",
-            "shorthand": "f",
-            "usage": "Follow new events (default true)",
-            "type": "bool",
-            "default": "true",
-            "hidden": false
-          },
-          {
-            "name": "ndjson",
-            "usage": "Output as newline-delimited JSON",
-            "type": "bool",
-            "default": "false",
-            "hidden": false
-          },
-          {
-            "name": "since",
-            "usage": "Start from event ID (0 = all events)",
-            "type": "int64",
-            "default": "0",
-            "hidden": false
-          }
-        ]
+        "available": true
       },
       {
         "name": "webhook",

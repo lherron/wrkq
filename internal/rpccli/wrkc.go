@@ -229,7 +229,7 @@ wrkc has no HRC dependency: every verb works with every HRC daemon down.`,
 // ExecuteWrkc runs the wrkc CLI.
 func ExecuteWrkc() error {
 	return clifunnel.Execute(context.Background(), NewWrkcRootCmd(), os.Args[1:],
-		clifunnel.Options{NotFoundHint: wrkcNotFoundHint})
+		clifunnel.Options{NotFoundHint: wrkcNotFoundHint, OutputModes: wrkqOutputModes})
 }
 
 // wrkcScopeRef resolves the caller's own scope handle: the --scope-ref flag when

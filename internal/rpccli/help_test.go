@@ -74,7 +74,9 @@ func TestRootHelpListsEveryVisibleCommand(t *testing.T) {
 func collectHelpPaths(cmd *cobra.Command, prefix []string) [][]string {
 	paths := [][]string{append([]string(nil), prefix...)}
 	for _, child := range cmd.Commands() {
-		if !isVisibleHelpCommand(child) {
+		// A command that owns its argv (the retired `watch` pointer shim) answers
+		// --help itself, so it has no cobra help page to measure.
+		if !isVisibleHelpCommand(child) || child.DisableFlagParsing {
 			continue
 		}
 		childPrefix := append(append([]string(nil), prefix...), child.Name())

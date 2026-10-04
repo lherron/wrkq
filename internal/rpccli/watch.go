@@ -3,23 +3,23 @@ package rpccli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
-	"github.com/lherron/wrkq/internal/style"
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/spf13/cobra"
 )
 
-// watch mirrors `wrkq watch [PATH...]` over wrkq.history.tailView (T-05116), a
-// SIBLING of wrkq.history.listView in the `history` namespace. tailView is the
-// bounded ASCENDING raw event_log read model: the SERVER owns the cursored page
+// The raw tail reads wrkq.history.tailView (T-05116), a SIBLING of
+// wrkq.history.listView in the `history` namespace. tailView is the bounded
+// ASCENDING raw event_log read model: the SERVER owns the cursored page
 // (`id > cursor`, hard limit), actor slug/id + resource_id hydration, and the
-// high-water cursor; the CLIENT (here) repeats it for --follow, prints the
-// deprecation warning caller-side, and renders human/NDJSON locally. This is the
-// shared bounded-polling-as-RPC-v1-streaming arch record (with monitor): NO server
-// push/subscribe in v1; the loop lives caller-side. `monitor watch --raw`
-// delegates to the SAME watchTailLoop (NDJSON, follow=true).
+// high-water cursor; the CLIENT (here) repeats it to follow and writes NDJSON.
+// This is the shared bounded-polling-as-RPC-v1-streaming arch record (with
+// monitor): NO server push/subscribe in v1; the loop lives caller-side.
+// `monitor watch --raw` is its only command; `wrkq watch` is retired.
 
 const watchPollInterval = 1 * time.Second
 
@@ -42,135 +42,76 @@ type watchEvent struct {
 	Payload      *string `json:"payload,omitempty"`
 }
 
+// retiredWatchPointer is the whole of `wrkq watch` since its retirement
+// (T-10234, CLI standard §13): callers were migrated first, and the shim exits
+// 2 with the replacement instead of streaming, for --help too.
+const retiredWatchPointer = "wrkq watch was removed; use: wrkq monitor watch --raw [--since <event-id>] [--timeout <d>] [--stall-after <d>]"
+
 func newWatchCmd() *cobra.Command {
-	var since int64
-	var ndjson bool
-	var follow bool
-	cmd := &cobra.Command{
-		Use:   "watch [PATH...]",
-		Short: "Stream change events from the event log",
-		Long: `Stream change events from the event log in real-time.
-
-Examples:
-  wrkq watch                     # Watch all events
-  wrkq watch --since 100         # Watch from event ID 100
-  wrkq watch --ndjson            # Output as NDJSON
-  wrkq watch portal/**           # Watch events under portal (future)
-`,
+	return &cobra.Command{
+		Use:                "watch",
+		Short:              "Removed: use wrkq monitor watch --raw",
+		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tr, sc, closeFn, err := openMirror(cmd)
-			if err != nil {
-				return err
-			}
-			defer closeFn()
-
-			out := cmd.OutOrStdout()
-			// Legacy prints the deprecation warning caller-side, BEFORE streaming.
-			fmt.Fprintln(cmd.ErrOrStderr(), "wrkq watch is deprecated; use wrkq monitor watch --raw")
-			// Legacy: ndjson = watchNDJSON || !isStdoutTTY(stdout). Non-TTY defaults
-			// to NDJSON; a TTY without --ndjson renders the human format.
-			ndjsonMode := ndjson || !isStdoutTTY(out)
-			for i := range args {
-				args[i] = sc.selector(args[i], false)
-			}
-			return watchTailLoop(cmd.Context(), tr, out, since, ndjsonMode, follow, args...)
+			return exitError(clifunnel.ExitUsage, errors.New(retiredWatchPointer))
 		},
 	}
-	cmd.Flags().Int64Var(&since, "since", 0, "Start from event ID (0 = all events)")
-	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as newline-delimited JSON")
-	cmd.Flags().BoolVarP(&follow, "follow", "f", true, "Follow new events (default true)")
-	return cmd
 }
 
-// watchTailLoop reproduces legacy watchEvents: it polls wrkq.history.tailView for
-// the next bounded ASCENDING page from the monotonic cursor, advances the cursor by
-// the server's high-water, renders each row (NDJSON or human), and (when following)
-// sleeps watchPollInterval between polls. Without --follow it drains the current
-// backlog and returns. Shared by `wrkq watch` and `monitor watch --raw`.
-func watchTailLoop(ctx context.Context, tr Transport, out io.Writer, sinceID int64, ndjson bool, follow bool, tasks ...string) error {
+// watchTailLoop polls wrkq.history.tailView for the next bounded ASCENDING page
+// from the monotonic cursor, advances the cursor by the server's high-water,
+// writes each row as NDJSON, and sleeps watchPollInterval between polls. It
+// backs `monitor watch --raw`, and returns when a clock expires: timeout bounds
+// the whole follow, stallAfter the gap since the last event (0 = unbounded).
+func watchTailLoop(ctx context.Context, tr Transport, out io.Writer, sinceID int64, timeout, stallAfter time.Duration) (monitorTerminalResult, error) {
 	currentID := sinceID
 	encoder := json.NewEncoder(out)
+	started := time.Now()
+	lastEvent := started
 
 	for {
-		raw, err := tr.Call(ctx, "wrkq.history.tailView", map[string]any{"cursor": currentID, "tasks": tasks})
+		raw, err := tr.Call(ctx, "wrkq.history.tailView", map[string]any{"cursor": currentID})
 		if err != nil {
-			return monitorStripError(err)
+			return monitorResultError, monitorStripError(err)
 		}
 		var res struct {
 			Items     []watchEvent `json:"items"`
 			HighWater int64        `json:"high_water"`
 		}
 		if jerr := json.Unmarshal(raw, &res); jerr != nil {
-			return jerr
+			return monitorResultError, jerr
 		}
 
-		hasEvents := false
 		for _, e := range res.Items {
-			if ndjson {
-				if encErr := encoder.Encode(e); encErr != nil {
-					return fmt.Errorf("encode failed: %w", encErr)
-				}
-			} else {
-				printWatchEvent(out, e)
+			if encErr := encoder.Encode(e); encErr != nil {
+				return monitorResultError, fmt.Errorf("encode failed: %w", encErr)
 			}
 			currentID = e.ID
-			hasEvents = true
+			lastEvent = time.Now()
 		}
 		if res.HighWater > currentID {
 			currentID = res.HighWater
 		}
 
-		if !follow {
-			break
+		if timeout > 0 && time.Since(started) >= timeout {
+			return monitorResultTimeout, nil
 		}
-		_ = hasEvents
-		time.Sleep(watchPollInterval)
-	}
-	return nil
-}
-
-// printWatchEvent renders the human stream with the shared local wall clock.
-func printWatchEvent(stdout io.Writer, e watchEvent) {
-	timestamp := style.FormatLocalTimestamp(e.Timestamp)
-
-	actor := "system"
-	if e.PrincipalRef != nil {
-		actor = *e.PrincipalRef
-	}
-
-	resource := e.ResourceType
-	if e.ResourceID != nil {
-		resource += fmt.Sprintf(" %s", *e.ResourceID)
-	} else if e.ResourceUUID != nil {
-		resource += fmt.Sprintf(" %s", (*e.ResourceUUID)[:8])
-	}
-
-	fmt.Fprintf(stdout, "[%s] %s: %s by %s\n", timestamp, resource, e.EventType, actor)
-
-	if e.Payload != nil && *e.Payload != "" {
-		fmt.Fprintf(stdout, "  %s\n", formatWatchPayloadOneLine(*e.Payload))
+		if stallAfter > 0 && time.Since(lastEvent) >= stallAfter {
+			return monitorResultStall, nil
+		}
+		time.Sleep(min(watchPollInterval, clockSlack(started, lastEvent, timeout, stallAfter)))
 	}
 }
 
-func formatWatchPayloadOneLine(payload string) string {
-	var data map[string]interface{}
-	if err := json.Unmarshal([]byte(payload), &data); err != nil {
-		return payload
+// clockSlack is the time left before the nearer clock expires, so a short
+// --timeout is not overshot by a whole poll interval.
+func clockSlack(started, lastEvent time.Time, timeout, stallAfter time.Duration) time.Duration {
+	slack := watchPollInterval
+	if timeout > 0 {
+		slack = min(slack, time.Until(started.Add(timeout)))
 	}
-	var parts []string
-	for key, value := range data {
-		parts = append(parts, fmt.Sprintf("%s=%v", key, value))
+	if stallAfter > 0 {
+		slack = min(slack, time.Until(lastEvent.Add(stallAfter)))
 	}
-	return fmt.Sprintf("{%s}", joinWatchStrings(parts, ", "))
-}
-
-func joinWatchStrings(strs []string, sep string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	result := strs[0]
-	for i := 1; i < len(strs); i++ {
-		result += sep + strs[i]
-	}
-	return result
+	return max(slack, 10*time.Millisecond)
 }

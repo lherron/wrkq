@@ -16,7 +16,7 @@ type agentContextOutput struct {
 	Env            scope.EnvSnapshot    `json:"env"`
 	Scope          *scope.ResolvedScope `json:"scope,omitempty"`
 	Diagnostics    []scope.Diagnostic   `json:"diagnostics,omitempty"`
-	Error          string               `json:"error,omitempty"`
+	Error          *structuredCLIError  `json:"error,omitempty"`
 	Lookups        *agentContextLookups `json:"lookups,omitempty"`
 	DBPath         string               `json:"db_path,omitempty"`
 	DBMode         string               `json:"db_mode,omitempty"`
@@ -74,7 +74,8 @@ Use --json or --human to force a mode.`,
 				out.OverrideFlag = overrideScope
 			}
 			if resolveErr != nil {
-				out.Error = resolveErr.Error()
+				// The handoff family's error shape: a code beside the message.
+				out.Error = &structuredCLIError{Code: "scope_unresolvable", Message: resolveErr.Error()}
 			} else {
 				r := resolved
 				out.Scope = &r
@@ -232,9 +233,9 @@ func printAgentContextHuman(stdout, stderr io.Writer, out agentContextOutput) {
 			fmt.Fprintf(stdout, "  role_name     = %s (dropped in canonical_ref for v1)\n", r.RoleName)
 		}
 		fmt.Fprintf(stdout, "  canonical_ref = %s\n", r.CanonicalRef)
-	} else if out.Error != "" {
+	} else if out.Error != nil {
 		fmt.Fprintln(stdout, "Resolved scope: <unresolved>")
-		fmt.Fprintf(stderr, "Error: %s\n", out.Error)
+		fmt.Fprintf(stderr, "Error: %s\ncode: %s\n", out.Error.Message, out.Error.Code)
 	}
 
 	if len(out.Diagnostics) > 0 {

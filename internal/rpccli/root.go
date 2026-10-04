@@ -156,8 +156,11 @@ func Execute() error {
 // the shared help/error funnel (CLI standard §1, §4).
 func ExecuteAs(commandName string) error {
 	return clifunnel.Execute(context.Background(), NewRootCmdFor(commandName), os.Args[1:],
-		clifunnel.Options{NotFoundHint: wrkqNotFoundHint})
+		clifunnel.Options{NotFoundHint: wrkqNotFoundHint, OutputModes: wrkqOutputModes})
 }
+
+// wrkqOutputModes is the --output vocabulary shared by wrkq and wrkc (§9).
+var wrkqOutputModes = []string{"table", "human", "json", "ndjson", "porcelain", "yaml", "tsv", "raw"}
 
 func newStubCmd(mc mirroredCommand) *cobra.Command {
 	return &cobra.Command{

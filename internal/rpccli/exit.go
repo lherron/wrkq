@@ -1,6 +1,10 @@
 package rpccli
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/lherron/wrkq/internal/clifunnel"
+)
 
 // exit.go mirrors internal/rpccli/exit.go's exit-code error mechanism so the
 // mirror binary reproduces the legacy CLI's DISTINCT process exit codes (e.g.
@@ -46,7 +50,7 @@ func ExitCodeForError(err error) int {
 	if errors.As(err, &e) {
 		return e.code
 	}
-	return 1
+	return clifunnel.ExitCode(err, 1)
 }
 
 // ErrorAlreadyReported reports whether a command already wrote its own structured
