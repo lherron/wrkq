@@ -301,7 +301,7 @@ func queryEnvelopesWith(ctx context.Context, q contextRowsQueryer, query string,
 	return result, nil
 }
 
-func scanEnvelope(scanner collabScanner) (*domain.Envelope, error) {
+func scanEnvelope(scanner rowScanner) (*domain.Envelope, error) {
 	envelope := &domain.Envelope{}
 	err := scanner.Scan(envelopeScanDestinations(envelope)...)
 	return envelope, err
@@ -323,7 +323,7 @@ func envelopeScanDestinations(envelope *domain.Envelope) []interface{} {
 	}
 }
 
-func scanEnvelopePresentation(scanner collabScanner) (*domain.EnvelopePresentation, error) {
+func scanEnvelopePresentation(scanner rowScanner) (*domain.EnvelopePresentation, error) {
 	presentation := &domain.EnvelopePresentation{}
 	err := scanner.Scan(
 		&presentation.UUID, &presentation.EnvelopeUUID, &presentation.RoomUUID,

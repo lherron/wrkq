@@ -59,7 +59,7 @@ predicate: >
 authority:
   repo: wrkq
   surface: tasks table parent graph + wrkq task/container mutation/read-model surfaces
-enforced_by: "internal/db/migrations/000031_cross_project_parent_edges.sql; internal/store/task_update.go; internal/store/task_move.go; internal/store/task_removal.go; internal/store/containers.go; internal/wrkqapi/treeview.go; internal/rpccli/tree.go; internal/wrkqd/tree_http.go; internal/store/cross_project_parent_test.go; internal/workrpc/taskmove_test.go"
+enforced_by: "internal/db/migrations/000031_cross_project_parent_edges.sql; internal/store/task_update.go; internal/store/task_move.go; internal/store/task_removal.go; internal/store/containers.go; internal/store/container_delete.go; internal/wrkqapi/treeview.go; internal/rpccli/tree.go; internal/wrkqd/tree_http.go; internal/store/cross_project_parent_test.go; internal/workrpc/taskmove_test.go"
 required_tests:
   - go test ./internal/store ./internal/wrkqapi ./internal/rpccli ./internal/wrkqd
   - internal/rpccli/container_archive_test.go
@@ -81,6 +81,7 @@ source:
   - internal/store/task_move.go
   - internal/store/task_removal.go
   - internal/store/containers.go
+  - internal/store/container_delete.go
   - internal/wrkqapi/task_create.go
   - internal/wrkqapi/task_update.go
   - internal/wrkqapi/task_lifecycle.go

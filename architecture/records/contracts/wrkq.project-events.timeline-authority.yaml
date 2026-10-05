@@ -87,6 +87,8 @@ source:
   - internal/db/envelope_project_affiliation_migration_test.go
   - internal/wrkqapi/monitorview.go
   - internal/store/containers.go
+  - internal/store/container_archive.go
+  - internal/store/container_delete.go
 required_tests:
   - TestProjectEventsA1OneBody
   - TestProjectEventsA2ShapeAndBounds

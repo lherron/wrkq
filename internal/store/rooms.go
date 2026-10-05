@@ -517,20 +517,18 @@ func (rs *RoomStore) queryRooms(query string, args ...interface{}) ([]domain.Roo
 	return result, nil
 }
 
-type collabScanner interface{ Scan(...interface{}) error }
-
 // appendScan scans a row's leading columns through an existing scanner and
 // its trailing extra columns into extra.
 type appendScan struct {
-	collabScanner
+	rowScanner
 	extra interface{}
 }
 
 func (a appendScan) Scan(dest ...interface{}) error {
-	return a.collabScanner.Scan(append(dest, a.extra)...)
+	return a.rowScanner.Scan(append(dest, a.extra)...)
 }
 
-func scanRoom(scanner collabScanner) (*domain.Room, error) {
+func scanRoom(scanner rowScanner) (*domain.Room, error) {
 	room := &domain.Room{}
 	err := scanner.Scan(
 		&room.UUID, &room.ID, &room.Kind, &room.TaskUUID, &room.ContainerUUID,
@@ -546,7 +544,7 @@ func scanRoom(scanner collabScanner) (*domain.Room, error) {
 	return room, nil
 }
 
-func scanRoomMember(scanner collabScanner) (*domain.RoomMember, error) {
+func scanRoomMember(scanner rowScanner) (*domain.RoomMember, error) {
 	member := &domain.RoomMember{}
 	err := scanner.Scan(
 		&member.UUID, &member.RoomUUID, &member.MemberRef,

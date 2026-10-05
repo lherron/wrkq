@@ -9,26 +9,7 @@ import (
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
-	"github.com/lherron/wrkq/internal/taskmember"
-	"github.com/lherron/wrkq/internal/webhooks"
 )
-
-const containerArchiveCascadeMetaKey = "_wrkq_archive_cascade"
-
-type containerArchiveCascadeMarker struct {
-	Version        int    `json:"version"`
-	ContainerUUID  string `json:"container_uuid"`
-	ArchiveEventID int64  `json:"archive_event_id"`
-	PriorState     string `json:"prior_state"`
-	MetaWasNull    bool   `json:"meta_was_null,omitempty"`
-}
-
-type containerArchiveTask struct {
-	UUID  string
-	State string
-	Meta  sql.NullString
-	ETag  int64
-}
 
 // ContainerStore handles container persistence operations.
 type ContainerStore struct {
@@ -48,40 +29,6 @@ type ContainerCreateResult struct {
 	UUID string
 	ID   string
 	ETag int64
-}
-
-// ContainerDeleteRecursiveImpact summarizes a destructive container subtree
-// purge. Container counts include the root container being deleted.
-type ContainerDeleteRecursiveImpact struct {
-	ContainerUUID string
-	Containers    int64
-	Tasks         int64
-	Attachments   int64
-	Bytes         int64
-}
-
-// ContainerDeleteRecursiveResult contains committed purge statistics and file
-// cleanup inputs captured before rows were deleted.
-type ContainerDeleteRecursiveResult struct {
-	Deleted            bool
-	ContainersDeleted  int64
-	TasksDeleted       int64
-	AttachmentsDeleted int64
-	BytesFreed         int64
-	Attachments        []AttachmentInfo
-	TaskUUIDs          []string
-}
-
-// ContainerDeleteImpactMismatchError reports that a caller-supplied recursive
-// delete preflight is stale relative to the impact recomputed in the delete
-// transaction.
-type ContainerDeleteImpactMismatchError struct {
-	Expected ContainerDeleteRecursiveImpact
-	Current  ContainerDeleteRecursiveImpact
-}
-
-func (e *ContainerDeleteImpactMismatchError) Error() string {
-	return "container deleteRecursive expected impact does not match current impact"
 }
 
 // Create creates a new container and logs a container.created event.
@@ -172,22 +119,8 @@ func (cs *ContainerStore) CreateWithAttribution(attr attribution.Attribution, pa
 			payload["parent_uuid"] = *params.ParentUUID
 		}
 
-		payloadJSON, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("failed to marshal event payload: %w", err)
-		}
-		payloadStr := string(payloadJSON)
-
-		if err := ew.LogEvent(tx, &domain.Event{
-			PrincipalRef: attr.PrincipalRef,
-			ScopeRef:     attr.ScopeRef,
-			ResourceType: "container",
-			ResourceUUID: &uuid,
-			EventType:    "container.created",
-			ETag:         &etag,
-			Payload:      &payloadStr,
-		}); err != nil {
-			return fmt.Errorf("failed to log event: %w", err)
+		if err := logContainerEvent(tx, ew, attr, uuid, "container.created", &etag, payload); err != nil {
+			return err
 		}
 
 		result = &ContainerCreateResult{
@@ -280,39 +213,17 @@ func (cs *ContainerStore) UpdateFieldsWithAttribution(attr attribution.Attributi
 		// Curated iteration remains a kind=decision comment; this event is the
 		// byte-preserving history channel.
 		eventFields := fields
-		if _, descriptionChanged := fields["description"]; descriptionChanged {
-			eventFields, err = containerContentSnapshot(tx, containerUUID, fields)
-			if err != nil {
-				return err
-			}
-		} else if _, specificationChanged := fields["specification"]; specificationChanged {
-			eventFields, err = containerContentSnapshot(tx, containerUUID, fields)
-			if err != nil {
-				return err
-			}
-		} else if _, labelsChanged := fields["labels"]; labelsChanged {
-			eventFields, err = containerContentSnapshot(tx, containerUUID, fields)
-			if err != nil {
+		_, descriptionChanged := fields["description"]
+		_, specificationChanged := fields["specification"]
+		_, labelsChanged := fields["labels"]
+		if descriptionChanged || specificationChanged || labelsChanged {
+			if eventFields, err = containerContentSnapshot(tx, containerUUID, fields); err != nil {
 				return err
 			}
 		}
-		changesJSON, err := json.Marshal(eventFields)
-		if err != nil {
-			return fmt.Errorf("failed to marshal changes: %w", err)
-		}
-		changesStr := string(changesJSON)
 		newETag = currentETag + 1
-
-		if err := ew.LogEvent(tx, &domain.Event{
-			PrincipalRef: attr.PrincipalRef,
-			ScopeRef:     attr.ScopeRef,
-			ResourceType: "container",
-			ResourceUUID: &containerUUID,
-			EventType:    "container.updated",
-			ETag:         &newETag,
-			Payload:      &changesStr,
-		}); err != nil {
-			return fmt.Errorf("failed to log event: %w", err)
+		if err := logContainerEvent(tx, ew, attr, containerUUID, "container.updated", &newETag, eventFields); err != nil {
+			return err
 		}
 
 		return nil
@@ -418,20 +329,9 @@ func (cs *ContainerStore) MoveWithAttribution(attr attribution.Attribution, cont
 		if newParentUUID != nil {
 			payload["new_parent_uuid"] = *newParentUUID
 		}
-		payloadJSON, _ := json.Marshal(payload)
-		payloadStr := string(payloadJSON)
 		newETag = currentETag + 1
-
-		if err := ew.LogEvent(tx, &domain.Event{
-			PrincipalRef: attr.PrincipalRef,
-			ScopeRef:     attr.ScopeRef,
-			ResourceType: "container",
-			ResourceUUID: &containerUUID,
-			EventType:    "container.moved",
-			ETag:         &newETag,
-			Payload:      &payloadStr,
-		}); err != nil {
-			return fmt.Errorf("failed to log event: %w", err)
+		if err := logContainerEvent(tx, ew, attr, containerUUID, "container.moved", &newETag, payload); err != nil {
+			return err
 		}
 
 		return nil
@@ -482,811 +382,81 @@ func validateContainerKindUpdate(rootUUID, currentKind string, currentParentUUID
 	return nil
 }
 
-// Archive soft-deletes a container by setting archived_at timestamp.
-func (cs *ContainerStore) Archive(actorUUID, containerUUID string, ifMatch int64) (int64, error) {
-	return cs.ArchiveWithAttribution(cs.store.attributionFromActorUUID(actorUUID), containerUUID, ifMatch)
-}
+// containerColumns is the SELECT list scanContainer reads, in scan order.
+// `root` is selected separately: ListAll has never returned it.
+const containerColumns = `uuid, id, slug, title, parent_uuid, kind, sort_index, webhook_urls, etag,
+	created_at, updated_at, archived_at,
+	created_by_principal_ref, updated_by_principal_ref,
+	created_by_scope_ref, updated_by_scope_ref`
 
-// ArchiveWithAttribution archives a container using canonical principal attribution.
-func (cs *ContainerStore) ArchiveWithAttribution(attr attribution.Attribution, containerUUID string, ifMatch int64) (int64, error) {
-	if err := requireAttribution(attr); err != nil {
-		return 0, err
-	}
-	var newETag int64
-	var webhooksToDispatch []pendingWebhook
+// containerWithRootColumns adds the root marker the single-container reads return.
+const containerWithRootColumns = containerColumns + `, root`
 
-	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
-		// Get current state
-		var currentETag int64
-		var slug string
-		err := tx.QueryRow("SELECT etag, slug FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag, &slug)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return fmt.Errorf("container not found: %s", containerUUID)
-			}
-			return fmt.Errorf("failed to get container: %w", err)
-		}
-
-		// Check etag if ifMatch was provided
-		if err := checkETag(currentETag, ifMatch); err != nil {
-			return err
-		}
-
-		cascadeTasks, err := containerArchiveLiveTasks(tx, containerUUID)
-		if err != nil {
-			return err
-		}
-
-		// Soft delete. Re-archiving is intentional: it refreshes the archive event
-		// and cascades any live stragglers created since the prior archive.
-		_, err = tx.Exec(`
-			UPDATE containers
-			SET archived_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
-				updated_by_principal_ref = ?,
-				updated_by_scope_ref = ?,
-				etag = etag + 1
-			WHERE uuid = ?
-		`, attr.PrincipalRef, scopeSQL(attr), containerUUID)
-		if err != nil {
-			return fmt.Errorf("failed to archive container: %w", err)
-		}
-
-		// Log the container event before task updates so its durable event id can
-		// be stored in every causal marker written by this transaction.
-		payload := map[string]interface{}{
-			"slug":        slug,
-			"soft_delete": true,
-		}
-		payloadJSON, _ := json.Marshal(payload)
-		payloadStr := string(payloadJSON)
-		newETag = currentETag + 1
-
-		archiveEvent, err := ew.LogEventReturning(tx, &domain.Event{
-			PrincipalRef: attr.PrincipalRef,
-			ScopeRef:     attr.ScopeRef,
-			ResourceType: "container",
-			ResourceUUID: &containerUUID,
-			EventType:    "container.archived",
-			ETag:         &newETag,
-			Payload:      &payloadStr,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to log event: %w", err)
-		}
-
-		for _, task := range cascadeTasks {
-			pending, err := cascadeCancelTask(tx, ew, attr, containerUUID, archiveEvent.ID, task)
-			if err != nil {
-				return err
-			}
-			webhooksToDispatch = append(webhooksToDispatch, pending)
-		}
-		for _, task := range cascadeTasks {
-			if err := maybeLogCampaignCloseNudgeForTask(tx, ew, attr, task.UUID); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-	if err == nil {
-		dispatchTaskWebhooks(cs.store.db, webhooksToDispatch)
-	}
-
-	return newETag, err
-}
-
-// RestoreWithAttribution clears a container's archived marker and reverses only
-// task cancellations causally marked by ArchiveWithAttribution for this exact
-// container UUID. The container and task mutations share one transaction.
-func (cs *ContainerStore) RestoreWithAttribution(attr attribution.Attribution, containerUUID string) error {
-	if err := requireAttribution(attr); err != nil {
-		return err
-	}
-	var webhooksToDispatch []pendingWebhook
-	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
-		var exists int
-		if err := tx.QueryRow("SELECT COUNT(*) FROM containers WHERE uuid = ?", containerUUID).Scan(&exists); err != nil {
-			return fmt.Errorf("failed to resolve container: %w", err)
-		}
-		if exists == 0 {
-			return fmt.Errorf("container not found: %s", containerUUID)
-		}
-
-		tasks, err := containerArchiveMarkedTasks(tx, containerUUID)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`
-			UPDATE containers
-			SET archived_at = NULL,
-			    updated_by_principal_ref = ?,
-			    updated_by_scope_ref = ?
-			WHERE uuid = ?
-		`, attr.PrincipalRef, scopeSQL(attr), containerUUID); err != nil {
-			return fmt.Errorf("failed to restore container: %w", err)
-		}
-
-		for _, task := range tasks {
-			pending, _, err := restoreCascadeTask(tx, ew, attr, containerUUID, task)
-			if err != nil {
-				return err
-			}
-			webhooksToDispatch = append(webhooksToDispatch, pending)
-		}
-		payloadStr := `{"action":"restored"}`
-		if err := ew.LogEvent(tx, &domain.Event{
-			PrincipalRef: attr.PrincipalRef,
-			ScopeRef:     attr.ScopeRef,
-			ResourceType: "container",
-			ResourceUUID: &containerUUID,
-			EventType:    "container.restored",
-			Payload:      &payloadStr,
-		}); err != nil {
-			return fmt.Errorf("failed to log event: %w", err)
-		}
-		return nil
-	})
-	if err == nil {
-		dispatchTaskWebhooks(cs.store.db, webhooksToDispatch)
-	}
-	return err
-}
-
-func containerArchiveLiveTasks(tx *sql.Tx, containerUUID string) ([]containerArchiveTask, error) {
-	rows, err := tx.Query(`
-		WITH RECURSIVE subtree(uuid) AS (
-			SELECT uuid FROM containers WHERE uuid = ?
-			UNION ALL
-			SELECT c.uuid FROM containers c JOIN subtree s ON c.parent_uuid = s.uuid
-		)
-		SELECT t.uuid, t.state, t.meta, t.etag
-		FROM tasks t JOIN subtree s ON s.uuid = t.project_uuid
-		WHERE `+taskmember.Filter("t", false)+` AND t.state IN ('idea','draft','open','in_progress','blocked')
-		  AND t.archived_at IS NULL AND t.deleted_at IS NULL
-		ORDER BY t.uuid`, containerUUID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query container archive tasks: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var tasks []containerArchiveTask
-	for rows.Next() {
-		var task containerArchiveTask
-		if err := rows.Scan(&task.UUID, &task.State, &task.Meta, &task.ETag); err != nil {
-			return nil, fmt.Errorf("failed to scan container archive task: %w", err)
-		}
-		tasks = append(tasks, task)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to iterate container archive tasks: %w", err)
-	}
-	return tasks, nil
-}
-
-func containerArchiveMarkedTasks(tx *sql.Tx, containerUUID string) ([]containerArchiveTask, error) {
-	rows, err := tx.Query(`
-		WITH RECURSIVE subtree(uuid) AS (
-			SELECT uuid FROM containers WHERE uuid = ?
-			UNION ALL
-			SELECT c.uuid FROM containers c JOIN subtree s ON c.parent_uuid = s.uuid
-		)
-		SELECT t.uuid, t.state, t.meta, t.etag
-		FROM tasks t JOIN subtree s ON s.uuid = t.project_uuid
-		WHERE `+taskmember.Filter("t", false)+` AND json_valid(t.meta)
-		  AND json_extract(t.meta, '$._wrkq_archive_cascade.container_uuid') = ?
-		ORDER BY t.uuid`, containerUUID, containerUUID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query container unarchive tasks: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var tasks []containerArchiveTask
-	for rows.Next() {
-		var task containerArchiveTask
-		if err := rows.Scan(&task.UUID, &task.State, &task.Meta, &task.ETag); err != nil {
-			return nil, fmt.Errorf("failed to scan container unarchive task: %w", err)
-		}
-		tasks = append(tasks, task)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to iterate container unarchive tasks: %w", err)
-	}
-	return tasks, nil
-}
-
-func cascadeCancelTask(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, containerUUID string, archiveEventID int64, task containerArchiveTask) (pendingWebhook, error) {
-	meta, err := parseContainerArchiveMeta(task)
-	if err != nil {
-		return pendingWebhook{}, err
-	}
-	meta[containerArchiveCascadeMetaKey] = containerArchiveCascadeMarker{
-		Version: 1, ContainerUUID: containerUUID, ArchiveEventID: archiveEventID,
-		PriorState: task.State, MetaWasNull: !task.Meta.Valid,
-	}
-	metaJSON, err := json.Marshal(meta)
-	if err != nil {
-		return pendingWebhook{}, fmt.Errorf("failed to encode archive marker for task %s: %w", task.UUID, err)
-	}
-	if _, err := tx.Exec(`
-		UPDATE tasks
-		SET state = 'cancelled', meta = ?, etag = etag + 1,
-		    updated_by_principal_ref = ?, updated_by_scope_ref = ?
-		WHERE uuid = ?`, string(metaJSON), attr.PrincipalRef, scopeSQL(attr), task.UUID); err != nil {
-		return pendingWebhook{}, fmt.Errorf("failed to cancel task %s during container archive: %w", task.UUID, err)
-	}
-	payload := map[string]any{"state": "cancelled", "state_from": task.State, "meta": string(metaJSON)}
-	newETag := task.ETag + 1
-	eventMeta, err := logTaskEvent(tx, ew, attr, task.UUID, "task.updated", &newETag, payload)
-	if err != nil {
-		return pendingWebhook{}, fmt.Errorf("failed to log archive cancellation for task %s: %w", task.UUID, err)
-	}
-	return pendingWebhook{taskUUID: task.UUID, ctx: webhooks.EventContext{
-		Metadata: eventMeta, Event: "updated", PrincipalRef: attr.PrincipalRef, Via: "cli",
-		Transition: &webhooks.Transition{From: stringPtr(task.State), To: stringPtr("cancelled")},
-		Changed:    []string{"meta", "state"},
-		Changes: map[string]webhooks.Change{
-			"meta":  {From: archiveNullableStringValue(task.Meta), To: string(metaJSON)},
-			"state": {From: task.State, To: "cancelled"},
-		},
-	}}, nil
-}
-
-func restoreCascadeTask(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, containerUUID string, task containerArchiveTask) (pendingWebhook, bool, error) {
-	meta, err := parseContainerArchiveMeta(task)
-	if err != nil {
-		return pendingWebhook{}, false, err
-	}
-	rawMarker, ok := meta[containerArchiveCascadeMetaKey]
-	if !ok {
-		return pendingWebhook{}, false, fmt.Errorf("archive marker disappeared for task %s", task.UUID)
-	}
-	markerJSON, _ := json.Marshal(rawMarker)
-	var marker containerArchiveCascadeMarker
-	if err := json.Unmarshal(markerJSON, &marker); err != nil || marker.Version != 1 || marker.ContainerUUID != containerUUID || !isContainerArchiveLiveState(marker.PriorState) {
-		return pendingWebhook{}, false, fmt.Errorf("invalid archive marker for task %s", task.UUID)
-	}
-	delete(meta, containerArchiveCascadeMetaKey)
-	var restoredMeta any
-	var restoredMetaForEvent any
-	if len(meta) == 0 && marker.MetaWasNull {
-		restoredMeta = nil
-		restoredMetaForEvent = nil
-	} else {
-		metaJSON, err := json.Marshal(meta)
-		if err != nil {
-			return pendingWebhook{}, false, fmt.Errorf("failed to clear archive marker for task %s: %w", task.UUID, err)
-		}
-		restoredMeta = string(metaJSON)
-		restoredMetaForEvent = string(metaJSON)
-	}
-	restoreState := task.State == "cancelled"
-	state := task.State
-	if restoreState {
-		state = marker.PriorState
-	}
-	if _, err := tx.Exec(`
-		UPDATE tasks
-		SET state = ?, meta = ?, etag = etag + 1,
-		    updated_by_principal_ref = ?, updated_by_scope_ref = ?
-		WHERE uuid = ?`, state, restoredMeta, attr.PrincipalRef, scopeSQL(attr), task.UUID); err != nil {
-		return pendingWebhook{}, false, fmt.Errorf("failed to restore task %s during container unarchive: %w", task.UUID, err)
-	}
-	payload := map[string]any{"meta": restoredMetaForEvent}
-	changed := []string{"meta"}
-	changes := map[string]webhooks.Change{"meta": {From: archiveNullableStringValue(task.Meta), To: restoredMetaForEvent}}
-	var transition *webhooks.Transition
-	if restoreState {
-		payload["state"] = state
-		payload["state_from"] = task.State
-		changed = append(changed, "state")
-		changes["state"] = webhooks.Change{From: task.State, To: state}
-		transition = &webhooks.Transition{From: stringPtr(task.State), To: stringPtr(state)}
-	}
-	newETag := task.ETag + 1
-	eventMeta, err := logTaskEvent(tx, ew, attr, task.UUID, "task.updated", &newETag, payload)
-	if err != nil {
-		return pendingWebhook{}, false, fmt.Errorf("failed to log cascade restore for task %s: %w", task.UUID, err)
-	}
-	return pendingWebhook{taskUUID: task.UUID, ctx: webhooks.EventContext{
-		Metadata: eventMeta, Event: "updated", PrincipalRef: attr.PrincipalRef, Via: "cli",
-		Transition: transition, Changed: changed, Changes: changes,
-	}}, restoreState, nil
-}
-
-func parseContainerArchiveMeta(task containerArchiveTask) (map[string]any, error) {
-	meta := map[string]any{}
-	if !task.Meta.Valid || strings.TrimSpace(task.Meta.String) == "" {
-		return meta, nil
-	}
-	if err := json.Unmarshal([]byte(task.Meta.String), &meta); err != nil || meta == nil {
-		return nil, fmt.Errorf("task %s has invalid meta; container archive aborted", task.UUID)
-	}
-	return meta, nil
-}
-
-func isContainerArchiveLiveState(state string) bool {
-	switch state {
-	case "idea", "draft", "open", "in_progress", "blocked":
-		return true
-	default:
-		return false
-	}
-}
-
-func archiveNullableStringValue(value sql.NullString) any {
-	if !value.Valid {
-		return nil
-	}
-	return value.String
-}
-
-// Delete hard-deletes an empty container.
-func (cs *ContainerStore) Delete(actorUUID, containerUUID string, ifMatch int64) error {
-	return cs.DeleteWithAttribution(cs.store.attributionFromActorUUID(actorUUID), containerUUID, ifMatch)
-}
-
-// DeleteWithAttribution hard-deletes an empty container using canonical attribution.
-func (cs *ContainerStore) DeleteWithAttribution(attr attribution.Attribution, containerUUID string, ifMatch int64) error {
-	if err := requireAttribution(attr); err != nil {
-		return err
-	}
-	return cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
-		// Get current state
-		var currentETag int64
-		var id, slug, kind string
-		err := tx.QueryRow("SELECT etag, id, slug, kind FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag, &id, &slug, &kind)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return fmt.Errorf("container not found: %s", containerUUID)
-			}
-			return fmt.Errorf("failed to get container: %w", err)
-		}
-		if kind == string(domain.ContainerKindRoot) {
-			return fmt.Errorf("root container cannot be deleted")
-		}
-
-		// Check etag if ifMatch was provided
-		if err := checkETag(currentETag, ifMatch); err != nil {
-			return err
-		}
-
-		// Check for children (tasks or subcontainers)
-		var childCount int
-		err = tx.QueryRow(`
-			SELECT (
-				(SELECT COUNT(*) FROM tasks WHERE `+taskmember.Filter("", false)+` AND project_uuid = ?) +
-				(SELECT COUNT(*) FROM containers WHERE parent_uuid = ?)
-			)
-		`, containerUUID, containerUUID).Scan(&childCount)
-		if err != nil {
-			return fmt.Errorf("failed to check children: %w", err)
-		}
-		if childCount > 0 {
-			return fmt.Errorf("container is not empty: has %d children", childCount)
-		}
-
-		// Log event BEFORE deleting
-		payload := map[string]interface{}{
-			"slug":       slug,
-			"deleted_by": attr.PrincipalRef,
-		}
-		payloadJSON, _ := json.Marshal(payload)
-		payloadStr := string(payloadJSON)
-
-		if err := ew.LogEvent(tx, &domain.Event{
-			PrincipalRef: attr.PrincipalRef,
-			ScopeRef:     attr.ScopeRef,
-			ResourceType: "container",
-			ResourceUUID: &containerUUID,
-			EventType:    "container.deleted",
-			Payload:      &payloadStr,
-		}); err != nil {
-			return fmt.Errorf("failed to log event: %w", err)
-		}
-		if err := retargetPromisesForPurgedContainer(tx, ew, attr, containerUUID, id, slug); err != nil {
-			return err
-		}
-
-		// Hard delete
-		_, err = tx.Exec("DELETE FROM containers WHERE uuid = ?", containerUUID)
-		if err != nil {
-			return fmt.Errorf("failed to delete container: %w", err)
-		}
-
-		return nil
-	})
-}
-
-// DeleteRecursiveImpact computes the current impact for deleting the container
-// subtree rooted at containerUUID without mutating the database.
-func (cs *ContainerStore) DeleteRecursiveImpact(containerUUID string) (*ContainerDeleteRecursiveImpact, error) {
-	tx, err := cs.store.db.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	impact, _, _, err := cs.recursiveDeleteImpactTx(tx, containerUUID)
-	return impact, err
-}
-
-// DeleteRecursiveWithAttribution hard-deletes a container and all descendant
-// tasks/containers. The root container etag is the only CAS target; expected
-// impact is compared against a fresh impact computed inside the delete tx.
-func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attribution, containerUUID string, ifMatch int64, expected ContainerDeleteRecursiveImpact) (*ContainerDeleteRecursiveResult, error) {
-	if err := requireAttribution(attr); err != nil {
-		return nil, err
-	}
-	var result *ContainerDeleteRecursiveResult
-	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
-		var currentETag int64
-		var kind string
-		err := tx.QueryRow("SELECT etag, kind FROM containers WHERE uuid = ?", containerUUID).Scan(&currentETag, &kind)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return fmt.Errorf("container not found: %s", containerUUID)
-			}
-			return fmt.Errorf("failed to get container: %w", err)
-		}
-		if kind == string(domain.ContainerKindRoot) {
-			return fmt.Errorf("root container cannot be deleted")
-		}
-		if err := checkETag(currentETag, ifMatch); err != nil {
-			return err
-		}
-
-		current, containers, tasks, err := cs.recursiveDeleteImpactTx(tx, containerUUID)
-		if err != nil {
-			return err
-		}
-		if !sameDeleteImpact(expected, *current) {
-			return &ContainerDeleteImpactMismatchError{Expected: expected, Current: *current}
-		}
-
-		// Ownership survives logical deletion; physical container purge cannot
-		// remove an owner while its named assignments still exist.
-		for _, task := range tasks {
-			var owns int
-			if err := tx.QueryRow("SELECT COUNT(*) FROM tasks WHERE subtask_owner_uuid = ?", task.UUID).Scan(&owns); err != nil {
-				return err
-			}
-			if owns > 0 {
-				return fmt.Errorf("cannot purge container containing an owner with subtasks; archive instead")
-			}
-		}
-		attachments, err := recursiveDeleteAttachmentsTx(tx, containerUUID)
-		if err != nil {
-			return err
-		}
-		taskUUIDs := make([]string, 0, len(tasks))
-		for _, task := range tasks {
-			taskUUIDs = append(taskUUIDs, task.UUID)
-			payload := map[string]interface{}{
-				"slug":      task.Slug,
-				"purged_by": attr.PrincipalRef,
-			}
-			if task.AttachmentCount > 0 {
-				payload["attachment_count"] = task.AttachmentCount
-				payload["bytes_freed"] = task.Bytes
-			}
-			if _, err := logTaskEvent(tx, ew, attr, task.UUID, "task.purged", nil, payload); err != nil {
-				return err
-			}
-		}
-		if err := detachExternalSubtasksForParents(tx, attr, taskUUIDs); err != nil {
-			return err
-		}
-		for _, task := range tasks {
-			if err := retargetPromisesForPurgedTask(tx, ew, attr, task.UUID, task.ID, task.Slug); err != nil {
-				return err
-			}
-			if _, err := tx.Exec("DELETE FROM tasks WHERE uuid = ?", task.UUID); err != nil {
-				return fmt.Errorf("failed to delete task: %w", err)
-			}
-		}
-
-		for _, container := range containers {
-			payloadJSON, _ := json.Marshal(map[string]interface{}{
-				"slug":       container.Slug,
-				"deleted_by": attr.PrincipalRef,
-				"recursive":  true,
-			})
-			payloadStr := string(payloadJSON)
-			if err := ew.LogEvent(tx, &domain.Event{
-				PrincipalRef: attr.PrincipalRef,
-				ScopeRef:     attr.ScopeRef,
-				ResourceType: "container",
-				ResourceUUID: &container.UUID,
-				EventType:    "container.deleted",
-				Payload:      &payloadStr,
-			}); err != nil {
-				return fmt.Errorf("failed to log container delete event: %w", err)
-			}
-		}
-		for _, container := range containers {
-			if err := retargetPromisesForPurgedContainer(tx, ew, attr, container.UUID, container.ID, container.Slug); err != nil {
-				return err
-			}
-			if _, err := tx.Exec("DELETE FROM containers WHERE uuid = ?", container.UUID); err != nil {
-				return fmt.Errorf("failed to delete container: %w", err)
-			}
-		}
-
-		result = &ContainerDeleteRecursiveResult{
-			Deleted:            true,
-			ContainersDeleted:  current.Containers,
-			TasksDeleted:       current.Tasks,
-			AttachmentsDeleted: current.Attachments,
-			BytesFreed:         current.Bytes,
-			Attachments:        attachments,
-			TaskUUIDs:          taskUUIDs,
-		}
-		return nil
-	})
-	return result, err
-}
-
-type recursiveContainerRow struct {
-	UUID  string
-	ID    string
-	Slug  string
-	Depth int
-}
-
-type recursiveTaskRow struct {
-	UUID            string
-	ID              string
-	Slug            string
-	AttachmentCount int64
-	Bytes           int64
-}
-
-func (cs *ContainerStore) recursiveDeleteImpactTx(tx *sql.Tx, containerUUID string) (*ContainerDeleteRecursiveImpact, []recursiveContainerRow, []recursiveTaskRow, error) {
-	containers, err := recursiveDeleteContainersTx(tx, containerUUID)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	tasks, err := recursiveDeleteTasksTx(tx, containerUUID)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	var attachmentCount, totalBytes int64
-	for _, task := range tasks {
-		attachmentCount += task.AttachmentCount
-		totalBytes += task.Bytes
-	}
-	return &ContainerDeleteRecursiveImpact{
-		ContainerUUID: containerUUID,
-		Containers:    int64(len(containers)),
-		Tasks:         int64(len(tasks)),
-		Attachments:   attachmentCount,
-		Bytes:         totalBytes,
-	}, containers, tasks, nil
-}
-
-func recursiveDeleteContainersTx(tx *sql.Tx, containerUUID string) ([]recursiveContainerRow, error) {
-	rows, err := tx.Query(`
-		WITH RECURSIVE subtree(uuid, id, slug, depth) AS (
-			SELECT uuid, id, slug, 0 FROM containers WHERE uuid = ?
-			UNION ALL
-			SELECT c.uuid, c.id, c.slug, subtree.depth + 1
-			  FROM containers c
-			  JOIN subtree ON c.parent_uuid = subtree.uuid
-		)
-		SELECT uuid, id, slug, depth FROM subtree ORDER BY depth DESC, slug ASC
-	`, containerUUID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query recursive containers: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	out := []recursiveContainerRow{}
-	for rows.Next() {
-		var row recursiveContainerRow
-		if err := rows.Scan(&row.UUID, &row.ID, &row.Slug, &row.Depth); err != nil {
-			return nil, fmt.Errorf("failed to scan recursive container: %w", err)
-		}
-		out = append(out, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to iterate recursive containers: %w", err)
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("container not found: %s", containerUUID)
-	}
-	return out, nil
-}
-
-func recursiveDeleteTasksTx(tx *sql.Tx, containerUUID string) ([]recursiveTaskRow, error) {
-	rows, err := tx.Query(`
-		WITH RECURSIVE subtree(uuid) AS (
-			SELECT uuid FROM containers WHERE uuid = ?
-			UNION ALL
-			SELECT c.uuid FROM containers c JOIN subtree ON c.parent_uuid = subtree.uuid
-		)
-		SELECT t.uuid, t.id, t.slug, COUNT(a.uuid), COALESCE(SUM(a.size_bytes), 0)
-		  FROM tasks t
-		  JOIN subtree ON t.project_uuid = subtree.uuid
-		  LEFT JOIN attachments a ON a.task_uuid = t.uuid
-	 WHERE `+taskmember.Filter("t", false)+`
- GROUP BY t.uuid, t.id, t.slug
-		 ORDER BY t.id ASC
-	`, containerUUID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query recursive tasks: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	out := []recursiveTaskRow{}
-	for rows.Next() {
-		var row recursiveTaskRow
-		if err := rows.Scan(&row.UUID, &row.ID, &row.Slug, &row.AttachmentCount, &row.Bytes); err != nil {
-			return nil, fmt.Errorf("failed to scan recursive task: %w", err)
-		}
-		out = append(out, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to iterate recursive tasks: %w", err)
-	}
-	return out, nil
-}
-
-func recursiveDeleteAttachmentsTx(tx *sql.Tx, containerUUID string) ([]AttachmentInfo, error) {
-	rows, err := tx.Query(`
-		WITH RECURSIVE subtree(uuid) AS (
-			SELECT uuid FROM containers WHERE uuid = ?
-			UNION ALL
-			SELECT c.uuid FROM containers c JOIN subtree ON c.parent_uuid = subtree.uuid
-		)
-		SELECT a.task_uuid, a.relative_path, a.size_bytes
-		  FROM attachments a
-		  JOIN tasks t ON t.uuid = a.task_uuid
-		  JOIN subtree ON t.project_uuid = subtree.uuid
-		 WHERE `+taskmember.Filter("t", false)+`
-		 ORDER BY a.id ASC
-	`, containerUUID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query recursive attachments: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	out := []AttachmentInfo{}
-	for rows.Next() {
-		var a AttachmentInfo
-		if err := rows.Scan(&a.TaskUUID, &a.RelativePath, &a.SizeBytes); err != nil {
-			return nil, fmt.Errorf("failed to scan recursive attachment: %w", err)
-		}
-		out = append(out, a)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed to iterate recursive attachments: %w", err)
-	}
-	return out, nil
-}
-
-func sameDeleteImpact(a, b ContainerDeleteRecursiveImpact) bool {
-	return a.Containers == b.Containers &&
-		a.Tasks == b.Tasks &&
-		a.Attachments == b.Attachments &&
-		a.Bytes == b.Bytes
-}
-
-// GetByUUID retrieves a container by UUID.
-func (cs *ContainerStore) GetByUUID(uuid string) (*domain.Container, error) {
-	container := &domain.Container{}
-	// Use string intermediates for time fields since SQLite stores times as strings
+// scanContainer reads containerColumns, plus root when withRoot.
+func scanContainer(scanner rowScanner, withRoot bool) (*domain.Container, error) {
+	c := &domain.Container{}
 	var createdAt, updatedAt string
 	var archivedAt *string
 	var kind string
 	var createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
-
-	err := cs.store.db.QueryRow(`
-		SELECT uuid, id, slug, title, parent_uuid, kind, sort_index, webhook_urls, root, etag,
-			   created_at, updated_at, archived_at,
-			   created_by_principal_ref, updated_by_principal_ref,
-			   created_by_scope_ref, updated_by_scope_ref
-		FROM containers WHERE uuid = ?
-	`, uuid).Scan(
-		&container.UUID, &container.ID, &container.Slug, &container.Title,
-		&container.ParentUUID, &kind, &container.SortIndex, &container.WebhookURLs, &container.Root, &container.ETag,
+	dest := []interface{}{
+		&c.UUID, &c.ID, &c.Slug, &c.Title,
+		&c.ParentUUID, &kind, &c.SortIndex, &c.WebhookURLs, &c.ETag,
 		&createdAt, &updatedAt, &archivedAt,
 		&createdByPrincipal, &updatedByPrincipal,
 		&createdByScope, &updatedByScope,
-	)
+	}
+	if withRoot {
+		dest = append(dest, &c.Root)
+	}
+	if err := scanner.Scan(dest...); err != nil {
+		return nil, err
+	}
+	c.Kind = domain.ContainerKind(kind)
+	c.CreatedByPrincipalRef = createdByPrincipal.String
+	c.UpdatedByPrincipalRef = updatedByPrincipal.String
+	c.CreatedByScopeRef = createdByScope.String
+	c.UpdatedByScopeRef = updatedByScope.String
+	return c, nil
+}
+
+// GetByUUID retrieves a container by UUID.
+func (cs *ContainerStore) GetByUUID(uuid string) (*domain.Container, error) {
+	container, err := scanContainer(cs.store.db.QueryRow(`SELECT `+containerWithRootColumns+` FROM containers WHERE uuid = ?`, uuid), true)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("container not found: %s", uuid)
 		}
 		return nil, fmt.Errorf("failed to get container: %w", err)
 	}
-	container.Kind = domain.ContainerKind(kind)
-	if createdByPrincipal.Valid {
-		container.CreatedByPrincipalRef = createdByPrincipal.String
-	}
-	if updatedByPrincipal.Valid {
-		container.UpdatedByPrincipalRef = updatedByPrincipal.String
-	}
-	if createdByScope.Valid {
-		container.CreatedByScopeRef = createdByScope.String
-	}
-	if updatedByScope.Valid {
-		container.UpdatedByScopeRef = updatedByScope.String
-	}
 	return container, nil
 }
 
-// LookupBySlugAndParent finds a container by slug within a parent.
+// LookupBySlugAndParent finds a container by slug within a parent; a nil
+// parent means the root.
 func (cs *ContainerStore) LookupBySlugAndParent(slug string, parentUUID *string) (*domain.Container, error) {
-	container := &domain.Container{}
-	// Use string intermediates for time fields
-	var createdAt, updatedAt string
-	var archivedAt *string
-	var kind string
-	var createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
-	var query string
-	var args []interface{}
-
-	if parentUUID == nil {
-		query = `
-			SELECT uuid, id, slug, title, parent_uuid, kind, sort_index, webhook_urls, root, etag,
-				   created_at, updated_at, archived_at,
-				   created_by_principal_ref, updated_by_principal_ref,
-				   created_by_scope_ref, updated_by_scope_ref
-			FROM containers WHERE slug = ? AND parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
-		`
-		args = []interface{}{slug}
-	} else {
-		query = `
-			SELECT uuid, id, slug, title, parent_uuid, kind, sort_index, webhook_urls, root, etag,
-				   created_at, updated_at, archived_at,
-				   created_by_principal_ref, updated_by_principal_ref,
-				   created_by_scope_ref, updated_by_scope_ref
-			FROM containers WHERE slug = ? AND parent_uuid = ?
-		`
-		args = []interface{}{slug, *parentUUID}
+	query := `SELECT ` + containerWithRootColumns + ` FROM containers WHERE slug = ? AND parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')`
+	args := []interface{}{slug}
+	if parentUUID != nil {
+		query = `SELECT ` + containerWithRootColumns + ` FROM containers WHERE slug = ? AND parent_uuid = ?`
+		args = append(args, *parentUUID)
 	}
-
-	err := cs.store.db.QueryRow(query, args...).Scan(
-		&container.UUID, &container.ID, &container.Slug, &container.Title,
-		&container.ParentUUID, &kind, &container.SortIndex, &container.WebhookURLs, &container.Root, &container.ETag,
-		&createdAt, &updatedAt, &archivedAt,
-		&createdByPrincipal, &updatedByPrincipal,
-		&createdByScope, &updatedByScope,
-	)
+	container, err := scanContainer(cs.store.db.QueryRow(query, args...), true)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil // Not found
 		}
 		return nil, fmt.Errorf("failed to lookup container: %w", err)
 	}
-	container.Kind = domain.ContainerKind(kind)
-	if createdByPrincipal.Valid {
-		container.CreatedByPrincipalRef = createdByPrincipal.String
-	}
-	if updatedByPrincipal.Valid {
-		container.UpdatedByPrincipalRef = updatedByPrincipal.String
-	}
-	if createdByScope.Valid {
-		container.CreatedByScopeRef = createdByScope.String
-	}
-	if updatedByScope.Valid {
-		container.UpdatedByScopeRef = updatedByScope.String
-	}
 	return container, nil
 }
 
 // ListAll returns all non-archived containers (or all containers if includeArchived is true).
 func (cs *ContainerStore) ListAll(includeArchived bool) ([]domain.Container, error) {
-	query := `
-		SELECT uuid, id, slug, title, parent_uuid, kind, sort_index, webhook_urls, etag,
-		       created_at, updated_at, archived_at,
-		       created_by_principal_ref, updated_by_principal_ref,
-		       created_by_scope_ref, updated_by_scope_ref
-		FROM containers
-	`
+	query := `SELECT ` + containerColumns + ` FROM containers`
 	if !includeArchived {
 		query += " WHERE archived_at IS NULL"
 	}
-
 	rows, err := cs.store.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
@@ -1295,34 +465,19 @@ func (cs *ContainerStore) ListAll(includeArchived bool) ([]domain.Container, err
 
 	var containers []domain.Container
 	for rows.Next() {
-		var c domain.Container
-		var createdAt, updatedAt string
-		var archivedAt *string
-		var kind string
-		var createdByPrincipal, updatedByPrincipal, createdByScope, updatedByScope sql.NullString
-		if err := rows.Scan(
-			&c.UUID, &c.ID, &c.Slug, &c.Title,
-			&c.ParentUUID, &kind, &c.SortIndex, &c.WebhookURLs, &c.ETag,
-			&createdAt, &updatedAt, &archivedAt,
-			&createdByPrincipal, &updatedByPrincipal,
-			&createdByScope, &updatedByScope,
-		); err != nil {
+		c, err := scanContainer(rows, false)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan container: %w", err)
 		}
-		c.Kind = domain.ContainerKind(kind)
-		if createdByPrincipal.Valid {
-			c.CreatedByPrincipalRef = createdByPrincipal.String
-		}
-		if updatedByPrincipal.Valid {
-			c.UpdatedByPrincipalRef = updatedByPrincipal.String
-		}
-		if createdByScope.Valid {
-			c.CreatedByScopeRef = createdByScope.String
-		}
-		if updatedByScope.Valid {
-			c.UpdatedByScopeRef = updatedByScope.String
-		}
-		containers = append(containers, c)
+		containers = append(containers, *c)
 	}
 	return containers, rows.Err()
 }
+
+// containerSubtreeCTE binds subtree(uuid) to the container named by the
+// first ? and every container beneath it.
+const containerSubtreeCTE = `WITH RECURSIVE subtree(uuid) AS (
+			SELECT uuid FROM containers WHERE uuid = ?
+			UNION ALL
+			SELECT c.uuid FROM containers c JOIN subtree s ON c.parent_uuid = s.uuid
+		)`

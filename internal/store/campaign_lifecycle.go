@@ -145,7 +145,7 @@ func (cs *ContainerStore) ConvertCampaignWithAttribution(
 			if err != nil {
 				return err
 			}
-			if err := logContainerEvent(tx, ew, attr, containerUUID, "container.updated", newETag, snapshot); err != nil {
+			if err := logContainerEvent(tx, ew, attr, containerUUID, "container.updated", &newETag, snapshot); err != nil {
 				return err
 			}
 		}
@@ -351,7 +351,7 @@ func logCampaignStateEvent(
 		"to":             to,
 	}
 	return logContainerEventReturning(
-		tx, ew, attr, containerUUID, "container.campaign_state_changed", etag, payload,
+		tx, ew, attr, containerUUID, "container.campaign_state_changed", &etag, payload,
 	)
 }
 
@@ -360,7 +360,7 @@ func logContainerEvent(
 	ew *events.Writer,
 	attr attribution.Attribution,
 	containerUUID, eventType string,
-	etag int64,
+	etag *int64,
 	payload map[string]interface{},
 ) error {
 	_, err := logContainerEventReturning(tx, ew, attr, containerUUID, eventType, etag, payload)
@@ -372,7 +372,7 @@ func logContainerEventReturning(
 	ew *events.Writer,
 	attr attribution.Attribution,
 	containerUUID, eventType string,
-	etag int64,
+	etag *int64,
 	payload map[string]interface{},
 ) (events.EventMetadata, error) {
 	payloadJSON, err := json.Marshal(payload)
@@ -386,7 +386,7 @@ func logContainerEventReturning(
 		ResourceType: "container",
 		ResourceUUID: &containerUUID,
 		EventType:    eventType,
-		ETag:         &etag,
+		ETag:         etag,
 		Payload:      &payloadString,
 	})
 	if err != nil {
@@ -473,5 +473,5 @@ func maybeLogCampaignCloseNudge(
 		"reason":         "all_members_terminal",
 		"prompt":         "all members terminal — close?",
 	}
-	return logContainerEvent(tx, ew, attr, campaignUUID, CampaignCloseNudgeEvent, etag, payload)
+	return logContainerEvent(tx, ew, attr, campaignUUID, CampaignCloseNudgeEvent, &etag, payload)
 }
