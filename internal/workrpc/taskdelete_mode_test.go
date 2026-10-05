@@ -47,21 +47,6 @@ func taskRow(t *testing.T, dbPath, uuid string) (exists bool, state, archivedAt,
 	return true, state, ar.String, dl.String
 }
 
-// createTaskRPC creates a task via wrkq.task.create and returns (id, uuid).
-func createTaskRPC(t *testing.T, dbPath, title string) (id, uuid string) {
-	t.Helper()
-	frames := p2Run(t, dbPath,
-		mkRPC("c1", "wrkq.task.create", map[string]any{"title": title, "kind": "task"}),
-	)
-	result := p2ResultOrFail(t, frames[1], "wrkq.task.create")
-	id, _ = result["id"].(string)
-	uuid, _ = result["uuid"].(string)
-	if id == "" || uuid == "" {
-		t.Fatalf("createTaskRPC: empty id/uuid: %#v", result)
-	}
-	return id, uuid
-}
-
 // TestTaskDelete_NoModePreserved proves the absent-mode contract is UNCHANGED:
 // state=deleted + deleted_at tombstone, archived_at NOT set.
 func TestTaskDelete_NoModePreserved(t *testing.T) {

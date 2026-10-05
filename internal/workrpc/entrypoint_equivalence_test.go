@@ -93,28 +93,30 @@ func runPreinitValidation(t *testing.T, entrypoint, dbPath string) map[string]an
 
 func runRPC(t *testing.T, entrypoint, dbPath string, requests []string) []map[string]any {
 	t.Helper()
+	// Principal-only attribution: each entrypoint receives its own explicit
+	// principal env in an otherwise scope-free environment.
+	key := "WRKQ_PRINCIPAL_REF"
+	if entrypoint == "wrkf" {
+		key = "WRKF_PRINCIPAL_REF"
+	}
+	principal := os.Getenv(key)
+	if principal == "" {
+		principal = "agent:smokey"
+	}
+	return runRPCProcess(t, entrypoint, dbPath, requests, append(scopeFreeAuthorityEnv(t), key+"="+principal))
+}
+
+// runRPCProcess runs `go run ./cmd/<entrypoint> --db <dbPath> rpc --stdio` with
+// env, writes each request line to stdin, and returns every stdout frame.
+func runRPCProcess(t *testing.T, entrypoint, dbPath string, requests []string, env []string) []map[string]any {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	args := []string{"run", "-tags", "sqlite_fts5,wrkq_local", "./cmd/" + entrypoint, "--db", dbPath, "rpc", "--stdio"}
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = repoRoot(t)
-	// Principal-only attribution: each entrypoint receives its own explicit
-	// principal env in an otherwise scope-free environment.
-	cmd.Env = scopeFreeAuthorityEnv(t)
-	if entrypoint == "wrkf" {
-		principal := os.Getenv("WRKF_PRINCIPAL_REF")
-		if principal == "" {
-			principal = "agent:smokey"
-		}
-		cmd.Env = append(cmd.Env, "WRKF_PRINCIPAL_REF="+principal)
-	} else {
-		principal := os.Getenv("WRKQ_PRINCIPAL_REF")
-		if principal == "" {
-			principal = "agent:smokey"
-		}
-		cmd.Env = append(cmd.Env, "WRKQ_PRINCIPAL_REF="+principal)
-	}
+	cmd.Env = env
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatalf("stdin pipe: %v", err)
