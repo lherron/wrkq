@@ -77,7 +77,7 @@ source:
   - internal/wrkqapi/timeline.go
   - internal/wrkqapi/timeline_v2.go
   - internal/wrkqapi/project_events_test.go
-  - internal/wrkqapi/rooms.go
+  - internal/wrkqapi/rooms_say.go
   - internal/db/envelope_project_affiliation_migration_test.go
   - internal/wrkqapi/monitorview.go
   - internal/store/containers.go

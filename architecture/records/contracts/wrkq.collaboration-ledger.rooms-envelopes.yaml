@@ -103,7 +103,15 @@ source:
   - internal/db/migrations/000059_envelope_admission.sql
   - internal/domain/rooms.go
   - internal/store/rooms.go
-  - internal/wrkqapi/rooms.go
+  - internal/wrkqapi/rooms_say.go
+  - internal/wrkqapi/rooms_routing.go
+  - internal/wrkqapi/rooms_addressees.go
+  - internal/wrkqapi/rooms_verbs.go
+  - internal/wrkqapi/rooms_state.go
+  - internal/wrkqapi/rooms_wire.go
+  - internal/wrkqapi/room_scope_refs.go
+  - internal/wrkqapi/envelope_reads.go
+  - internal/wrkqapi/envelope_dispositions.go
   - internal/rpccli/wrkc.go
   - internal/rpccli/wrkc_acceptance_test.go
   - internal/wrkqapi/rooms_admission_test.go

@@ -28,7 +28,7 @@ exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the bypassing call site
 source:
   - internal/nodeauth/nodeauth.go              # tokens resolve to a node id only; nothing maps a token to an agent principal
   - internal/wrkqapi/api.go                    # attributionFor validates the GRAMMAR of the asserted principal, not its truth
-  - internal/wrkqapi/rooms.go                  # addressee/sender WRKQ_FORBIDDEN guards compare against the asserted principal
+  - internal/wrkqapi/envelope_dispositions.go  # addressee/sender WRKQ_FORBIDDEN guards compare against the asserted principal
   - internal/wrkqapi/promises.go               # owner/onBehalf WRKQ_FORBIDDEN guards compare against the asserted principal
   - internal/wrkqapi/errors.go                 # NewForbiddenError: a coordination refusal, not an authentication result
 required_tests:

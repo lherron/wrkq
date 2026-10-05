@@ -34,7 +34,7 @@ source:
   - architecture/records/invariants/wrkq.collaboration-ledger.authority.yaml
   - internal/domain/rooms.go
   - internal/store/rooms.go
-  - internal/wrkqapi/rooms.go
+  - internal/wrkqapi/envelope_reads.go
   - packages/client/src/wrkq/types.ts
 required_tests:
   - before/after boundary, limit-one, exact-member filter-before-limit, cross-room ordering, and unrelated-noise gates
