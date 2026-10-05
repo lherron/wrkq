@@ -112,8 +112,9 @@ the end. The procedure is in [MAINTAIN.md](MAINTAIN.md).
 
 ## Helpers
 
-`fixtures/` holds the drive inputs the feature files name: `wv-flow.json` and `wv-flow-fail.json` (feature 8),
-`sink.py` (feature 9) and `client-drive.ts` (feature 10).
+The drive inputs the feature files name live outside this skill directory, in the repo at `~/praesidium/wrkq/spaces/verify-wrkq/fixtures/`
+(`spaces/verify-wrkq/fixtures/`): `wv-flow.json` and `wv-flow-fail.json` (feature 8), `sink.py` (feature 9) and
+`client-drive.ts` (feature 10). They are data you pass to `wrkf`, `python3` and `bun`, not helpers.
 
 `wv` (this directory, mode 100755) is the only helper. Every verb except `env`, `run` and `rec` prints one JSON
 object. A refusal prints `{error, message, next}` and exits 1.

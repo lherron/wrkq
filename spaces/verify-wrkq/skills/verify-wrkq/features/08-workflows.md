@@ -36,14 +36,14 @@ supervisor role sit on top. Code: `cmd/wrkf/`, `internal/wrkfcli/`, `internal/wo
 
 Run `eval "$(wv env <name>)"`. The scratch daemon's hook catalog is `$WV_STATE/hooks.json`, with `wv_pass`
 (`/usr/bin/true`) and `wv_fail` (`/usr/bin/false`). Hooks run inside the **daemon**, so a template can only
-reference hook ids from that catalog. The fixture template is `../fixtures/wv-flow.json`: plan → done
+reference hook ids from that catalog. The fixture template is `~/praesidium/wrkq/spaces/verify-wrkq/fixtures/wv-flow.json`: plan → done
 (it needs `implementation` evidence with `verdict=ready`) → closed (the `wv_pass` check).
-`../fixtures/wv-flow-fail.json` is the same flow as `wv_flow_fail@1`, with its check on `wv_fail`.
+`~/praesidium/wrkq/spaces/verify-wrkq/fixtures/wv-flow-fail.json` is the same flow as `wv_flow_fail@1`, with its check on `wv_fail`.
 
 ## Driving it
 
 ```bash
-WF=<skill dir>/fixtures/wv-flow.json
+WF=~/praesidium/wrkq/spaces/verify-wrkq/fixtures/wv-flow.json
 R="wrkf --principal-ref agent:clod --role coordinator"
 wrkf workflow validate $WF --json && $R workflow install $WF --json
 wrkq touch inbox/wv-flow -t "WV workflow task" --json | jq -r '.[0].id'   # T-00005 when only the baseline blocks ran; use what it prints
@@ -57,7 +57,7 @@ $R task inspect T-00005 --json | jq -c '{status, outcome, revision, templateId}'
 $R task timeline T-00005 --json | jq -c '[.events[].type]'
 ```
 
-To drive the failing branch, install `fixtures/wv-flow-fail.json`, attach `wv_flow_fail@1` to a fresh task, add
+To drive the failing branch, install `~/praesidium/wrkq/spaces/verify-wrkq/fixtures/wv-flow-fail.json`, attach `wv_flow_fail@1` to a fresh task, add
 the evidence and run `plan_ready`, then `finish --run-checks`. It is **refused** `WRKF_TRANSITION_BLOCKED`, and
 the instance stays `active`/`done` at revision 1 with a `chk_` row of verdict `error`. The `otherwise` outcome
 never fires for a failed check, because a non-pass verdict blocks before outcomes are evaluated (2026-10-05,

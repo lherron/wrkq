@@ -34,7 +34,7 @@ stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rid
 Run `eval "$(wv env <name>)"`. For raw frames, pipe JSON lines into `wrkq rpc --stdio`. For the client, install
 the **published** package into a scratch dir **that has its own `package.json`**:
 `mkdir "$WV_STATE/client" && cd "$WV_STATE/client" && echo '{"name":"wv-client","private":true}' > package.json && bun add @wrkq/client@latest`.
-Copy `../fixtures/client-drive.ts` there and run it with `bun --env-file=/dev/null`. Bun autoloads
+Copy `~/praesidium/wrkq/spaces/verify-wrkq/fixtures/client-drive.ts` there and run it with `bun --env-file=/dev/null`. Bun autoloads
 `.env.local`, and that would swap the locator back to canonical.
 
 Live, read only: one `rpc.initialize` frame against canonical names the serving revision.
@@ -83,4 +83,4 @@ On the scratch, raw frames return the protocol hash, `-32601` for an unknown met
 Live: `rpc.initialize` names the canonical revision.
 
 Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep), installed 037fe66, published `@wrkq/client@0.1.0-dev.20261005155132`:
-`var/wrkq-artifacts/T-10349/10-rpc-client/drive.txt` with `fixtures/client-drive.ts`. Live: `live/reads.txt` (canonical serves 037fe66).
+`var/wrkq-artifacts/T-10349/10-rpc-client/drive.txt` with `spaces/verify-wrkq/fixtures/client-drive.ts` (typed, re-driven in `fixup/drive.txt`). Live: `live/reads.txt` (canonical serves 037fe66).

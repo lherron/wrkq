@@ -32,7 +32,7 @@ downward) or global, on the internal root. Code: `internal/rpccli/monitor.go`, `
 ## How to get to it
 
 Run `eval "$(wv env <name>)"`. For webhooks, start a throwaway HTTP sink on a free loopback port that appends
-each POST to a file under `$WV_STATE`. The 10-line Python sink is `../fixtures/sink.py`. Subscribe a scratch
+each POST to a file under `$WV_STATE`. The 10-line Python sink is `~/praesidium/wrkq/spaces/verify-wrkq/fixtures/sink.py`. Subscribe a scratch
 container to it.
 
 Live, read only: `wrkq webhook list --output json` shows the global sinks: ACP on loopback and on the tailnet,
@@ -47,7 +47,7 @@ W=$(wrkq touch inbox/wv-watch -t "WV monitor target" --json | jq -r '.[0].id')  
 wrkq set $W --state completed; wait                                                  # result met, exit 0
 wrkq monitor wait $W --until state=cancelled --timeout 3s; echo "exit=$?"      # timeout, exit 1
 wrkq monitor watch --raw --timeout 3s | jq -c 'select(.id) | {id,event_type}' | tail -3   # not `| head`: SIGPIPE = exit 141
-python3 <skill dir>/fixtures/sink.py <port> "$WV_STATE/sink.jsonl" &
+python3 ~/praesidium/wrkq/spaces/verify-wrkq/fixtures/sink.py <port> "$WV_STATE/sink.jsonl" &
 wrkq container set inbox --webhook-url "http://127.0.0.1:<port>/hook/{ticket_id}" --webhook-events task
 wrkq touch inbox/wv-hook -t "WV webhook target"; wrkq set inbox/wv-hook --priority 1; sleep 3
 jq -c '{path, body: (.body|fromjson|{event, ticket_id, event_seq})}' "$WV_STATE/sink.jsonl"
