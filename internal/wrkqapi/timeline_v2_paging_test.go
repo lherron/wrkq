@@ -85,10 +85,10 @@ func TestTimelineMergeHorizonBound(t *testing.T) {
 		{entry: WrkqTimelineEntry{Timestamp: "2026-01-01T00:00:00Z"}},
 		{entry: WrkqTimelineEntry{Timestamp: "2026-01-05T00:00:00Z"}},
 	}
-	if kept := trimTimelineProjectRows(rows, "2026-01-01T00:00:00Z", false); len(kept) != 1 {
+	if kept := trimTimelineRows(rows, "2026-01-01T00:00:00Z", false); len(kept) != 1 {
 		t.Fatalf("trim kept %d rows, want the horizon prefix", len(kept))
 	}
-	if kept := trimTimelineProjectRows(rows, "", false); len(kept) != 2 {
+	if kept := trimTimelineRows(rows, "", false); len(kept) != 2 {
 		t.Fatalf("an unbounded page must keep every row, got %d", len(kept))
 	}
 	// Descending delivery inverts the rule: the LATEST bound wins, and rows
@@ -100,7 +100,7 @@ func TestTimelineMergeHorizonBound(t *testing.T) {
 		{entry: WrkqTimelineEntry{Timestamp: "2026-01-05T00:00:00Z"}},
 		{entry: WrkqTimelineEntry{Timestamp: "2026-01-01T00:00:00Z"}},
 	}
-	if kept := trimTimelineProjectRows(descRows, "2026-01-05T00:00:00Z", true); len(kept) != 1 {
+	if kept := trimTimelineRows(descRows, "2026-01-05T00:00:00Z", true); len(kept) != 1 {
 		t.Fatalf("descending trim kept %d rows, want the horizon prefix", len(kept))
 	}
 }

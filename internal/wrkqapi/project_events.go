@@ -244,3 +244,18 @@ func optionalTrimmedString(value string) *string {
 	}
 	return &value
 }
+
+// resolveUnadornedProject resolves a selector that must name an unadorned
+// project, the only container a subtree read admits.
+func (a *API) resolveUnadornedProject(ctx context.Context, raw, field string) (string, error) {
+	uuid, _, err := selectors.ResolveContainer(a.db, raw)
+	if err != nil {
+		return "", NewValidationError("project must resolve to an unadorned project", map[string]any{"field": field, "reason": "subtree_requires_unadorned_project"})
+	}
+	var kind string
+	var campaign sql.NullString
+	if err := a.db.QueryRowContext(ctx, `SELECT kind, campaign_state FROM containers WHERE uuid = ?`, uuid).Scan(&kind, &campaign); err != nil || kind != "project" || campaign.Valid {
+		return "", NewValidationError("project must resolve to an unadorned project", map[string]any{"field": field, "reason": "subtree_requires_unadorned_project"})
+	}
+	return uuid, nil
+}

@@ -76,6 +76,10 @@ source:
   - architecture/records/invariants/wrkq.wrkf-rpc.bounded-polling-streaming.yaml
   - internal/wrkqapi/timeline.go
   - internal/wrkqapi/timeline_v2.go
+  - internal/wrkqapi/timeline_v2_request.go
+  - internal/wrkqapi/timeline_v2_sources.go
+  - internal/wrkqapi/timeline_v2_merge.go
+  - internal/wrkqapi/timeline_v2_delivery.go
   - internal/wrkqapi/project_events_test.go
   - internal/wrkqapi/project_events_timeline_test.go
   - internal/wrkqapi/timeline_v2_messages_test.go
