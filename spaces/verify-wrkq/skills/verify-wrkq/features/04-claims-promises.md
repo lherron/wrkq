@@ -50,9 +50,8 @@ wrkq log PR-00001 --oneline
 - **Claims need a node identity.** A daemon started with plain `-token` (or none) refuses every claim:
   `WRKQ_NODE_IDENTITY_REQUIRED: node identity is required for task claims`. `wv up` starts with
   `-node-tokens-file` for this reason (2026-10-05, T-10298).
-- **`--scope` refuses a lane-suffixed session ref.** `agent:...:task:T-00001/lane:main`, which is the form
-  `$HRC_SESSION_REF` takes, fails with `--scope must be a task-scoped sessionRef`. Drop `/lane:main`. When
-  `--scope` is omitted, the runtime scope (with its lane) resolves correctly. This is a minor product defect.
+- `--scope` accepts the lane-suffixed `$HRC_SESSION_REF` form (`...:task:T-00001/lane:main`) and records
+  the claim against the task scopeRef with the lane dropped. A non-task ref is still refused.
 - Release must run as the holder's principal: `WRKQ_VALIDATION: claim principal must match claim scope agent`.
   Set `--as` to match the scope's agent.
 - `promise add --json` returns camelCase fields (`reviewAt`, `ready`, `state`, `etag`), and `promise ready --json`

@@ -159,7 +159,9 @@ func newReleaseCmd() *cobra.Command {
 
 func claimScopeRef(override string) (string, error) {
 	if strings.TrimSpace(override) != "" {
-		parsed, err := scope.ParseScopeRef(strings.TrimSpace(override))
+		// An HRC session ref carries a /lane: suffix; the claim scope is the seat.
+		ref, _, _ := strings.Cut(strings.TrimSpace(override), "/lane:")
+		parsed, err := scope.ParseScopeRef(ref)
 		if err != nil || parsed.TaskID == "" {
 			return "", fmt.Errorf("--scope must be a task-scoped sessionRef")
 		}
