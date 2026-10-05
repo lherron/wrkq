@@ -16,7 +16,9 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
   catalog (`WRKF_HOOK_CATALOG`) and refuses to start without one. It also refuses a non-loopback listen without
   a token, unless it gets `-unsafe-no-token`.
 - **Health.** `wrkq server health --addr H:P` reads `/v1/health` with the caller's token. A node-token daemon
-  answers 401 to an unauthenticated health read. `wrkq server status` reports this node's launchd job and pid
+  answers 401 to an unauthenticated health read. With a wrong token, `server health` still exits 0 and prints
+  `{"auth":"unauthorized","status":"ok"}` plus a stderr notice that the daemon rejected the caller's token, so
+  check `auth`, not the exit code. `wrkq server status` reports this node's launchd job and pid
   file, plus `binaryStale`.
 - **Locator and auth precedence.** CLI flags, then env, then `./.env.local`, then `~/praesidium/.env.local`,
   then `~/.config/wrkq/config.yaml`. A client with no token is refused with a message naming both token inputs.
@@ -58,7 +60,13 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 - Doctor's `sequence_drift` checks `event_log` against its own AUTOINCREMENT row in `sqlite_sequence`
   (named `event_log`). Before T-10327 it read the dead `event_seq` row and flagged every store with an event.
 - Doctor's `attach_dir_exists` needs `WRKQ_ATTACH_DIR` (or `attach_dir` in config) on the **caller's** side.
-  `wv env` exports it. Without it, a correct store reports an error.
+  `wv env` exports it. Without it, a correct store reports an error row, and `doctor --json` still exits 0, so
+  read the rows (2026-10-05, T-10349 `01-store-daemon/drive.txt`).
+- A malformed `X-Wrkq-Principal-Ref` header on `/v1/rpc` is refused `WRKQ_VALIDATION` ("principal attribution
+  only supports agent identities"). The CLI validates the flag first, so prove the server side with `curl`.
+- In an agent seat an unattributed write doesn't reach the "principalRef is required" refusal: the CLI resolves
+  the principal from `ASP_AGENT_ID`/`AGENT_ACTOR` even with `WRKQ_PRINCIPAL_REF`, `HRC_SESSION_REF` and
+  `AGENT_SCOPE_REF` unset (T-10349).
 - `wrkqd` won't start without a hook catalog:
   `failed to initialize workrpc registry: hook catalog configuration is required`. The canonical job sets
   `WRKF_HOOK_CATALOG`. A hand-started daemon has to set it too.
@@ -74,5 +82,5 @@ a dead locator gets the "retrying is safe" refusal, `whoami` names the scratch l
 ok, `migrate --status` lists every migration as applied, and `migrate` refuses
 the serving store. On the canonical daemon, read only: health is ok and `rpc.initialize` names a revision.
 
-Driven 2026-10-05 on wv `t-10298` (T-10298) with installed f43c308: `var/wrkq-artifacts/T-10298/01-store-daemon/drive.txt`,
-`evidence/t-10298/`, live reads in `live/canonical.txt`.
+Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep) with installed 037fe66: `var/wrkq-artifacts/T-10349/01-store-daemon/drive.txt`,
+`evidence/t-10349/`, live reads in `live/reads.txt` (canonical serves 037fe66).

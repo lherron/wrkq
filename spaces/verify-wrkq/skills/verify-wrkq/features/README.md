@@ -6,12 +6,12 @@ and Proven when. The last lines of each file name the drive that last proved it 
 | # | Feature | File | Drive on |
 | --- | --- | --- | --- |
 | 1 | Store and daemon (`wrkqadm init/migrate/doctor`, `wrkqd` serve and auth, health, locator precedence, whoami) | [01-store-daemon.md](01-store-daemon.md) | scratch; health and initialize read-only on canonical |
-| 2 | Tasks and containers (create, cat, etag set, ls/tree/find/search, mv, rm/restore, container archive, named subtasks, relations, apply, log) | [02-tasks-containers.md](02-tasks-containers.md) | scratch |
+| 2 | Tasks and containers (create, cat, etag set, ls/tree/find/search, mv, cp, rm/restore, container archive, rmdir, rename, named subtasks, relations, apply, diff, ack, check-inbox, timeline, log) | [02-tasks-containers.md](02-tasks-containers.md) | scratch |
 | 3 | Comments, attachments and handoffs (comment add/ls, attach put/ls/get, handoff create/list/acknowledge) | [03-comments-attachments-handoffs.md](03-comments-attachments-handoffs.md) | scratch |
 | 4 | Claims and promises (node-authenticated claim, takeover, release; promise add/ready/renew/resolve) | [04-claims-promises.md](04-claims-promises.md) | scratch |
 | 5 | Campaigns (convert, activate, close, enrollment, members, portfolio) | [05-campaigns.md](05-campaigns.md) | scratch |
 | 6 | Rooms, wrkc (say and routing, obligations, reply-is-ack, inbox, defer, withdraw, log, members) | [06-rooms.md](06-rooms.md) | scratch; own inbox read-only on canonical |
-| 7 | Project facts, wrkp (post and idempotency, log and cursor, types, git producers, the `just` shim and `run.settled`, project roots) | [07-project-facts.md](07-project-facts.md) | scratch; types read-only on canonical |
+| 7 | Project facts, wrkp (post and idempotency, show, log and cursor, types, git producers, the `just` shim and `run.settled`, project roots) | [07-project-facts.md](07-project-facts.md) | scratch; types read-only on canonical |
 | 8 | Workflows, wrkf (templates, attach, next, evidence, blocked and checked transitions, inspect, timeline) | [08-workflows.md](08-workflows.md) | scratch; template list read-only on canonical |
 | 9 | Monitor and webhooks (`monitor wait/watch`, container and global webhooks) | [09-monitor-webhooks.md](09-monitor-webhooks.md) | scratch with a local sink; global list read-only |
 | 10 | RPC and `@wrkq/client` (stdio JSON-RPC, errors, idempotency, CAS, the published client) | [10-rpc-client.md](10-rpc-client.md) | scratch; initialize read-only on canonical |

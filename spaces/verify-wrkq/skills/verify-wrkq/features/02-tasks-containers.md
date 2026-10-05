@@ -17,21 +17,34 @@ its cascade, named subtasks, relations, the edit round trip (`cat --output raw` 
 - **Update.** `wrkq set <sel> --state ... --priority ... [--if-match <etag>]`. A stale etag fails with
   `task etag precondition failed` (exit 1).
 - **List.** `wrkq ls <container> --type t`, `wrkq tree` (JSON lines when stdout is not a TTY), and
-  `wrkq find --state open|all --type t [--campaign P]`. Completed, archived and deleted tasks are hidden by
-  default.
+  `wrkq find --state open|all --type t [--campaign P]`. Without `--state`, completed, archived and deleted
+  tasks are hidden (source read, `find.go`: `idea` and `cancelled` too).
 - **Search.** `wrkq search '<words>' --state all --json` returns
   `{query, stale, status, results[].resource_id}`. Dense search uses the local embedding model, so a word can
   match a neighbouring task.
 - **Move.** `wrkq mv <task> <container>/`.
 - **Delete and restore.** `wrkq rm <task>` soft-deletes (state `archived`, `archived_at` set) and
-  `wrkq restore <task>` returns it to `open`. `--purge` hard-deletes and cascades away the task's room and its
+  `wrkq restore <task>` returns it to `open` (a task that isn't archived or deleted is refused,
+  `task is not deleted or archived (current state: completed)`). `wrkq rm <container> --yes` archives the
+  container and cancels its live tasks, like `archive`. `--purge` hard-deletes and cascades away the task's room and its
   envelopes. Never purge a task that has a room.
 - **Container archive.** `wrkq archive <container> --yes` cancels the live tasks below it, and `wrkq unarchive`
-  restores exactly the task states that the archive changed.
+  restores exactly the task states that the archive changed. Without `--yes` on a non-TTY it prompts, reads EOF
+  and aborts (`Error: aborted`, exit 1), changing nothing.
 - **Named subtasks.** `wrkq touch T-<n>.<name> --subtask` creates id `T-<n>.<name>` and bumps the owner's
   `open_subtask_count`.
-- **Relations.** `wrkq relation add <a> blocks <b>` and `wrkq relation ls <a>`.
+- **Relations.** `wrkq relation add <a> blocks|relates_to|duplicates <b>` and `wrkq relation ls <a>`. Any other
+  kind is refused, naming the three.
 - **Edit round trip.** `wrkq cat <task> --output raw > f.md`, edit the file, then `wrkq apply <task> f.md`.
+  `apply` writes only the body. Front-matter edits (title, state) need `--with-metadata`, and without it `apply`
+  warns `Metadata ignored without --with-metadata`.
+- **The other verbs.** `wrkq cp <task> <container>/` copies a task (a new `T-<n>`, so it shifts later ids;
+  its JSON row reports `dest_path: ""`). `wrkq diff <a> <b>` lists `fields_changed`. `wrkq stat <sel> --json`
+  returns an array. `wrkq rename-container <c> <new-slug>` (no `--json`). `wrkq rmdir <c> [--force]`
+  hard-deletes, and `--force` cascades with no undo. Never use it on shared data. `wrkq ack <task>` acknowledges completed
+  tasks (`--force` for others). `wrkq check` is a group (`wrkq check T-1` is an unknown command, exit 2).
+  `wrkq check-inbox --json` lists open inbox tasks. `wrkq timeline <container>` is the composite timeline
+  (no `--json`; use `--output json`).
 - **History.** `wrkq log <ID|path> [--oneline|--patch|--json]`. A path names a task first, then a container.
 
 ## How to get to it
@@ -69,6 +82,10 @@ wrkq index update && wrkq search alpha --state all --json | jq -c '[.results[].r
 - Closing a task prints a hint about reconciling worktrees under `~/praesidium/under-construction/`. On a scratch
   it means nothing.
 - `wrkq tree` without a TTY prints JSON lines, and an empty project prints nothing at all.
+- **A one-character slug fails with a raw store error.** `wrkq touch inbox/x -t x` returns `WRKQ_ERROR`
+  `CHECK constraint failed: slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' ...`, because that GLOB needs
+  two characters. Use slugs of two or more characters. Product task T-10355 (2026-10-05, T-10349
+  `02-tasks-containers/drive.txt`).
 
 ## Proven when
 
@@ -77,5 +94,5 @@ the completed task until `--state all`, `rm`/`restore` moves the task between `a
 container archive cascades to `cancelled` and `unarchive` reverses exactly that change, a named subtask raises
 `open_subtask_count`, and `log <ID>` and `log <path>` show `task.created` and `task.updated` attributed to you.
 
-Driven 2026-10-05 on wv `t-10298` (T-10298) with installed f43c308: `var/wrkq-artifacts/T-10298/02-tasks-containers/drive.txt`.
-`drive-attempt1-bad-commands.txt` beside it keeps the first, malformed attempt.
+Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep) with installed 037fe66: `var/wrkq-artifacts/T-10349/02-tasks-containers/drive.txt`
+(baseline, then the drift drives after the NOTE line, which ran after features 3–7, so their ids are higher).

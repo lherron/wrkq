@@ -23,10 +23,19 @@ You can drive on a scratch daemon or read the live one:
   `eval "$(wv env <name>)"` points `wrkq`, `wrkc`, `wrkf`, `wrkp` and `@wrkq/client` at it as node `wv`. Use
   the scratch for every drive that writes. Name it after your task (`--name T-10298` becomes `t-10298`), so its
   ids and facts start empty.
+- **What the scratch doesn't isolate** (2026-10-05, T-10349). `wv env` leaves the seat's `HRC_SESSION_REF`,
+  `AGENT_SCOPE_REF` and `ASP_*` in place. Scratch writes still carry your real canonical scope as `scope_ref`
+  (`wrkq whoami`, `wrkp show`), and an unattributed write resolves your agent from `ASP_AGENT_ID`, not a refusal.
+  Feature 6 unsets `HRC_SESSION_REF`. A scratch task's `artifact_dir` is a host hint that points into the
+  **canonical** `~/praesidium/var/wrkq-artifacts/<id>`, and `wrkq touch` creates that directory (`touch.go`;
+  empty `T-00001.*` dirs from earlier scratch drives already sit in the canonical root). Never write
+  evidence there. It goes under the pass task's own `artifact_dir`.
 - **Live (read-only).** The canonical daemon runs on mini (`WRKQ_DB=rpc://mini` from `~/praesidium/.env.local`).
   On any node, read only: `wrkq whoami`, `wrkq server health --addr mini:7171`, an `rpc.initialize` frame through
-  `wrkq rpc --stdio` (it names the server revision), `wrkq projects`, `wrkp types <project>`,
-  `wrkf workflow list`, `wrkq webhook list`, and `wrkc inbox` for your own scope. Never write test data to the
+  `wrkq rpc --stdio` (pass `protocolVersion`, feature 10, and read `.result.server.revision`; without it the frame
+  is refused, though `error.data.serverRevision` still names the build), `wrkq projects`, `wrkp types <project>`,
+  `wrkf workflow list --json` (`.templates[]`), `wrkq webhook list --output json` (it has no `--json`), and
+  `wrkc inbox` for your own scope. Never write test data to the
   canonical store, never migrate it, never restart its job (its procedure is AGENTS.md "Justfile is the
   lifecycle", and only Mable or Lance runs it).
 - Scratch tests **what is installed**. To test an uninstalled change, build it (`just build`) and run
@@ -71,7 +80,8 @@ serve the agent guides.
   - `NN-<feature>/drive.txt` for each feature, written by `wv rec`. Each entry is a `## <UTC time>` line, then
     `$ <command>`, then its output, then `exit: <code>`. The file reruns as written after
     `eval "$(wv env <name>)"`. Commands run under `bash -o pipefail`, so a failed command can't hide behind a
-    pipe into `jq`;
+    pipe into `jq`. The flip side: a stream cut short by `| head` records `exit: 141` (SIGPIPE). Bound streams
+    with `--timeout` and filter with `jq` instead;
   - `evidence/<scratch name>/` for each scratch, written by `wv evidence <name> <dir>` before `wv down`. It holds
     the daemon log, health, doctor, the project tree, the hook catalog and a `.backup` copy of the store;
   - `live/` for reads of the canonical daemon.
@@ -101,6 +111,9 @@ every feature, triage (doc drift, harness gap, product gap), at most one commit,
 the end. The procedure is in [MAINTAIN.md](MAINTAIN.md).
 
 ## Helpers
+
+`fixtures/` holds the drive inputs the feature files name: `wv-flow.json` and `wv-flow-fail.json` (feature 8),
+`sink.py` (feature 9) and `client-drive.ts` (feature 10).
 
 `wv` (this directory, mode 100755) is the only helper. Every verb except `env`, `run` and `rec` prints one JSON
 object. A refusal prints `{error, message, next}` and exits 1.

@@ -3,7 +3,8 @@
 A campaign adorns an ordinary container with a lifecycle (draft → active → completed|cancelled), a brief and a
 specification. Tasks inside the container are **resident** members. A task elsewhere becomes an **enrolled**
 member and keeps its own project and path. Code: `internal/rpccli/campaign.go`, `internal/rpccli/set.go`
-(`--campaign`), `internal/store/containers.go`, and `internal/taskmember/`.
+(`--campaign`), `internal/store/campaign_lifecycle.go`, `internal/store/campaign_membership.go`,
+`internal/wrkqapi/campaigns.go`, `internal/wrkqapi/campaign_portfolio.go`, and `internal/taskmember/`.
 
 ## Sub-features
 
@@ -33,6 +34,8 @@ wrkq touch inbox/wv-enrolled -t "enrolled from inbox"
 wrkq set inbox/wv-enrolled --campaign P-<camp1 id> && wrkq cat inbox/wv-enrolled --json --one | jq -c .campaign
 wrkq find --campaign P-<camp1 id> --state all --json | jq -c '[.[] | {id,path}]'
 wrkq campaign portfolio --json | jq -c '[.. | objects | select(.id? == "P-<camp1 id>")][0] | {id,campaignState}'
+wrkq campaign close P-<camp1 id> --state completed --json        # refused: blocked by 2 open member(s)
+wrkq set camp1/member-a inbox/wv-enrolled --state completed
 wrkq campaign close P-<camp1 id> --state completed --json | jq -c '{previousState,campaignState,missingOutcomes}'
 wrkq log P-<camp1 id> --oneline
 ```
@@ -40,18 +43,27 @@ wrkq log P-<camp1 id> --oneline
 ## Gotchas
 
 - Campaign verbs take `--json` or `--output json` (both force JSON on a TTY; a non-TTY stdout gets JSON anyway).
-- An unknown `wrkq campaign <verb>` prints the group help instead of an error. `enroll` is not a verb.
-  Enrollment is `wrkq set --campaign`.
+- An unknown `wrkq campaign <verb>` is a usage error, `unknown command "enroll" for "wrkq campaign"`, exit 2.
+  `enroll` is not a verb. Enrollment is `wrkq set --campaign`.
+- **A completed close needs every member terminal.** With open members, `close --state completed` is refused
+  `campaign close blocked by N open member(s)`, with a hint naming each one and whether it is resident or
+  enrolled. Complete, cancel, move or unenroll them first. `--state cancelled` abandons the campaign and leaves
+  open members as they are (2026-10-05, T-10349 `05-campaigns/drive.txt`).
+- `convert` with no `--state` makes an active campaign. A draft can only be activated or cancelled. A terminal
+  campaign refuses every transition (`terminal campaigns cannot transition`), and enrolling into one is refused
+  (`campaign enrollment target must be a draft or active campaign`).
 - `wrkq stat <container> --json` returns an array, and `wrkq cat P-<n> --json --one` doesn't carry the
   campaign state. Read the state from the `convert`/`activate`/`close` results or from `portfolio`.
 - After `close`, the campaign drops out of the default `portfolio` aggregate.
-- Named subtasks can't enroll in campaigns (`wrkq info`).
+- Named subtasks can't enroll in campaigns: `subtask cannot have parent or campaign`.
 
 ## Proven when
 
 `convert` reports `campaignState: draft` and `activate` makes it `active`. The enrolled task keeps its inbox
 path and shows `membership: enrolled`. `find --campaign` returns both the resident and the enrolled member.
-`close` reports `previousState: active` → `completed` and names the members without outcomes. The container's
-log has `container.campaign_state_changed` for each move.
+`close` with open members is refused, naming them. Once they are completed, `close` reports
+`previousState: active` → `completed` and names the members without outcomes. The container's log
+(`wrkq log camp1` works by path) has `container.campaign_state_changed` for each move and a
+`container.campaign_close_nudged`.
 
-Driven 2026-10-05 on wv `t-10298` (T-10298): `var/wrkq-artifacts/T-10298/05-campaigns/drive.txt`.
+Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep) with installed 037fe66: `var/wrkq-artifacts/T-10349/05-campaigns/drive.txt`.

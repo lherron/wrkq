@@ -17,6 +17,11 @@ MAINTAIN.md. Code: `cmd/wrkp/`, `internal/rpccli/wrkp*.go` (`wrkp.go`, `wrkp_log
 - **Forward cursor.** `wrkp cursor <project>` captures a point, and `wrkp log --after C` reads oldest-first from
   it up to now.
 - **Types.** `wrkp types <project>` lists every stored fact type with its count.
+- **Show.** `wrkp show <uuid> --json` returns the full row, including `idempotencyKey`, `occurredAt`,
+  `principalRef` and `scopeRef`.
+- **Post refusals** (all `WRKQ_VALIDATION`, exit 1): a reserved first segment (`--type task.x`,
+  `reserved_namespace`), a type that isn't dotted lowercase (`Foo`, `invalid_format`), and no `--attr` at all
+  (`attributes are required`).
 - **Git producers.** `wrkp git commit` (post-commit) and `wrkp git push` (pre-push, reads ref lines on stdin)
   resolve the checkout through the **registered project roots**. They always exit 0, and anything they can't do
   is reported as one `wrkp git: ...` line on stderr.
@@ -54,23 +59,29 @@ Live, read only: `wrkp types wrkq` and `wrkp log wrkq --type verify.upkeep --lim
 
 ## Gotchas
 
-- **Producers need a registered root.** Without `--root`, `wrkp git` and `wrkp just` resolve no project. They
+- **Producers need a registered root.** Without `--root`, `wrkp git` and `wrkp just` resolve no project
+  (source read, not driven: `wrkp git --project <slug>` skips the root lookup). They
   skip with a one-line stderr notice and exit 0, so nothing fails visibly. A linked worktree resolves to the
   registered main checkout that owns it.
 - The shim posts with the caller's environment, so a `just` run inside a shell with `wv env` evaluated posts to
   the **scratch** daemon. A `just` run in the real wrkq checkout from that shell would post its `run.settled`
   to the scratch, not to canonical.
 - `git.commit` facts carry `source: lefthook` even when you run `wrkp git commit` by hand.
-- The ndjson log entry has `projectEvent.idempotencyKey: null` even for a keyed post. Prove idempotency by the
-  repeated post returning the same uuid and by `wrkp types` counting 1.
-- `wrkp log` hides `turn.*` facts and the quiet task entries unless `--type` names them.
+- The log projection has no `idempotencyKey` field, so `.projectEvent.idempotencyKey` reads null even for a keyed
+  post. `wrkp show <uuid>` carries it. The direct proof of idempotency is the replayed `post --json` returning
+  `{"uuid": <same>, "created": false}`. A replay with a different summary or attributes still returns the
+  original row unchanged, with no conflict (2026-10-05, T-10349 `07-project-facts/drive.txt`).
+- Scratch facts carry your seat's canonical `scopeRef` (SKILL.md "Launch").
+- `wrkp log` hides `turn.*` facts and the quiet task entries unless `--type` names them. `--timeout` and
+  `--stall-after` without `--follow` are a usage error (exit 2).
+- `just -n <recipe>` and `just --summary` are non-run modes, like `--list`. They post nothing.
 
 ## Proven when
 
 The keyed post repeats to the same uuid and `types` counts it once. The forward read after the cursor returns
 exactly the new fact, with its attributes and your principal. `wrkp git commit` skips before `--root` and
-posts a `git.commit` (sha, branch, author, `files_changed`) after it. `just hello`/`just fail` post
+posts a `git.commit` (sha, branch, author, `files_changed`, plus node, insertions, deletions, parents) after it. `just hello`/`just fail` post
 `run.settled` with status 0 and 3, the listing posts nothing, and just's exit code passes through (3).
 
-Driven 2026-10-05 on wv `t-10298` (T-10298), shim from the installed build: `var/wrkq-artifacts/T-10298/07-project-facts/drive.txt`.
-Live reads: `live/canonical.txt` (`wrkp types wrkq`, no `verify.upkeep` yet).
+Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep), shim from installed 037fe66: `var/wrkq-artifacts/T-10349/07-project-facts/drive.txt`.
+Live reads: `live/reads.txt` (`wrkp types wrkq`; no `verify.upkeep` before this pass).

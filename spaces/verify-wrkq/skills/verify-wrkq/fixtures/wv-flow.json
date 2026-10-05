@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "wrkf.workflow-template.v0",
+  "id": "wv_flow",
+  "version": "1",
+  "kind": "agent_first_workflow",
+  "initial": { "status": "active", "phase": "plan" },
+  "roles": {
+    "coordinator": { "description": "Drives the wv workflow" },
+    "supervisor": { "description": "Recovery" }
+  },
+  "states": [
+    { "status": "active", "phase": "plan" },
+    { "status": "active", "phase": "done" },
+    { "status": "active", "phase": "error" },
+    { "status": "closed", "outcome": "completed" }
+  ],
+  "evidenceKinds": {
+    "implementation": {
+      "description": "Implementation proof",
+      "facts": { "required": ["verdict"], "properties": { "verdict": { "type": "string", "enum": ["ready", "needs_patch"] } } }
+    }
+  },
+  "checks": {
+    "pass_check": { "type": "hook", "hookId": "wv_pass", "exitMap": { "0": { "verdict": "pass", "outcome": "ok" }, "*": { "verdict": "error", "outcome": "failed" } } }
+  },
+  "transitions": [
+    {
+      "id": "plan_ready",
+      "from": { "status": "active", "phase": "plan" },
+      "by": ["coordinator"],
+      "requires": [{ "evidence": { "kind": "implementation", "facts": { "verdict": "ready" } } }],
+      "outcomes": [{ "id": "ready", "when": { "always": true }, "to": { "status": "active", "phase": "done" } }]
+    },
+    {
+      "id": "finish",
+      "from": { "status": "active", "phase": "done" },
+      "by": ["coordinator"],
+      "checks": ["pass_check"],
+      "outcomes": [
+        { "id": "finished", "when": { "checkVerdict": { "check": "pass_check", "is": "pass" } }, "to": { "status": "closed", "outcome": "completed" } },
+        { "id": "failed", "when": { "otherwise": true }, "to": { "status": "active", "phase": "error" } }
+      ]
+    }
+  ]
+}

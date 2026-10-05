@@ -18,13 +18,20 @@ hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.
   nobody presented, and nothing acked. `--to a,b` fans out into one envelope per addressee under a shared
   `groupId`.
 - **Reply is the ack.** A say with `--to` acks the sender's own pending or presented obligations in that room from
-  the same counterparty (`acked: [EN-...]`). Each envelope carries `replyTo`.
+  the same counterparty (`acked: [EN-...]`). Each envelope carries `replyTo`. Only `reply_required` envelopes that
+  are pending or presented are acked. A **deferred** envelope is not (`acked: []`, it stays `deferred`). Finish it
+  with `--discharges EN-<n>` on the reply. `--fyi` without `--to` is refused (`a say without an addressee is a
+  log entry`).
 - **Inbox.** `wrkc inbox --as <principal> --scope-ref <scope> --output json` returns
   `{groups[].room, groups[].items[], deferred[], failed, sentExpired, sentFailed, sentWithdrawn}`.
 - **Defer and withdraw.** `wrkc defer EN-<n> --reason ... [--retry-after ...]` pauses an obligation (paused,
-  never terminal). `wrkc withdraw EN-<n> --reason ...` withdraws unpresented mail.
+  never terminal). `wrkc withdraw EN-<n> --reason ...` withdraws unpresented mail and returns
+  `{withdrawn[], refused[]}`. Only the sender (or a scope-less operator) may withdraw. The addressee gets
+  `WRKQ_FORBIDDEN`.
 - **Reads.** `wrkc show <EN|R>`, `wrkc log <room>`, `wrkc members <room>` (`items[].memberRef`, `source`),
-  `wrkc ls`, and `hide`/`unhide`, `join`/`leave`/`invite`. `wrkc ack` is operator-only.
+  `wrkc ls` (a bare JSON array of rooms), and `hide`/`unhide`, `join`/`leave`/`invite`. `wrkc ack` is labelled
+  operator-only, but the daemon doesn't enforce it: an agent scope acked an envelope (`terminalActor: agent:cody`).
+  Product task T-10358 (2026-10-05, T-10349 `06-rooms/drive.txt`).
 
 ## How to get to it
 
@@ -76,5 +83,5 @@ the addressee's inbox. The addressee's `--to` reply returns `acked: [that id]` a
 shows every envelope with its sender and addressee. Live, read only: your own `wrkc inbox` matches what you
 know you owe.
 
-Driven 2026-10-05 on wv `t-10298` (T-10298): `var/wrkq-artifacts/T-10298/06-rooms/drive.txt`. Live inbox read:
-`live/rooms.txt`.
+Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep) with installed 037fe66: `var/wrkq-artifacts/T-10349/06-rooms/drive.txt`.
+Live inbox read: `live/reads.txt`.
