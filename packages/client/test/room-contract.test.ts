@@ -3,16 +3,16 @@ import { createClient, type WorkClient } from "../src/client";
 import { FakeTransport } from "../src/testing/fake-transport";
 import type {
   WrkqEnvelope,
+  WrkqEnvelopeInboxView,
   WrkqEnvelopeMemberPage,
   WrkqEnvelopeMemberPageParams,
-  WrkqEnvelopeInboxView,
   WrkqEnvelopePendingView,
   WrkqEnvelopePresentResult,
   WrkqRoom,
   WrkqRoomLogView,
   WrkqRoomMembersView,
   WrkqRoomSayResult,
-} from "../src/wrkq/types";
+} from "../src/wrkq/collaboration";
 
 type Equal<Left, Right> =
   (<Value>() => Value extends Left ? 1 : 2) extends

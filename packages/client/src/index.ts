@@ -35,5 +35,20 @@ export type {
   WrkqFacade,
 } from "./wrkq/facade.js";
 export type { WrkfFacade } from "./wrkf/facade.js";
-export type * from "./wrkq/types.js";
+export type * from "./wrkq/attachment.js";
+export type * from "./wrkq/campaign.js";
+export type * from "./wrkq/collaboration.js";
+export type * from "./wrkq/comment.js";
+export type * from "./wrkq/container.js";
+export type * from "./wrkq/handoff.js";
+export type * from "./wrkq/listing.js";
+export type * from "./wrkq/project.js";
+export type * from "./wrkq/project-event.js";
+export type * from "./wrkq/promise.js";
+export type * from "./wrkq/relation.js";
+export type * from "./wrkq/search.js";
+export type * from "./wrkq/task.js";
+export type * from "./wrkq/timeline.js";
+export type * from "./wrkq/webhook.js";
+export type * from "./wrkq/workflow-binding.js";
 export type * from "./wrkf/types.js";

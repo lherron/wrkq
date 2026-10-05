@@ -11,13 +11,9 @@ import { createClient } from "../src/client";
 import { WorkRpcError, isWorkRpcError, isWrkfError, isWrkqError } from "../src/errors";
 import { FakeTransport } from "../src/testing/fake-transport";
 import type { WrkfEventQueryResult, WrkfTransitionResult } from "../src/wrkf/types";
-import type {
-  WrkqContainer,
-  WrkqTaskCreateParams,
-  WrkqHandoff,
-  WrkqTask,
-  WrkqTaskCopyResult,
-} from "../src/wrkq/types";
+import type { WrkqContainer } from "../src/wrkq/container";
+import type { WrkqHandoff } from "../src/wrkq/handoff";
+import type { WrkqTask, WrkqTaskCopyResult, WrkqTaskCreateParams } from "../src/wrkq/task";
 
 async function clientWith(transport: FakeTransport, autoInitialize = false) {
   return createClient({ transport, autoInitialize });

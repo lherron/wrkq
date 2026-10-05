@@ -35,7 +35,7 @@ source:
   - internal/domain/rooms.go
   - internal/store/envelope_member_page.go
   - internal/wrkqapi/envelope_reads.go
-  - packages/client/src/wrkq/types.ts
+  - packages/client/src/wrkq/collaboration.ts
 required_tests:
   - before/after boundary, limit-one, exact-member filter-before-limit, cross-room ordering, and unrelated-noise gates
   - indexed query-plan and limit-plus-one materialization evidence

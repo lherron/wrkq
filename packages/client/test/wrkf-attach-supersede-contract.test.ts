@@ -73,7 +73,7 @@ describe("T-05822 wrkf attach supersede contract", () => {
   test("public attach params expose explicit supersede with predecessor CAS guard", () => {
     const goParams = typeBlock(readRepoFile("internal/wrkqapi/types.go"), "WorkflowAttachParams");
     const tsParams = interfaceBlock(
-      readRepoFile("packages/client/src/wrkq/types.ts"),
+      readRepoFile("packages/client/src/wrkq/workflow-binding.ts"),
       "WrkqWorkflowAttachParams",
     );
     const cli = readRepoFile("internal/wrkfcli/root.go");

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createClient } from "../src/client";
 import { FakeTransport } from "../src/testing/fake-transport";
-import type { WrkqComment, WrkqCommentAddParams, WrkqCommentListParams } from "../src/wrkq/types";
+import type { WrkqComment, WrkqCommentAddParams, WrkqCommentListParams } from "../src/wrkq/comment";
 
 const DIGEST_COMMENT: WrkqComment = {
   uuid: "comment-u-1",

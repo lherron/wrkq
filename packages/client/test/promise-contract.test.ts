@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createClient } from "../src/client";
 import { FakeTransport } from "../src/testing/fake-transport";
-import type { WrkqPromise } from "../src/wrkq/types";
+import type { WrkqPromise } from "../src/wrkq/promise";
 
 const PROMISE: WrkqPromise = {
   uuid: "promise-uuid",

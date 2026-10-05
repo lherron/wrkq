@@ -57,7 +57,9 @@ source:
   - internal/workrpc/registry.go
   - internal/workrpc/schema.go
   - internal/workrpc/catview_catalog_test.go
-  - packages/client/src/wrkq/types.ts
+  - packages/client/src/wrkq/container.ts
+  - packages/client/src/wrkq/campaign.ts
+  - packages/client/src/wrkq/timeline.ts
   - packages/client/src/wrkq/facade.ts
   - packages/client/test/fake-transport.test.ts
   - docs/SPEC.md

@@ -45,7 +45,7 @@ source:
   - internal/workrpc/project_root_test.go
   - packages/client/src/client.ts
   - packages/client/src/wrkq/facade.ts
-  - packages/client/src/wrkq/types.ts
+  - packages/client/src/wrkq/project.ts
   - packages/client/test/fake-transport.test.ts
   - docs/wrkq-wrkf-rpc-client-forward-spec.md
   - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml

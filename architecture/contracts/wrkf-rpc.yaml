@@ -94,7 +94,9 @@ source:
   - packages/client/src/wrkq/facade.ts
   - packages/client/src/wrkf/facade.ts
   - packages/client/src/wrkf/types.ts
-  - packages/client/src/wrkq/types.ts
+  - packages/client/src/wrkq/container.ts
+  - packages/client/src/wrkq/project.ts
+  - packages/client/src/wrkq/workflow-binding.ts
   - packages/client/test/fake-transport.test.ts
   - packages/client/test/remote-locator.integration.test.ts
   - packages/client/test/workflow-template-discontinue-contract.test.ts

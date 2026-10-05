@@ -38,7 +38,7 @@ source:
   - packages/client/src/client.ts
   - packages/client/src/wrkf/facade.ts
   - packages/client/src/wrkf/types.ts
-  - packages/client/src/wrkq/types.ts
+  - packages/client/src/wrkq/workflow-binding.ts
   - packages/client/test/workflow-template-discontinue-contract.test.ts
   - docs/wrkq-wrkf-rpc.md
   - docs/wrkq-wrkf-rpc-client-forward-spec.md

@@ -33,7 +33,7 @@ describe("T-06357 workflow template discontinuation contract", () => {
   test("attach override crosses only the wrkq producer and client facade", () => {
     const goParams = read("internal/wrkqapi/types.go");
     const producer = read("internal/wrkqapi/workflow.go");
-    const tsTypes = read("packages/client/src/wrkq/types.ts");
+    const tsTypes = read("packages/client/src/wrkq/workflow-binding.ts");
 
     expect(goParams).toMatch(/AttachDiscontinued\s+bool\s+`json:"attachDiscontinued,omitempty"`/);
     expect(producer).toContain("AttachDiscontinued:    p.AttachDiscontinued");
