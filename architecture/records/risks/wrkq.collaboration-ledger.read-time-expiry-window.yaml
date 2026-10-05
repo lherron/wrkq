@@ -30,7 +30,7 @@ reopen_when:
   - presentation can record a first receipt after an applicable explicit or implicit deadline has committed
 source:
   - wrkq:T-07871
-  - internal/store/rooms.go
+  - internal/store/envelope_lifecycle.go
   - internal/wrkqapi/monitorview.go
   - internal/wrkqapi/rooms_admission_test.go
   - hrc-runtime:T-08401

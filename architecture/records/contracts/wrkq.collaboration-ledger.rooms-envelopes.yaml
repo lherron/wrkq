@@ -103,6 +103,9 @@ source:
   - internal/db/migrations/000059_envelope_admission.sql
   - internal/domain/rooms.go
   - internal/store/rooms.go
+  - internal/store/envelopes.go
+  - internal/store/envelope_send.go
+  - internal/store/envelope_lifecycle.go
   - internal/wrkqapi/rooms_say.go
   - internal/wrkqapi/rooms_routing.go
   - internal/wrkqapi/rooms_addressees.go

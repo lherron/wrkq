@@ -33,7 +33,7 @@ source:
   - wrkq:T-07723
   - architecture/records/invariants/wrkq.collaboration-ledger.authority.yaml
   - internal/domain/rooms.go
-  - internal/store/rooms.go
+  - internal/store/envelope_member_page.go
   - internal/wrkqapi/envelope_reads.go
   - packages/client/src/wrkq/types.ts
 required_tests:
