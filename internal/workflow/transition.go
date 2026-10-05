@@ -148,98 +148,27 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 			return nil
 		}
 
-		if inst.Suspension != nil {
-			return suspendedWriteError(inst)
+		expectedRevision := inst.Revision
+		if opts.ExpectRevision != nil {
+			expectedRevision = *opts.ExpectRevision
 		}
-
-		eventID, err := nextSeqID(tx, "workflow_event_seq", "wfe")
+		updated, committed, eventMeta, err := commitTransitionOutcomeTx(tx, transitionCommit{
+			inst: inst, task: task, outcome: chosen, transitionID: transitionID, resultTask: resultTaskSelector,
+			principalRef: opts.PrincipalRef, role: opts.Role, runID: opts.RunID,
+			idempotencyKey: opts.IdempotencyKey, requestHash: requestHash,
+			now: s.now().Format(time.RFC3339), expectedRevision: expectedRevision,
+		})
 		if err != nil {
 			return err
 		}
-		nextRevision := inst.Revision + 1
-		now := s.now().Format(time.RFC3339)
-		updated := *inst
-		if chosen.To != nil {
-			updated.Status = chosen.To.Status
-			updated.Phase = chosen.To.Phase
-			updated.Outcome = chosen.To.Outcome
-		} else {
-			if err := applySuspendOutcomeTx(tx, &updated, chosen.Suspend, eventID, now); err != nil {
-				return err
-			}
-		}
-		updated.Revision = nextRevision
-		updated.UpdatedAt = now
-		if updated.Status == "closed" {
-			updated.ClosedAt = now
-		} else {
-			updated.ClosedAt = ""
-		}
-		updated.TaskDocEtag = fmt.Sprint(task.ETag)
-		updated.TaskDocHash = taskDocHash(task)
-		res, err := tx.Exec(`
-			UPDATE workflow_instances
-			SET status = ?, phase = ?, outcome = ?, revision = ?, task_doc_etag = ?, task_doc_hash = ?,
-			    updated_at = ?, closed_at = ?, suspension_id = ?, suspension_reason = ?, suspension_at = ?, suspension_cause_ref = ?
-			WHERE id = ? AND revision = ?
-		`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.TaskDocEtag, updated.TaskDocHash,
-			updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), suspensionID(updated.Suspension), suspensionReason(updated.Suspension), suspensionAt(updated.Suspension), suspensionCauseRef(updated.Suspension), updated.ID, inst.Revision)
-		if err != nil {
-			return err
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if affected != 1 {
-			actual, loadErr := instanceRevisionTx(tx, updated.ID)
-			if loadErr != nil {
-				return loadErr
-			}
-			expected := inst.Revision
-			if opts.ExpectRevision != nil {
-				expected = *opts.ExpectRevision
-			}
-			return staleRevisionError(updated.ID, expected, actual.revision)
-		}
-
-		createdObligations, err := insertOutcomeObligationsTx(tx, updated.ID, chosen.Obligations, now)
-		if err != nil {
-			return err
-		}
-		createdEffects, err := enqueueRenderedEffectsTx(tx, updated, chosen.Effects, chosen.ID, opts.RunID, now)
-		if err != nil {
-			return err
-		}
-		result = transitionResultMap(taskSelector, updated, eventID, createdEffects, createdObligations)
-		result["task"] = resultTaskSelector
-		result["idempotent"] = false
-		result["transition"] = transitionID
-		result["outcome"] = chosen.ID
-		eventPayload := map[string]interface{}{"transition": transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}
-		eventType := "workflow.transitioned"
-		if chosen.Suspend != nil {
-			eventType = "workflow.suspended"
-			eventPayload["suspension"] = updated.Suspension
-			eventPayload["beforeRevision"] = inst.Revision
-			eventPayload["afterRevision"] = updated.Revision
-		}
-		resultJSON, _ := json.Marshal(result)
-		eventMeta, err := insertWorkflowMutationEventWithID(tx, eventType, eventID, updated.ID, opts.PrincipalRef, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey, requestHash, string(resultJSON), task.ETag, updated.TaskDocHash, eventPayload)
-		if err != nil {
-			return err
-		}
+		result = committed
 		ctx := workflowTransitionWebhookContext(eventMeta, updated, opts.PrincipalRef, opts.Role, opts.RunID, transitionID, chosen.ID, inst.Revision, updated.Revision, opts.IdempotencyKey, inst.State(), updated.State())
 		if chosen.Suspend != nil {
 			ctx = workflowSuspensionWebhookContext(eventMeta, updated, opts.PrincipalRef, opts.Role, opts.RunID, inst.Revision, updated.Revision, opts.IdempotencyKey)
 		}
 		webhookCtx = &ctx
 		webhookTaskUUID = updated.TaskUUID
-		if chosen.Suspend != nil {
-
-			return nil
-		}
-		return updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, opts.PrincipalRef)
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -254,6 +183,109 @@ func (s *Service) TransitionForSelectors(taskSelector, instanceID, transitionID 
 		}
 	}
 	return result, nil
+}
+
+// transitionCommit is one legal outcome to commit at inst's revision.
+type transitionCommit struct {
+	inst           *Instance
+	task           *taskDoc
+	outcome        *OutcomeCase
+	transitionID   string
+	resultTask     string // the "task" the result reports
+	principalRef   string
+	role           string
+	runID          string
+	idempotencyKey string
+	requestHash    string
+	now            string
+	// expectedRevision is reported when the revision CAS loses.
+	expectedRevision int64
+}
+
+// commitTransitionOutcomeTx applies a decided outcome: it moves the instance
+// to the outcome's state (or suspends it) under a revision CAS, opens the
+// outcome's obligations, enqueues its effects, records the mutation event
+// with the replayable result, and mirrors the state onto the task. Legality
+// is the caller's decision; this only writes.
+func commitTransitionOutcomeTx(tx *sql.Tx, c transitionCommit) (Instance, map[string]interface{}, workflowEventMetadata, error) {
+	inst, chosen := c.inst, c.outcome
+	if inst.Suspension != nil {
+		return Instance{}, nil, workflowEventMetadata{}, suspendedWriteError(inst)
+	}
+	eventID, err := nextSeqID(tx, "workflow_event_seq", "wfe")
+	if err != nil {
+		return Instance{}, nil, workflowEventMetadata{}, err
+	}
+	updated := *inst
+	if chosen.To != nil {
+		updated.Status = chosen.To.Status
+		updated.Phase = chosen.To.Phase
+		updated.Outcome = chosen.To.Outcome
+	} else if err := applySuspendOutcomeTx(tx, &updated, chosen.Suspend, eventID, c.now); err != nil {
+		return Instance{}, nil, workflowEventMetadata{}, err
+	}
+	updated.Revision = inst.Revision + 1
+	updated.UpdatedAt = c.now
+	if updated.Status == "closed" {
+		updated.ClosedAt = c.now
+	} else {
+		updated.ClosedAt = ""
+	}
+	updated.TaskDocEtag = fmt.Sprint(c.task.ETag)
+	updated.TaskDocHash = taskDocHash(c.task)
+	res, err := tx.Exec(`
+		UPDATE workflow_instances
+		SET status = ?, phase = ?, outcome = ?, revision = ?, task_doc_etag = ?, task_doc_hash = ?,
+		    updated_at = ?, closed_at = ?, suspension_id = ?, suspension_reason = ?, suspension_at = ?, suspension_cause_ref = ?
+		WHERE id = ? AND revision = ?
+	`, updated.Status, nullIfEmpty(updated.Phase), nullIfEmpty(updated.Outcome), updated.Revision, updated.TaskDocEtag, updated.TaskDocHash,
+		updated.UpdatedAt, nullIfEmpty(updated.ClosedAt), suspensionID(updated.Suspension), suspensionReason(updated.Suspension), suspensionAt(updated.Suspension), suspensionCauseRef(updated.Suspension), updated.ID, inst.Revision)
+	if err != nil {
+		return Instance{}, nil, workflowEventMetadata{}, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return Instance{}, nil, workflowEventMetadata{}, err
+	}
+	if affected != 1 {
+		actual, loadErr := instanceRevisionTx(tx, updated.ID)
+		if loadErr != nil {
+			return Instance{}, nil, workflowEventMetadata{}, loadErr
+		}
+		return Instance{}, nil, workflowEventMetadata{}, staleRevisionError(updated.ID, c.expectedRevision, actual.revision)
+	}
+
+	createdObligations, err := insertOutcomeObligationsTx(tx, updated.ID, chosen.Obligations, c.now)
+	if err != nil {
+		return Instance{}, nil, workflowEventMetadata{}, err
+	}
+	createdEffects, err := enqueueRenderedEffectsTx(tx, updated, chosen.Effects, chosen.ID, c.runID, c.now)
+	if err != nil {
+		return Instance{}, nil, workflowEventMetadata{}, err
+	}
+	result := transitionResultMap(c.resultTask, updated, eventID, createdEffects, createdObligations)
+	result["idempotent"] = false
+	result["transition"] = c.transitionID
+	result["outcome"] = chosen.ID
+	eventPayload := map[string]interface{}{"transition": c.transitionID, "outcome": chosen.ID, "from": inst.State(), "to": updated.State()}
+	eventType := "workflow.transitioned"
+	if chosen.Suspend != nil {
+		eventType = "workflow.suspended"
+		eventPayload["suspension"] = updated.Suspension
+		eventPayload["beforeRevision"] = inst.Revision
+		eventPayload["afterRevision"] = updated.Revision
+	}
+	resultJSON, _ := json.Marshal(result)
+	eventMeta, err := insertWorkflowMutationEventWithID(tx, eventType, eventID, updated.ID, c.principalRef, c.role, c.runID, inst.Revision, updated.Revision, c.idempotencyKey, c.requestHash, string(resultJSON), c.task.ETag, updated.TaskDocHash, eventPayload)
+	if err != nil {
+		return Instance{}, nil, workflowEventMetadata{}, err
+	}
+	if chosen.Suspend == nil {
+		if err := updateTaskWorkflowMeta(tx, updated.TaskUUID, updated, c.principalRef); err != nil {
+			return Instance{}, nil, workflowEventMetadata{}, err
+		}
+	}
+	return updated, result, eventMeta, nil
 }
 
 func instanceRevisionTx(tx *sql.Tx, instanceID string) (instanceRevision, error) {

@@ -29,6 +29,8 @@ source:
   - internal/db/migrations/000034_workflow_action_leases.sql
   - internal/db/migrations/000043_workflow_action_succession.sql
   - internal/workflow/action.go
+  - internal/workflow/action_claim.go
+  - internal/workflow/action_settle.go
   - internal/workflow/action_claim_test.go
   - internal/workflow/action_settle_test.go
   - internal/workflow/instance_cancel.go

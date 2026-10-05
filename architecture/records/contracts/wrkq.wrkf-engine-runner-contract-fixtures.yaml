@@ -24,6 +24,8 @@ source:
   - architecture/records/invariants/wrkq.wrkf-action.lease-recovery.yaml
   - architecture/records/contracts/wrkq.simple-task.v3.batch-landing.yaml
   - internal/workflow/action.go
+  - internal/workflow/action_claim.go
+  - internal/workflow/action_settle.go
   - internal/workflow/action_next.go
   - internal/workflow/builtins/wrkq-simple-task-v3.workflow.json
   - hrcchat#13552

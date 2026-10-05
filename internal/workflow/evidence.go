@@ -27,123 +27,131 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		if err != nil {
 			return err
 		}
-		policy := ResolveWorkflowPolicy(tpl)
-		var kindSpec *KindSpec
-		if spec, ok := tpl.EvidenceKinds[params.Kind]; ok {
-			kindSpec = &spec
-		}
-
-		if err := validateProducibleBy(params.Kind, kindSpec, params.Role); err != nil {
-			return err
-		}
-		facts, err := parseAndValidateEvidenceFacts(params.Kind, params.Facts, kindSpec)
+		inserted, task, err := insertEvidenceTx(tx, inst, tpl, params, s.now().Format(time.RFC3339))
 		if err != nil {
-			return err
-		}
-		if err := policy.ValidateEvidence(params, facts); err != nil {
-			return err
-		}
-		var dataArg interface{}
-		var dataRaw json.RawMessage
-		if strings.TrimSpace(params.Data) != "" {
-			if !json.Valid([]byte(params.Data)) {
-				return validationError("data", "data must be valid JSON"+jsonLocationSuffix(json.Unmarshal([]byte(params.Data), new(json.RawMessage))), "valid JSON", nil, "fix the JSON syntax in --data")
-			}
-			dataArg = params.Data
-			dataRaw = json.RawMessage(params.Data)
-		}
-		var factsRaw json.RawMessage
-		if facts != nil {
-			factsRaw = facts.Raw
-		}
-		requestHash := ""
-		if params.IdempotencyKey != "" {
-			requestHash = evidenceAddRequestHash(params, factsRaw, dataRaw)
-			replayed, err := replayEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash)
-			if err != nil {
-				return err
-			}
-			if replayed != nil {
-				ev = replayed
-				return nil
-			}
-		}
-		task, err := loadTaskDoc(tx, inst.TaskUUID)
-		if err != nil {
-			return err
-		}
-
-		if kindSpec != nil && len(kindSpec.LinkageRefs) > 0 {
-			existing, err := listInstanceEvidence(tx, inst.ID)
-			if err != nil {
-				return err
-			}
-			if err := validateLinkageRefs(existing, kindSpec, dataRaw); err != nil {
-				return err
-			}
-		}
-		id, err := nextSeqID(tx, "workflow_evidence_seq", "ev")
-		if err != nil {
-			return err
-		}
-		taskHashAtProduction := taskDocHash(task)
-		source := map[string]interface{}{"type": "external_ref", "ref": params.Ref, "taskHashAtProduction": taskHashAtProduction}
-		if len(dataRaw) > 0 {
-			source["dataHash"] = Hash(dataRaw)
-		}
-		if strings.TrimSpace(params.ContentHash) != "" {
-			source["contentHash"] = strings.TrimSpace(params.ContentHash)
-		}
-		if params.Build != nil {
-			build := map[string]string{}
-			if strings.TrimSpace(params.Build.ID) != "" {
-				build["id"] = strings.TrimSpace(params.Build.ID)
-			}
-			if strings.TrimSpace(params.Build.Version) != "" {
-				build["version"] = strings.TrimSpace(params.Build.Version)
-			}
-			if strings.TrimSpace(params.Build.Env) != "" {
-				build["env"] = strings.TrimSpace(params.Build.Env)
-			}
-			if len(build) > 0 {
-				source["build"] = build
-			}
-		}
-		sourceJSON, _ := json.Marshal(source)
-		var factsArg interface{}
-		if facts != nil {
-			factsArg = string(facts.Raw)
-		}
-		now := s.now().Format(time.RFC3339)
-		_, err = tx.Exec(`
-			INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, facts_json, data_json, source_json, actor, principal_ref, role, run_id, task_etag_at_production, task_hash_at_production, produced_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, id, inst.ID, params.Kind, params.Ref, nullIfEmpty(params.Summary), factsArg, dataArg, string(sourceJSON), emptyToNil(params.PrincipalRef), emptyToNil(params.PrincipalRef), emptyToNil(params.Role), emptyToNil(params.RunID), fmt.Sprint(task.ETag), taskHashAtProduction, now)
-		if err != nil {
-			return err
-		}
-		inserted := &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, PrincipalRef: params.PrincipalRef, Role: params.Role, RunID: params.RunID, ContentHash: strings.TrimSpace(params.ContentHash), Build: normalizedEvidenceBuild(params.Build), TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
-		if err := policy.OnEvidenceAdded(tx, inst, inserted); err != nil {
-			return err
-		}
-		inst.TaskDocEtag = fmt.Sprint(task.ETag)
-		inst.TaskDocHash = taskDocHash(task)
-		inst.UpdatedAt = now
-		if _, err := tx.Exec(`UPDATE workflow_instances SET task_doc_etag = ?, task_doc_hash = ?, updated_at = ? WHERE id = ?`, inst.TaskDocEtag, inst.TaskDocHash, inst.UpdatedAt, inst.ID); err != nil {
-			return err
-		}
-		if err := updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, params.PrincipalRef); err != nil {
 			return err
 		}
 		ev = inserted
-		if params.IdempotencyKey != "" {
-			if err := storeEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash, ev); err != nil {
-				return err
-			}
+		if task == nil { // idempotent replay: nothing new to reflect
+			return nil
 		}
-		return nil
+		inst.TaskDocEtag = fmt.Sprint(task.ETag)
+		inst.TaskDocHash = taskDocHash(task)
+		inst.UpdatedAt = inserted.ProducedAt
+		if _, err := tx.Exec(`UPDATE workflow_instances SET task_doc_etag = ?, task_doc_hash = ?, updated_at = ? WHERE id = ?`, inst.TaskDocEtag, inst.TaskDocHash, inst.UpdatedAt, inst.ID); err != nil {
+			return err
+		}
+		return updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, params.PrincipalRef)
 	})
 	return ev, err
+}
+
+// insertEvidenceTx validates params against the template's kind spec and the
+// workflow policy, replays an idempotent repeat, and otherwise records the
+// evidence at now, runs the policy's side effects and stores the replay
+// result. task is the task doc read at production, nil on a replay.
+func insertEvidenceTx(tx *sql.Tx, inst *Instance, tpl *Template, params AddEvidenceParams, now string) (*Evidence, *taskDoc, error) {
+	policy := ResolveWorkflowPolicy(tpl)
+	var kindSpec *KindSpec
+	if spec, ok := tpl.EvidenceKinds[params.Kind]; ok {
+		kindSpec = &spec
+	}
+	if err := validateProducibleBy(params.Kind, kindSpec, params.Role); err != nil {
+		return nil, nil, err
+	}
+	facts, err := parseAndValidateEvidenceFacts(params.Kind, params.Facts, kindSpec)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := policy.ValidateEvidence(params, facts); err != nil {
+		return nil, nil, err
+	}
+	var dataArg interface{}
+	var dataRaw json.RawMessage
+	if strings.TrimSpace(params.Data) != "" {
+		if !json.Valid([]byte(params.Data)) {
+			return nil, nil, validationError("data", "data must be valid JSON"+jsonLocationSuffix(json.Unmarshal([]byte(params.Data), new(json.RawMessage))), "valid JSON", nil, "fix the JSON syntax in --data")
+		}
+		dataArg = params.Data
+		dataRaw = json.RawMessage(params.Data)
+	}
+	var factsRaw json.RawMessage
+	if facts != nil {
+		factsRaw = facts.Raw
+	}
+	requestHash := ""
+	if params.IdempotencyKey != "" {
+		requestHash = evidenceAddRequestHash(params, factsRaw, dataRaw)
+		replayed, err := replayEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash)
+		if err != nil {
+			return nil, nil, err
+		}
+		if replayed != nil {
+			return replayed, nil, nil
+		}
+	}
+	task, err := loadTaskDoc(tx, inst.TaskUUID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if kindSpec != nil && len(kindSpec.LinkageRefs) > 0 {
+		existing, err := listInstanceEvidence(tx, inst.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := validateLinkageRefs(existing, kindSpec, dataRaw); err != nil {
+			return nil, nil, err
+		}
+	}
+	id, err := nextSeqID(tx, "workflow_evidence_seq", "ev")
+	if err != nil {
+		return nil, nil, err
+	}
+	taskHashAtProduction := taskDocHash(task)
+	source := map[string]interface{}{"type": "external_ref", "ref": params.Ref, "taskHashAtProduction": taskHashAtProduction}
+	if len(dataRaw) > 0 {
+		source["dataHash"] = Hash(dataRaw)
+	}
+	if strings.TrimSpace(params.ContentHash) != "" {
+		source["contentHash"] = strings.TrimSpace(params.ContentHash)
+	}
+	if params.Build != nil {
+		build := map[string]string{}
+		if strings.TrimSpace(params.Build.ID) != "" {
+			build["id"] = strings.TrimSpace(params.Build.ID)
+		}
+		if strings.TrimSpace(params.Build.Version) != "" {
+			build["version"] = strings.TrimSpace(params.Build.Version)
+		}
+		if strings.TrimSpace(params.Build.Env) != "" {
+			build["env"] = strings.TrimSpace(params.Build.Env)
+		}
+		if len(build) > 0 {
+			source["build"] = build
+		}
+	}
+	sourceJSON, _ := json.Marshal(source)
+	var factsArg interface{}
+	if facts != nil {
+		factsArg = string(facts.Raw)
+	}
+	_, err = tx.Exec(`
+		INSERT INTO workflow_evidence (id, instance_id, kind, ref, summary, facts_json, data_json, source_json, actor, principal_ref, role, run_id, task_etag_at_production, task_hash_at_production, produced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, id, inst.ID, params.Kind, params.Ref, nullIfEmpty(params.Summary), factsArg, dataArg, string(sourceJSON), emptyToNil(params.PrincipalRef), emptyToNil(params.PrincipalRef), emptyToNil(params.Role), emptyToNil(params.RunID), fmt.Sprint(task.ETag), taskHashAtProduction, now)
+	if err != nil {
+		return nil, nil, err
+	}
+	ev := &Evidence{ID: id, InstanceID: inst.ID, Kind: params.Kind, Ref: params.Ref, Summary: params.Summary, Facts: factsRaw, Data: dataRaw, Source: sourceJSON, PrincipalRef: params.PrincipalRef, Role: params.Role, RunID: params.RunID, ContentHash: strings.TrimSpace(params.ContentHash), Build: normalizedEvidenceBuild(params.Build), TaskEtagAtProduction: fmt.Sprint(task.ETag), TaskHashAtProduction: taskHashAtProduction, ProducedAt: now}
+	if err := policy.OnEvidenceAdded(tx, inst, ev); err != nil {
+		return nil, nil, err
+	}
+	if params.IdempotencyKey != "" {
+		if err := storeEvidenceResult(tx, inst.ID, params.IdempotencyKey, requestHash, ev); err != nil {
+			return nil, nil, err
+		}
+	}
+	return ev, task, nil
 }
 
 func evidenceAddRequestHash(params AddEvidenceParams, factsRaw, dataRaw json.RawMessage) string {
@@ -278,7 +286,11 @@ func listInstanceEvidence(q rowsQueryer, instanceID string) ([]Evidence, error) 
 }
 
 func (s *Service) ShowEvidence(id string) (*Evidence, error) {
-	out, err := queryEvidence(s.db, `WHERE id = ?`, id)
+	return evidenceByID(s.db, id)
+}
+
+func evidenceByID(q rowsQueryer, id string) (*Evidence, error) {
+	out, err := queryEvidence(q, `WHERE id = ?`, id)
 	if err != nil {
 		return nil, err
 	}

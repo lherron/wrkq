@@ -32,7 +32,7 @@ consumers:
   - wrkf action runners consuming wrkq-simple-task@3
 source:
   - internal/workflow/builtins/wrkq-simple-task-v3.workflow.json
-  - internal/workflow/action.go
+  - internal/workflow/action_settle.go
   - internal/workflow/action_next.go
   - internal/workflow/action_settle_test.go
   - internal/workflow/action_next_test.go

@@ -53,12 +53,20 @@ describe("T-05620 workflow obligation policy registry boundary", () => {
     const policyPath = "internal/workflow/policy.go";
     expect(existsSync(join(repoRoot, policyPath)), `${policyPath} should define the policy registry boundary`).toBe(true);
 
-    const serviceBody = functionBody(readRepoFile("internal/workflow/service.go"), "(s *Service) AddEvidence");
-    const actionBody = functionBody(readRepoFile("internal/workflow/action.go"), "(s *Service) addActionEvidenceTx");
+    const evidenceSource = readRepoFile("internal/workflow/evidence.go");
+    const addBody = functionBody(evidenceSource, "(s *Service) AddEvidence");
+    const actionBody = functionBody(readRepoFile("internal/workflow/action_settle.go"), "(s *Service) addActionEvidenceTx");
+    // Both insertion surfaces share one insert path; the policy boundary is asserted there.
+    const serviceBody = functionBody(evidenceSource, "insertEvidenceTx");
+    for (const [surface, body] of [
+      ["Service.AddEvidence", addBody],
+      ["addActionEvidenceTx", actionBody],
+    ] as const) {
+      expect(body, `${surface} should insert through the shared insertEvidenceTx`).toContain("insertEvidenceTx(");
+    }
 
     for (const [surface, body] of [
-      ["Service.AddEvidence", serviceBody],
-      ["addActionEvidenceTx", actionBody],
+      ["insertEvidenceTx", serviceBody],
     ] as const) {
       expect(body, `${surface} should resolve the workflow policy for the active template`).toMatch(
         /WorkflowPolicy|ResolveWorkflowPolicy|workflowPolicyFor/,
