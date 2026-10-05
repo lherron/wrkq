@@ -52,6 +52,17 @@ func p2Run(t *testing.T, dbPath string, reqs ...string) []map[string]any {
 	return frames
 }
 
+// p3Run runs one wrkf RPC session around reqs and returns all response frames
+// (init + business requests + shutdown).
+func p3Run(t *testing.T, dbPath string, reqs ...string) []map[string]any {
+	t.Helper()
+	frames := runRPC(t, "wrkf", dbPath, rpcSession("p3-smokey", reqs...))
+	if want := 2 + len(reqs); len(frames) != want {
+		t.Fatalf("p3Run: expected %d frames, got %d\nframes: %#v", want, len(frames), frames)
+	}
+	return frames
+}
+
 // runRPCWithEnv is like runRPC but pins the entrypoint's caller principal to
 // agent:smokey and appends extraEnv last, so a test may override either.
 func runRPCWithEnv(t *testing.T, entrypoint, dbPath string, requests []string, extraEnv []string) []map[string]any {

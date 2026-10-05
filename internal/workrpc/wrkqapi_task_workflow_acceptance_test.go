@@ -14,22 +14,6 @@ import (
 	"github.com/lherron/wrkq/internal/workflow"
 )
 
-// installCodeChangeReq installs the canonical wrkq-code-change@1 template.
-func installCodeChangeReq(t *testing.T) string {
-	t.Helper()
-	return mkRPC("i1", "wrkf.workflow.install", map[string]any{"body": templateBody(t, p2WorkflowTemplatePath(t))})
-}
-
-// attachCodeChangeReq attaches wrkq-code-change@1 to taskID; an empty
-// idempotencyKey is omitted.
-func attachCodeChangeReq(id, taskID, idempotencyKey string) string {
-	params := map[string]any{"task": taskID, "workflow": "wrkq-code-change@1"}
-	if idempotencyKey != "" {
-		params["idempotencyKey"] = idempotencyKey
-	}
-	return mkRPC(id, "wrkq.workflow.attach", params)
-}
-
 // assertWrkfInstanceDTO checks the camelCase WrkfInstance fields shared by the
 // attach and inspect results; contextHash is purged (revision-only CAS).
 func assertWrkfInstanceDTO(t *testing.T, inst map[string]any) {

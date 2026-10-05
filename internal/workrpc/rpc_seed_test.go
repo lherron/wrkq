@@ -3,8 +3,8 @@
 package workrpc_test
 
 // rpc_seed_test.go — fixtures written straight to disk ahead of an RPC session:
-// task rows inserted by SQL (for states the RPC surface cannot create directly),
-// workflow template files, and scratch files.
+// task rows inserted by SQL (for states the RPC surface cannot create directly)
+// and scratch files.
 
 import (
 	"os"
@@ -89,27 +89,4 @@ func p4WriteTempFile(t *testing.T, name, content string) string {
 		t.Fatalf("p4WriteTempFile: write %s: %v", path, err)
 	}
 	return path
-}
-
-// p2WorkflowTemplatePath returns the path to the canonical wrkq-code-change template.
-func p2WorkflowTemplatePath(t *testing.T) string {
-	t.Helper()
-	root := repoRoot(t)
-	path := filepath.Join(root, "wrkf", "templates", "wrkq-code-change.workflow.json")
-	if _, err := os.Stat(path); err != nil {
-		t.Skipf("workflow template not found at %s: %v", path, err)
-	}
-	return path
-}
-
-func templateBody(t *testing.T, path string) string {
-	t.Helper()
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(repoRoot(t), path)
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read workflow template %s: %v", path, err)
-	}
-	return string(body)
 }
