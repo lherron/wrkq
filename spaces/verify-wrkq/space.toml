@@ -1,0 +1,9 @@
+schema = 1
+id = "verify-wrkq"
+version = "0.1.0"
+description = "Launch, check, drive and prove any wrkq feature, with evidence that survives"
+
+[plugin]
+name = "verify-wrkq"
+description = "wrkq verification: doctor, wv scratch daemons, the feature map, proof standards"
+keywords = ["wrkq", "wrkc", "wrkf", "wrkp", "verification", "wv"]

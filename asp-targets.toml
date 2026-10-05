@@ -54,3 +54,21 @@ compose = [
   "space:defaults@dev",
   "space:praesidium-defaults@dev"
 ]
+
+# Every agent that changes or operates wrkq in this project gets the
+# verify-wrkq skill (spaces/verify-wrkq). compose_mode "merge" appends it
+# to the agent's own base spaces; without it a target's compose replaces them.
+# The foundry resident gets it through its target here, as in the foundry
+# repo, not through its agent-profile.toml.
+
+[targets.clod]
+compose_mode = "merge"
+compose = ["space:project:verify-wrkq"]
+
+[targets.cody]
+compose_mode = "merge"
+compose = ["space:project:verify-wrkq"]
+
+[targets.foundry]
+compose_mode = "merge"
+compose = ["space:project:verify-wrkq"]

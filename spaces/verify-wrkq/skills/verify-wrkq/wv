@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# wv: scratch wrkq daemons for verify-wrkq drives.
+#
+# Each scratch is a fresh SQLite store (wrkqadm init) served by the INSTALLED
+# wrkqd on a free loopback port, with a stub wrkf hook catalog and its own
+# attachment dir, plus one scratch project `wv-<name>`. Nothing here touches
+# the canonical daemon on mini, launchd, HRC or ACP. Every verb prints one JSON
+# object; a refusal prints {error, message, next} and exits 1.
+set -euo pipefail
+
+WV_HOME="${WV_HOME:-$HOME/praesidium/var/state/wrkq-wv}"
+BIN="${WV_BIN:-$HOME/.local/bin}"
+
+refuse() { # code message next
+  python3 -c 'import json,sys;print(json.dumps({"error":sys.argv[1],"message":sys.argv[2],"next":sys.argv[3]}))' "$1" "$2" "$3"
+  exit 1
+}
+
+usage() {
+  cat >&2 <<'EOF'
+usage:
+  wv up [--name N]            start a scratch daemon + project wv-N (default N=wv)
+  wv env N                    print shell exports that point wrkq/wrkc/wrkf/wrkp at N
+  wv run N -- CMD [ARGS...]   run CMD with N's environment
+  wv down N [--dry-run]       stop N's daemon and remove its state
+  wv list                     scratches with pid, port and liveness
+  wv evidence N DIR           copy log, health, doctor, tree and a db snapshot into DIR
+  wv rec FILE 'SHELL CMD'     run CMD with bash, appending '## <UTC>', '$ CMD', output and exit to FILE
+EOF
+  exit 2
+}
+
+state_of() { echo "$WV_HOME/$1"; }
+
+alive() { # state_dir -> 0 if its pid is a live wrkqd serving its db
+  local s="$1" pid
+  [[ -f "$s/pid" ]] || return 1
+  pid="$(cat "$s/pid")"
+  kill -0 "$pid" 2>/dev/null || return 1
+  ps -o command= -p "$pid" 2>/dev/null | grep -qE -- "wrkqd .*-db $s/wrkq\.db( |\$)"
+}
+
+free_port() {
+  python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'
+}
+
+# Environment for clients. Process env beats the dotenv rpc://mini locator and
+# token file, so these point every client at the scratch daemon as node `wv`.
+env_lines() {
+  local n="$1" s; s="$(state_of "$n")"
+  echo "export WRKQ_DB=rpc://127.0.0.1:$(cat "$s/port")"
+  echo "export WRKQD_TOKEN_FILE=$s/token"
+  echo "export WRKQ_PROJECT_ROOT=wv-$n"
+  echo "export WRKF_HOOK_CATALOG=$s/hooks.json"
+  echo "export WRKQ_ATTACH_DIR=$s/attachments"
+  echo "export WV_STATE=$s"
+}
+
+cmd_up() {
+  local n="wv"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) n="$(echo "$2" | tr '[:upper:]' '[:lower:]')"; shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  local s; s="$(state_of "$n")"
+  if alive "$s"; then
+    refuse already_up "scratch $n is already up (pid $(cat "$s/pid"))" "wv down $n"
+  fi
+  rm -rf "$s"; mkdir -p "$s/attachments"
+  "$BIN/wrkqadm" --db "$s/wrkq.db" init >"$s/init.log" 2>&1 \
+    || refuse init_failed "wrkqadm init failed: $(tail -1 "$s/init.log")" "cat $s/init.log"
+  cat >"$s/hooks.json" <<'EOF'
+{"schemaVersion":"wrkf.hook-catalog.v0","hooks":{"wv_pass":{"kind":"check","argv":["/usr/bin/true"],"stdin":"json","stdout":"exit_code","timeoutMs":20000,"cwd":"template_dir","env":{"allow":["PATH"]},"maxStdoutBytes":65536,"maxStderrBytes":65536},"wv_fail":{"kind":"check","argv":["/usr/bin/false"],"stdin":"json","stdout":"exit_code","timeoutMs":20000,"cwd":"template_dir","env":{"allow":["PATH"]},"maxStdoutBytes":65536,"maxStderrBytes":65536}},"effectHandlers":{}}
+EOF
+  # Node tokens give the daemon a node identity per bearer credential, which
+  # task claims require (WRKQ_NODE_IDENTITY_REQUIRED without one). Node `wv` is
+  # the default client; `wv2` lets a drive act as a second node.
+  local tok tok2
+  tok="wv-$(openssl rand -hex 12)"; tok2="wv2-$(openssl rand -hex 12)"
+  printf '%s' "$tok" >"$s/token"; printf '%s' "$tok2" >"$s/token-wv2"
+  printf 'wv=%s\nwv2=%s\n' "$tok" "$tok2" >"$s/node-tokens"
+  chmod 600 "$s/token" "$s/token-wv2" "$s/node-tokens"
+  local port; port="$(free_port)"; echo "$port" >"$s/port"
+  date -u +%Y-%m-%dT%H:%M:%SZ >"$s/started_at"
+  WRKF_HOOK_CATALOG="$s/hooks.json" WRKQ_ATTACH_DIR="$s/attachments" \
+    nohup "$BIN/wrkqd" -addr "127.0.0.1:$port" -db "$s/wrkq.db" -node-tokens-file "$s/node-tokens" >"$s/wrkqd.log" 2>&1 &
+  echo $! >"$s/pid"
+  local i
+  for i in $(seq 1 50); do
+    curl -fsS -H "Authorization: Bearer $tok" "http://127.0.0.1:$port/v1/health" >/dev/null 2>&1 && break
+    alive "$s" || refuse daemon_exited "wrkqd exited: $(tail -1 "$s/wrkqd.log")" "cat $s/wrkqd.log"
+    sleep 0.2
+  done
+  curl -fsS -H "Authorization: Bearer $tok" "http://127.0.0.1:$port/v1/health" >/dev/null 2>&1 \
+    || refuse daemon_unhealthy "wrkqd on $port never answered /v1/health" "cat $s/wrkqd.log"
+  WRKQ_DB="rpc://127.0.0.1:$port" WRKQD_TOKEN_FILE="$s/token" "$BIN/wrkq" --as agent:wv mkdir "/wv-$n" --kind project >"$s/project.log" 2>&1 \
+    || refuse project_failed "creating /wv-$n failed: $(tail -1 "$s/project.log")" "cat $s/project.log"
+  python3 - "$n" "$s" "$port" "$(cat "$s/pid")" <<'PY'
+import json, sys
+n, s, port, pid = sys.argv[1:]
+print(json.dumps({"name": n, "state_root": s, "db": f"{s}/wrkq.db", "locator": f"rpc://127.0.0.1:{port}",
+  "port": int(port), "pid": int(pid), "project": f"wv-{n}", "hook_catalog": f"{s}/hooks.json",
+  "env": f'eval "$(wv env {n})"'}))
+PY
+}
+
+need_up() {
+  local n="$1" s; s="$(state_of "$n")"
+  [[ -d "$s" ]] || refuse not_found "no scratch named $n" "wv up --name $n"
+  alive "$s" || refuse not_running "scratch $n has state but no live wrkqd" "wv down $n && wv up --name $n"
+}
+
+cmd_env() { [[ $# -eq 1 ]] || usage; need_up "$1"; env_lines "$1"; }
+
+cmd_run() {
+  [[ $# -ge 3 && "$2" == "--" ]] || usage
+  local n="$1"; shift 2; need_up "$n"
+  eval "$(env_lines "$n")"
+  exec "$@"
+}
+
+cmd_down() {
+  [[ $# -ge 1 ]] || usage
+  local n="$1" dry="${2:-}" s; s="$(state_of "$n")"
+  [[ -d "$s" ]] || refuse not_found "no scratch named $n" "wv list"
+  local pid=""; alive "$s" && pid="$(cat "$s/pid")"
+  if [[ "$dry" == "--dry-run" ]]; then
+    python3 -c 'import json,sys;print(json.dumps({"name":sys.argv[1],"dry_run":True,"would_stop_pid":int(sys.argv[2]) if sys.argv[2] else None,"would_remove":sys.argv[3]}))' "$n" "$pid" "$s"
+    return
+  fi
+  if [[ -n "$pid" ]]; then
+    kill "$pid"; for _ in $(seq 1 25); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
+  fi
+  rm -rf "$s"
+  python3 -c 'import json,sys;print(json.dumps({"name":sys.argv[1],"stopped_pid":int(sys.argv[2]) if sys.argv[2] else None,"removed":sys.argv[3]}))' "$n" "$pid" "$s"
+}
+
+cmd_list() {
+  local out="[" first=1 d n live
+  if [[ -d "$WV_HOME" ]]; then
+    for d in "$WV_HOME"/*/; do
+      [[ -d "$d" ]] || continue
+      d="${d%/}"; n="$(basename "$d")"
+      if alive "$d"; then live=true; else live=false; fi
+      [[ $first -eq 1 ]] || out+=","
+      first=0
+      out+="{\"name\":\"$n\",\"pid\":$(cat "$d/pid" 2>/dev/null || echo null),\"port\":$(cat "$d/port" 2>/dev/null || echo null),\"alive\":$live,\"started_at\":\"$(cat "$d/started_at" 2>/dev/null)\"}"
+    done
+  fi
+  echo "$out]"
+}
+
+cmd_evidence() {
+  [[ $# -eq 2 ]] || usage
+  local n="$1" dir="$2" s; s="$(state_of "$n")"
+  need_up "$n"
+  mkdir -p "$dir"; dir="$(cd "$dir" && pwd)"
+  case "$dir/" in "$s"/*) refuse evidence_in_state "evidence dir is inside the scratch state, which down removes" "pick a dir under the task artifact_dir";; esac
+  eval "$(env_lines "$n")"
+  cp "$s/wrkqd.log" "$dir/wrkqd.log"
+  cp "$s/hooks.json" "$dir/hooks.json"
+  "$BIN/wrkq" server health --addr "127.0.0.1:$(cat "$s/port")" >"$dir/health.json" 2>&1 || true
+  "$BIN/wrkqadm" --db "$s/wrkq.db" doctor --json >"$dir/doctor.json" 2>&1 || true
+  "$BIN/wrkq" tree "/wv-$n" --state all >"$dir/tree.txt" 2>&1 || true
+  sqlite3 "$s/wrkq.db" ".backup '$dir/wrkq.db'" 2>/dev/null || cp "$s/wrkq.db" "$dir/wrkq.db"
+  python3 -c 'import json,sys,os;print(json.dumps({"name":sys.argv[1],"dir":sys.argv[2],"files":sorted(os.listdir(sys.argv[2]))}))' "$n" "$dir"
+}
+
+# Append one command to a drive.txt as `## <UTC time>`, `$ <command>`, its
+# combined output and `exit: <code>`, and echo the same to stdout. The command
+# runs in the caller's environment, so eval `wv env N` first for scratch drives.
+cmd_rec() {
+  [[ $# -eq 2 ]] || usage
+  local file="$1" cmd="$2" out code
+  mkdir -p "$(dirname "$file")"
+  set +e; out="$(bash -o pipefail -c "$cmd" 2>&1)"; code=$?; set -e
+  { printf '## %s\n$ %s\n%s\nexit: %s\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$cmd" "$out" "$code"; } | tee -a "$file"
+  return 0
+}
+
+[[ $# -ge 1 ]] || usage
+verb="$1"; shift
+case "$verb" in
+  up) cmd_up "$@" ;;
+  env) cmd_env "$@" ;;
+  run) cmd_run "$@" ;;
+  down) cmd_down "$@" ;;
+  list) cmd_list ;;
+  evidence) cmd_evidence "$@" ;;
+  rec) cmd_rec "$@" ;;
+  scratch) # foundry-style alias: wv scratch up|down|list
+    sub="${1:-}"; shift || true
+    case "$sub" in up) cmd_up "$@" ;; down) cmd_down "$@" ;; list) cmd_list ;; *) usage ;; esac ;;
+  *) usage ;;
+esac
