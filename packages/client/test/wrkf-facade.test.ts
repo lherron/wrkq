@@ -8,7 +8,8 @@
 import { describe, expect, test } from "bun:test";
 import { isWrkfError } from "../src/errors";
 import { FakeTransport } from "../src/testing/fake-transport";
-import type { WrkfEventQueryResult, WrkfTransitionResult } from "../src/wrkf/types";
+import type { WrkfEventQueryResult } from "../src/wrkf/event";
+import type { WrkfTransitionResult } from "../src/wrkf/transition";
 import { clientWith, rejectionOf } from "./support/client-fixtures";
 
 const MOCK_TRANSITION_RESULT: WrkfTransitionResult = {

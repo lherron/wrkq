@@ -40,7 +40,7 @@ source:
   - internal/workflow/instance_ledger.go
   - internal/wrkfapi/api.go
   - internal/workrpc/registry.go
-  - packages/client/src/wrkf/types.ts
+  - packages/client/src/wrkf/ledger.ts
   - packages/client/src/wrkf/facade.ts
   - packages/client/src/client.ts
   - internal/workflow/instance_ledger_test.go

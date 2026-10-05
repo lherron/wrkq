@@ -24,10 +24,7 @@ import { StdioTransport } from "./stdio-transport.js";
 import type { JsonRpcRequest, Transport } from "./transport.js";
 import type { WrkqFacade } from "./wrkq/facade.js";
 import type { WrkfFacade } from "./wrkf/facade.js";
-import type {
-  WrkfActionClaimResult,
-  WrkfActionNextResult,
-} from "./wrkf/types.js";
+import type { WrkfActionClaimResult, WrkfActionNextResult } from "./wrkf/action.js";
 
 const MAX_TEMPLATE_BODY_BYTES = 1 << 20;
 const MAX_TEMPLATE_DIFF_BODY_BYTES = 2 << 20;

@@ -29,7 +29,7 @@ reopen_when:
   - the LedgerRefs vocabulary or layering boundary changes
 source:
   - internal/workflow/instance_ledger.go
-  - packages/client/src/wrkf/types.ts
+  - packages/client/src/wrkf/ledger.ts
   - docs/wrkq-wrkf-rpc.md
   - hrcchat#14081
   - hrcchat#14083

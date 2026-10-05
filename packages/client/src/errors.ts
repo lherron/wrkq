@@ -17,7 +17,8 @@
  */
 
 import type { JsonRpcError } from "./transport.js";
-import type { WrkfActionClaimPredecessor, WrkfSuspension } from "./wrkf/types.js";
+import type { WrkfActionClaimPredecessor } from "./wrkf/action.js";
+import type { WrkfSuspension } from "./wrkf/instance.js";
 
 export interface WorkRpcErrorData {
   /** Stable machine-readable domain code, e.g. "WRKF_STALE_REVISION". */

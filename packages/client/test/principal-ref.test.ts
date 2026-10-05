@@ -12,7 +12,7 @@
 import { describe, expect, test } from "bun:test";
 import { createClient } from "../src/client";
 import { FakeTransport } from "../src/testing/fake-transport";
-import type { WrkfRoleBinding } from "../src/wrkf/types";
+import type { WrkfRoleBinding } from "../src/wrkf/role";
 
 const BINDING: WrkfRoleBinding = {
   instanceId: "wfi_1",

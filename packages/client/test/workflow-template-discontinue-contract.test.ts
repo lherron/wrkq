@@ -43,7 +43,7 @@ describe("T-06357 workflow template discontinuation contract", () => {
   test("client lifecycle facade and forward spec match the wire", () => {
     const client = read("packages/client/src/client.ts");
     const facade = read("packages/client/src/wrkf/facade.ts");
-    const types = read("packages/client/src/wrkf/types.ts");
+    const types = read("packages/client/src/wrkf/template.ts");
     const forwardSpec = read("docs/wrkq-wrkf-rpc-client-forward-spec.md");
 
     expect(client).toContain('this.call("wrkf.workflow.discontinue", p)');

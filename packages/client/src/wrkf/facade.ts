@@ -27,13 +27,19 @@ import type {
   WrkfActionSettleResult,
   WrkfActionShowParams,
   WrkfActionStartParams,
+} from "./action.js";
+import type {
   WrkfCheckListParams,
   WrkfCheckPreflightParams,
   WrkfCheckRun,
   WrkfCheckRunParams,
   WrkfCheckRunResult,
   WrkfCheckShowParams,
-  WrkfDiffResult,
+  WrkfHookListParams,
+  WrkfHookRunParams,
+  WrkfHookShowParams,
+} from "./check.js";
+import type {
   WrkfEffect,
   WrkfEffectAckParams,
   WrkfEffectClaimParams,
@@ -43,29 +49,43 @@ import type {
   WrkfEffectListParams,
   WrkfEffectRetryParams,
   WrkfEffectShowParams,
+  WrkfSupervisorParams,
+} from "./effect.js";
+import type {
   WrkfEventQueryParams,
   WrkfEventQueryResult,
+  WrkfWatchEventsParams,
+  WrkfWatchEventsResult,
+  WrkfWatchSnapshot,
+  WrkfWatchSnapshotParams,
+} from "./event.js";
+import type {
   WrkfEvidence,
   WrkfEvidenceAddParams,
+  WrkfEvidenceListParams,
   WrkfEvidenceSchema,
   WrkfEvidenceSchemaParams,
-  WrkfEvidenceListParams,
   WrkfEvidenceShowParams,
   WrkfEvidenceSuggestParams,
-  WrkfHookListParams,
-  WrkfHookRunParams,
-  WrkfHookShowParams,
+  WrkfSuggestResult,
+} from "./evidence.js";
+import type {
   WrkfInstance,
   WrkfInstanceCancelParams,
   WrkfInstanceCancelResult,
   WrkfInstanceNextParams,
   WrkfInstanceShowParams,
-  WrkfInstallResult,
+  WrkfNextResult,
+  WrkfSuspensionResolveParams,
+  WrkfSuspensionResolveResult,
+} from "./instance.js";
+import type {
   LedgerAppendInput,
   LedgerEntry,
   LedgerListFilter,
   LedgerListResult,
-  WrkfNextResult,
+} from "./ledger.js";
+import type {
   WrkfObligation,
   WrkfObligationCancelParams,
   WrkfObligationCreateParams,
@@ -73,11 +93,15 @@ import type {
   WrkfObligationSatisfyParams,
   WrkfObligationShowParams,
   WrkfObligationWaiveParams,
+} from "./obligation.js";
+import type {
   WrkfRoleBindParams,
   WrkfRoleBinding,
   WrkfRoleListParams,
   WrkfRoleSetParams,
   WrkfRoleUnbindParams,
+} from "./role.js";
+import type {
   WrkfRun,
   WrkfRunBindExternalParams,
   WrkfRunFailParams,
@@ -85,12 +109,10 @@ import type {
   WrkfRunListParams,
   WrkfRunShowParams,
   WrkfRunStartParams,
-  WrkfSuggestResult,
-  WrkfSupervisorParams,
-  WrkfSuspensionResolveParams,
-  WrkfSuspensionResolveResult,
-  WrkfTransitionApplyParams,
-  WrkfTransitionResult,
+} from "./run.js";
+import type {
+  WrkfDiffResult,
+  WrkfInstallResult,
   WrkfWorkflowDiffParams,
   WrkfWorkflowInstallParams,
   WrkfWorkflowLifecycleParams,
@@ -100,11 +122,8 @@ import type {
   WrkfWorkflowShowResult,
   WrkfWorkflowValidateParams,
   WrkfWorkflowValidateResult,
-  WrkfWatchEventsParams,
-  WrkfWatchEventsResult,
-  WrkfWatchSnapshot,
-  WrkfWatchSnapshotParams,
-} from "./types.js";
+} from "./template.js";
+import type { WrkfTransitionApplyParams, WrkfTransitionResult } from "./transition.js";
 
 export interface WrkfWorkflowFacade {
   validate(params: WrkfWorkflowValidateParams): Promise<WrkfWorkflowValidateResult>;

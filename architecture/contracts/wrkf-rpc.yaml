@@ -93,7 +93,9 @@ source:
   - packages/client/src/client.ts
   - packages/client/src/wrkq/facade.ts
   - packages/client/src/wrkf/facade.ts
-  - packages/client/src/wrkf/types.ts
+  - packages/client/src/wrkf/instance.ts
+  - packages/client/src/wrkf/action.ts
+  - packages/client/src/wrkf/template.ts
   - packages/client/src/wrkq/container.ts
   - packages/client/src/wrkq/project.ts
   - packages/client/src/wrkq/workflow-binding.ts

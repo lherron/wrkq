@@ -4,7 +4,8 @@
  * Mirrors docs/wrkq-wrkf-rpc.md §6.2 and §7.
  */
 
-import type { WrkfEvent, WrkfInstance } from "../wrkf/types.js";
+import type { WrkfEvent } from "../wrkf/event.js";
+import type { WrkfInstance } from "../wrkf/instance.js";
 import type { WrkqTask } from "./task.js";
 
 export interface WrkqWorkflowAttachParams {
