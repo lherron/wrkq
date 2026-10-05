@@ -355,7 +355,7 @@ promises, but actual use should prove that need before it becomes canonical.
 The ready predicate is a lexical text comparison, so it is only correct if
 every stored `review_at` and the comparison instant share one canonical form.
 This is NOT how `due_at`/`start_at` work today: `rpccli/touch.go` and
-`wrkqapi/tasks.go` forward those strings unchanged and `domain.ValidateTimestamp`
+`wrkqapi/task_create.go` and `task_update.go` forward those strings unchanged and `domain.ValidateTimestamp`
 is never called on that path. Promises must not inherit that behavior.
 
 Contract:

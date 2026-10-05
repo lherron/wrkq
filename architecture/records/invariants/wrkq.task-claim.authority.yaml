@@ -26,7 +26,7 @@ source:
   - internal/wrkqd/daemon_workrpc_test.go
   - internal/wrkqapi/claims.go
   - internal/wrkqapi/claims_test.go
-  - internal/wrkqapi/tasks.go
+  - internal/wrkqapi/task_update.go
   - internal/store/tasks.go
   - internal/store/task_update.go
   - internal/rpccli/claim.go

@@ -27,7 +27,7 @@ reopen_when:
   - archive-not-purge operating doctrine changes
 source:
   - internal/db/migrations/000040_workflow_ledger.sql
-  - internal/wrkqapi/tasks.go
+  - internal/wrkqapi/task_lifecycle.go
   - hrcchat#14081
   - hrcchat#14083
 supersedes: []

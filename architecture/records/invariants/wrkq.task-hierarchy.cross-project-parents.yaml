@@ -81,7 +81,9 @@ source:
   - internal/store/task_move.go
   - internal/store/task_removal.go
   - internal/store/containers.go
-  - internal/wrkqapi/tasks.go
+  - internal/wrkqapi/task_create.go
+  - internal/wrkqapi/task_update.go
+  - internal/wrkqapi/task_lifecycle.go
   - internal/wrkqapi/treeview.go
   - internal/rpccli/tree.go
   - internal/wrkqd/tree_http.go

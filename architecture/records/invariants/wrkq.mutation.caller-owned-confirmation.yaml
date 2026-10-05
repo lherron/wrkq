@@ -31,7 +31,7 @@ authority:
   surface: wrkq mutation methods (wrkq.task.delete mode, wrkq.container.deleteRecursive CAS) over the JSON-RPC boundary
 enforced_by: "explicit mode/expected-impact params on the mutation methods + the caller-side confirmation seam (internal/rpccli/confirm.go) + the prompt-ownership / non-interactivity tests; daedalus B-ruling hrcchat#10185 (T-05100)"
 source:
-  - internal/wrkqapi/tasks.go                         # TaskDelete mode (archive/purge/absent), no prompt/TTY/stdin read
+  - internal/wrkqapi/task_lifecycle.go                # TaskDelete mode (archive/purge/absent), no prompt/TTY/stdin read
   - internal/wrkqapi/comments.go                      # CommentDelete mode (soft/purge) + ifMatch CAS, non-interactive
   - internal/wrkqapi/containers.go                    # ContainerDeleteRecursive two-phase (dryRun impact / expected CAS), non-interactive
   - internal/rpccli/confirm.go                        # shared caller-side confirmation seam (prompt text, --yes, abort, non-TTY) — rm/comment-rm/rmdir-force variants
