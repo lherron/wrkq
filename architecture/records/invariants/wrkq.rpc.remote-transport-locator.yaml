@@ -78,6 +78,7 @@ source:
   - internal/workrpc/registry.go
   - internal/workrpc/bootstrap/bootstrap.go
   - internal/wrkqd/daemon.go
+  - internal/wrkqd/http_api.go
   - internal/wrkqd/daemon_migration_gate_test.go
   - internal/wrkqd/daemon_nodeauth_test.go
   - cmd/wrkqd/main.go

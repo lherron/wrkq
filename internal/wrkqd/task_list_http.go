@@ -3,6 +3,7 @@ package wrkqd
 import (
 	"database/sql"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 	"github.com/lherron/wrkq/internal/taskmember"
 )
@@ -260,4 +262,117 @@ func findTaskSortSQL(field string) string {
 	default:
 		return "t.updated_at"
 	}
+}
+
+type tasksListRequest struct {
+	Project    string   `json:"project,omitempty"`
+	Filter     string   `json:"filter,omitempty"`
+	Sort       string   `json:"sort,omitempty"`
+	Direction  string   `json:"direction,omitempty"`
+	Limit      int      `json:"limit,omitempty"`
+	Cursor     string   `json:"cursor,omitempty"`
+	PathPrefix []string `json:"path_prefix,omitempty"`
+	Assignee   string   `json:"assignee,omitempty"`
+	Kind       string   `json:"kind,omitempty"`
+	ParentTask string   `json:"parent_task,omitempty"`
+	DueBefore  string   `json:"due_before,omitempty"`
+	DueAfter   string   `json:"due_after,omitempty"`
+	SlugGlob   string   `json:"slug_glob,omitempty"`
+}
+
+func (s *daemonServer) handleTasksList(w http.ResponseWriter, r *http.Request) {
+	var req tasksListRequest
+	if !s.decodePost(w, r, &req) {
+		return
+	}
+
+	var pathsFilter []string
+
+	if req.Project != "" {
+		projectUUID, _, err := selectors.ResolveContainer(s.db, req.Project)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		var projectPath string
+		if err := s.db.QueryRow("SELECT path FROM v_container_paths WHERE uuid = ?", projectUUID).Scan(&projectPath); err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		pathsFilter = append(pathsFilter, projectPath)
+	}
+
+	for _, prefix := range req.PathPrefix {
+		trimmed := strings.Trim(prefix, "/")
+		if trimmed != "" {
+			pathsFilter = append(pathsFilter, trimmed)
+		}
+	}
+
+	var assigneePrincipalRef string
+	if req.Assignee != "" {
+		principalRef, err := attribution.NormalizeCompat(req.Assignee)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		assigneePrincipalRef = principalRef
+	}
+
+	var parentTaskUUID string
+	if req.ParentTask != "" {
+		uuid, _, err := selectors.ResolveTask(s.db, req.ParentTask)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		parentTaskUUID = uuid
+	}
+
+	stateFilter := ""
+	switch req.Filter {
+	case "all":
+		stateFilter = "all"
+	case "deleted":
+		stateFilter = "deleted"
+	case "active", "":
+		stateFilter = ""
+	default:
+		stateFilter = req.Filter
+	}
+
+	opts := findOptions{
+		paths:                pathsFilter,
+		typeFilter:           "t",
+		slugGlob:             req.SlugGlob,
+		state:                stateFilter,
+		dueBefore:            req.DueBefore,
+		dueAfter:             req.DueAfter,
+		kind:                 req.Kind,
+		assigneePrincipalRef: assigneePrincipalRef,
+		parentTaskUUID:       parentTaskUUID,
+		limit:                req.Limit,
+		cursor:               req.Cursor,
+	}
+
+	results, hasMore, err := findTasks(s.db, opts, false)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	var nextCursor string
+	if hasMore && len(results) > 0 {
+		lastEntry := results[len(results)-1]
+		nextCursor, _ = cursor.BuildNextCursor(
+			[]string{"updated_at"},
+			[]interface{}{lastEntry.UpdatedAt},
+			lastEntry.ID,
+		)
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"tasks":       results,
+		"next_cursor": nextCursor,
+	})
 }

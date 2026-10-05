@@ -1,7 +1,11 @@
 package wrkqd
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/selectors"
@@ -184,4 +188,41 @@ func buildTree(database *db.DB, path string, maxDepth int, includeArchived bool,
 
 func alwaysShowTreeContainer(node *treeNode) bool {
 	return node.Type == "container" && node.Slug == "inbox"
+}
+
+type containersTreeRequest struct {
+	Path            string `json:"path,omitempty"`
+	Depth           int    `json:"depth,omitempty"`
+	IncludeArchived bool   `json:"include_archived,omitempty"`
+	OpenOnly        bool   `json:"open_only,omitempty"`
+}
+
+func (s *daemonServer) handleContainersTree(w http.ResponseWriter, r *http.Request) {
+	if !s.allowMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	var req containersTreeRequest
+	if err := s.decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	rootPath := strings.Trim(req.Path, "/")
+	root, err := buildTree(s.db, rootPath, req.Depth, req.IncludeArchived, req.OpenOnly, !req.IncludeArchived, 0)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	path := rootPath
+	if path == "" {
+		path = "."
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"path":                            path,
+		"children":                        root.Children,
+		"hidden_containers_not_displayed": root.HiddenContainerCount,
+	})
 }
