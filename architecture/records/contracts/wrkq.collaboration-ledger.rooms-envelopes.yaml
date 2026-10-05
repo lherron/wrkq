@@ -116,6 +116,10 @@ source:
   - internal/wrkqapi/envelope_reads.go
   - internal/wrkqapi/envelope_dispositions.go
   - internal/rpccli/wrkc.go
+  - internal/rpccli/wrkc_say.go
+  - internal/rpccli/wrkc_room.go
+  - internal/rpccli/wrkc_envelope.go
+  - internal/rpccli/wrkc_wire.go
   - internal/rpccli/wrkc_acceptance_test.go
   - internal/wrkqapi/rooms_admission_test.go
   - packages/client/test/room-contract.test.ts
