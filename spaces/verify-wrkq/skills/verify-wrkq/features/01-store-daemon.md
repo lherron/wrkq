@@ -55,12 +55,8 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 
 ## Gotchas
 
-- **Doctor's `sequence_drift` on `event_seq` is a false positive.** `event_log` takes its ids from SQLite
-  AUTOINCREMENT, which `sqlite_sequence` records under the name `event_log`. Doctor reads a sequence named
-  `event_seq` (`internal/db/sequences.go:41`), and nothing advances that one. So every store that has at least
-  one event reports `event_seq (table event_log): sqlite_sequence=0, max_id=N` as an error. A bare `init`
-  doesn't show it, but the first write does (2026-10-05, T-10298 `01-store-daemon/drive.txt`). This is a
-  product defect. Don't run `--fix` to make the row go away.
+- Doctor's `sequence_drift` checks `event_log` against its own AUTOINCREMENT row in `sqlite_sequence`
+  (named `event_log`). Before T-10327 it read the dead `event_seq` row and flagged every store with an event.
 - Doctor's `attach_dir_exists` needs `WRKQ_ATTACH_DIR` (or `attach_dir` in config) on the **caller's** side.
   `wv env` exports it. Without it, a correct store reports an error.
 - `wrkqd` won't start without a hook catalog:
@@ -74,8 +70,8 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 ## Proven when
 
 On a fresh `wv up`, health is ok with the token and 401 without it, a tokenless client gets the token refusal,
-a dead locator gets the "retrying is safe" refusal, `whoami` names the scratch locator, doctor's only non-ok row
-is the `event_seq` false positive, `migrate --status` lists every migration as applied, and `migrate` refuses
+a dead locator gets the "retrying is safe" refusal, `whoami` names the scratch locator, doctor reports every row
+ok, `migrate --status` lists every migration as applied, and `migrate` refuses
 the serving store. On the canonical daemon, read only: health is ok and `rpc.initialize` names a revision.
 
 Driven 2026-10-05 on wv `t-10298` (T-10298) with installed f43c308: `var/wrkq-artifacts/T-10298/01-store-daemon/drive.txt`,

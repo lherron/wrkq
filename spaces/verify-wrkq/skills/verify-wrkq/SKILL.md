@@ -44,8 +44,7 @@ wrkq server health --addr "127.0.0.1:${WRKQ_DB##*:}"   # {"status":"ok"}
 wrkqadm --db "$WV_STATE/wrkq.db" doctor --json | jq -c '[.checks[] | select(.status!="ok")]'
 ```
 
-On a scratch, doctor's only non-ok row should be `sequence_drift` on `event_seq`. It is a known false positive
-that appears once the store has any event (feature 1, Gotchas). Any other non-ok row is real. For the live
+On a scratch, doctor should report every row ok. Any non-ok row is real. For the live
 daemon, `whoami` must show `rpc://<mini address>:7171` and health must be ok. Doctor's DB checks need the DB
 file, which only mini has, so don't run doctor against the canonical store from another node.
 

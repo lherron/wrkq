@@ -38,7 +38,7 @@ func DefaultSequenceSpecs() []SequenceSpec {
 		{SeqTable: "promise_seq", EntityTable: "promises", IDColumn: "id", Prefix: "PR-"},
 		{SeqTable: "room_seq", EntityTable: "rooms", IDColumn: "id", Prefix: "R-"},
 		{SeqTable: "envelope_seq", EntityTable: "envelopes", IDColumn: "id", Prefix: "EN-"},
-		{SeqTable: "event_seq", EntityTable: "event_log", IDColumn: "id", Prefix: ""},
+		{SeqTable: "event_log", EntityTable: "event_log", IDColumn: "id", Prefix: ""},
 	}
 }
 
