@@ -142,8 +142,8 @@ func currentCheckInputHash(inst *Instance, tr *TransitionSpec, actor, role strin
 
 func (s *Service) executeCheck(inst *Instance, tr *TransitionSpec, checkID string, check CheckSpec, actor, role string, catalog *HookCatalog, templateDir string, persist bool, execOpts HookExecutionOptions) (*CheckRun, error) {
 	task, _ := loadTaskDoc(s.db, inst.TaskUUID)
-	ev, _ := listEvidenceForInstance(s.db, inst.ID)
-	obl, _ := listObligationsForInstance(s.db, inst.ID, true)
+	ev, _ := listInstanceEvidence(s.db, inst.ID)
+	obl, _ := listObligations(s.db, inst.ID, true)
 	inputJSON, facts := buildCheckInput(inst, tr, actor, role, task, ev, obl)
 	cr := &CheckRun{InstanceID: inst.ID, TransitionID: tr.ID, CheckID: checkID, HookID: check.HookID, InputHash: Hash(inputJSON), Verdict: "inconclusive", PrincipalRef: actor, Role: role, StartedAt: s.now().Format(time.RFC3339)}
 	switch check.Type {

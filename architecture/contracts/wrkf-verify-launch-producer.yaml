@@ -23,7 +23,7 @@ consumers:
   - agent-control-plane ACP verify action launcher
 source:
   - internal/workflow/builtins/wrkq-simple-task.workflow.json
-  - internal/workflow/ledger.go
+  - internal/workflow/effect_render.go
   - internal/workflow/action_verify_launch_intent_test.go
   - architecture/records/risks/wrkq.simple-task.v1.naive-supersede.yaml
   - hrcchat#10969

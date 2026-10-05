@@ -81,7 +81,7 @@ describe("T-05620 workflow obligation policy registry boundary", () => {
   });
 
   test("generic obligation listing delegates computed state and projections through the policy", () => {
-    const ledgerBody = functionBody(readRepoFile("internal/workflow/ledger.go"), "(s *Service) ListObligations");
+    const ledgerBody = functionBody(readRepoFile("internal/workflow/obligations.go"), "(s *Service) ListObligations");
 
     expect(ledgerBody, "ListObligations should resolve the workflow policy for the active template").toMatch(
       /WorkflowPolicy|ResolveWorkflowPolicy|workflowPolicyFor/,

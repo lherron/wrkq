@@ -74,7 +74,7 @@ func (s *Service) AddEvidence(params AddEvidenceParams) (*Evidence, error) {
 		}
 
 		if kindSpec != nil && len(kindSpec.LinkageRefs) > 0 {
-			existing, err := listEvidenceTx(tx, inst.ID)
+			existing, err := listInstanceEvidence(tx, inst.ID)
 			if err != nil {
 				return err
 			}
@@ -256,11 +256,16 @@ func (s *Service) ListEvidence(taskSelector, instanceID string) ([]Evidence, err
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`
-		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
-		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
-	`, inst.ID)
+	return listInstanceEvidence(s.db, inst.ID)
+}
+
+// evidenceColumns is the SELECT list scanEvidenceRows reads, in scan order.
+const evidenceColumns = `id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
+	COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at`
+
+// queryEvidence runs a workflow_evidence query whose WHERE/ORDER tail is clause.
+func queryEvidence(q rowsQueryer, clause string, args ...interface{}) ([]Evidence, error) {
+	rows, err := q.Query(`SELECT `+evidenceColumns+` FROM workflow_evidence `+clause, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -268,30 +273,12 @@ func (s *Service) ListEvidence(taskSelector, instanceID string) ([]Evidence, err
 	return scanEvidenceRows(rows)
 }
 
-func listEvidenceTx(tx *sql.Tx, instanceID string) ([]Evidence, error) {
-	rows, err := tx.Query(`
-		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
-		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
-	`, instanceID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	return scanEvidenceRows(rows)
+func listInstanceEvidence(q rowsQueryer, instanceID string) ([]Evidence, error) {
+	return queryEvidence(q, `WHERE instance_id = ? ORDER BY produced_at, id`, instanceID)
 }
 
 func (s *Service) ShowEvidence(id string) (*Evidence, error) {
-	rows, err := s.db.Query(`
-		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
-		FROM workflow_evidence WHERE id = ?
-	`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	out, err := scanEvidenceRows(rows)
+	out, err := queryEvidence(s.db, `WHERE id = ?`, id)
 	if err != nil {
 		return nil, err
 	}

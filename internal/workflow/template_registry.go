@@ -283,3 +283,21 @@ func showTemplateTx(q queryer, ref string) (*Template, string, error) {
 	tpl, _, err := ParseTemplate([]byte(definition))
 	return tpl, hash, err
 }
+
+// DiffTemplateContent compares decoded template bodies without consulting the
+// daemon filesystem.
+func (s *Service) DiffTemplateContent(oldBody, newBody []byte) (map[string]interface{}, error) {
+	oldTpl, _, oldHash, err := ParseTemplateContent(oldBody)
+	if err != nil {
+		return nil, err
+	}
+	newTpl, _, newHash, err := ParseTemplateContent(newBody)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"old":      map[string]string{"id": oldTpl.ID, "version": oldTpl.Version, "hash": oldHash},
+		"new":      map[string]string{"id": newTpl.ID, "version": newTpl.Version, "hash": newHash},
+		"sameHash": oldHash == newHash,
+	}, nil
+}

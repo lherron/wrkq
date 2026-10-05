@@ -31,7 +31,7 @@ enforced_by: >
 source:
   - docs/wrkq-wrkf-rpc.md # current contract; ratified migration provenance: T-06754 / ATT-00102
   - internal/workflow/service.go
-  - internal/workflow/ledger.go
+  - internal/workflow/effect_delivery.go
   - internal/workflow/hook_catalog_pinning_test.go
   - internal/workflow/hook_isolation_test.go
   - internal/workrpc/bootstrap/bootstrap.go

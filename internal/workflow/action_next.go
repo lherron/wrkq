@@ -45,7 +45,7 @@ func (s *Service) actionCandidatesForInstance(q actionCandidateQueryer, inst *In
 	if err != nil {
 		return nil, err
 	}
-	ev, err := listEvidenceForInstanceRows(q, inst.ID)
+	ev, err := listInstanceEvidence(q, inst.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -400,19 +400,6 @@ func boundSourceFact(facts map[string]interface{}, binding *SourceBindingSpec, f
 		path = fallback
 	}
 	return stringFact(facts, path)
-}
-
-func listEvidenceForInstanceRows(q rowsQueryer, instanceID string) ([]Evidence, error) {
-	rows, err := q.Query(`
-		SELECT id, instance_id, kind, ref, COALESCE(summary,''), COALESCE(facts_json,''), COALESCE(data_json,''), source_json,
-		       COALESCE(principal_ref, actor, ''), COALESCE(role,''), COALESCE(run_id,''), COALESCE(task_etag_at_production,''), COALESCE(task_hash_at_production,''), produced_at
-		FROM workflow_evidence WHERE instance_id = ? ORDER BY produced_at, id
-	`, instanceID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	return scanEvidenceRows(rows)
 }
 
 func runActionByIDQuery(q queryer, runID string) (string, error) {

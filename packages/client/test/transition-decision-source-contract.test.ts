@@ -66,11 +66,11 @@ describe("T-05619 canonical wrkf transition decision contract", () => {
 
   test("Next, direct transition, and action settlement all delegate legality to the evaluator", () => {
     const service = readRepoFile("internal/workflow/service.go");
-    const ledger = readRepoFile("internal/workflow/ledger.go");
+    const transition = readRepoFile("internal/workflow/transition.go");
     const action = readRepoFile("internal/workflow/action.go");
 
     const nextBody = functionBody(service, "(s *Service) Next");
-    const directBody = functionBody(ledger, "(s *Service) TransitionForSelectors");
+    const directBody = functionBody(transition, "(s *Service) TransitionForSelectors");
     const settleBody = functionBody(action, "(s *Service) applyActionTransitionTx");
 
     for (const [surface, body] of [

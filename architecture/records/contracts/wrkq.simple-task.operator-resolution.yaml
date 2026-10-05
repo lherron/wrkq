@@ -29,7 +29,7 @@ source:
   - internal/workflow/builtin.go
   - internal/workflow/action_next.go
   - internal/workflow/service.go
-  - internal/workflow/ledger.go
+  - internal/workflow/transition.go
   - internal/workflow/operator_resolution_test.go
   - hrcchat#12358
 required_tests:

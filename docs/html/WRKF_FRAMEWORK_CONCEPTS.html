@@ -1593,7 +1593,7 @@ type Obligation = { // Outstanding duty that can block or guide progress.
   updatedAt: string // RFC3339 update timestamp.
 }</code></pre>
               </div>
-              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/ledger.go</span>, <span class="inline-code">internal/db/migrations/000014_wrkf_schema.sql</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/effects.go</span>, <span class="inline-code">internal/workflow/obligations.go</span>, <span class="inline-code">internal/db/migrations/000014_wrkf_schema.sql</span></div>
             </article>
 
             <article class="contract-object runtime" id="check-run-contract">
@@ -1644,7 +1644,7 @@ type Run = { // Active or completed role binding and execution record.
   terminalResult?: string // Human terminal summary recorded by finish or fail.
 }</code></pre>
               </div>
-              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">internal/workflow/ledger.go</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">internal/workflow/check_runs.go</span>, <span class="inline-code">internal/workflow/runs.go</span></div>
             </article>
 
             <article class="contract-object state" id="next-action-contract">
@@ -1774,7 +1774,7 @@ type ContextHashInput = { // Conceptual input covered by contextHash in service.
   pendingEffects?: string[] // Sorted pending or leased effect refs containing id, kind, and status.
 }</code></pre>
               </div>
-              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">internal/workflow/ledger.go</span>, <span class="inline-code">internal/wrkfcli/root.go</span></div>
+              <div class="source-note">Source: <span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">internal/workflow/transition.go</span>, <span class="inline-code">internal/wrkfcli/root.go</span></div>
             </article>
           </section>
 
@@ -1783,7 +1783,7 @@ type ContextHashInput = { // Conceptual input covered by contextHash in service.
             <div class="grid two">
               <article class="panel">
                 <h3>Authoritative files</h3>
-                <p class="minor"><span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">internal/workflow/ledger.go</span>, <span class="inline-code">internal/workflow/facts.go</span>, <span class="inline-code">internal/wrkfcli/root.go</span>, <span class="inline-code">internal/db/migrations/000014_wrkf_schema.sql</span>, and <span class="inline-code">000019_workflow_evidence_facts.sql</span>.</p>
+                <p class="minor"><span class="inline-code">internal/workflow/types.go</span>, <span class="inline-code">internal/workflow/service.go</span>, <span class="inline-code">internal/workflow/transition.go</span>, <span class="inline-code">internal/workflow/obligations.go</span>, <span class="inline-code">internal/workflow/effects.go</span>, <span class="inline-code">internal/workflow/runs.go</span>, <span class="inline-code">internal/workflow/facts.go</span>, <span class="inline-code">internal/wrkfcli/root.go</span>, <span class="inline-code">internal/db/migrations/000014_wrkf_schema.sql</span>, and <span class="inline-code">000019_workflow_evidence_facts.sql</span>.</p>
               </article>
               <article class="panel">
                 <h3>Template and hook sources</h3>

@@ -13,29 +13,8 @@ import (
 // event so every run records the same durable cause. It must run inside the
 // caller's immediate transaction.
 func terminalizeActiveRunsTx(tx *sql.Tx, inst *Instance, disposition, terminalEventID, completedAt string) ([]TerminalizedRunSummary, error) {
-	rows, err := tx.Query(`
-		SELECT id, instance_id, role, COALESCE(principal_ref, actor, ''), COALESCE(delivery_ref,''), COALESCE(lane,''), COALESCE(external_run_ref,''),
-		       COALESCE(action,''), status, started_at, COALESCE(completed_at,''), COALESCE(terminal_result,''),
-		       COALESCE(lease_owner,''), COALESCE(lease_token,''), COALESCE(lease_expires_at,''), COALESCE(heartbeat_at,'')
-		FROM workflow_runs WHERE instance_id = ? AND status = 'active' ORDER BY started_at, id
-	`, inst.ID)
+	active, err := queryRuns(tx, `WHERE instance_id = ? AND status = 'active' ORDER BY started_at, id`, inst.ID)
 	if err != nil {
-		return nil, err
-	}
-	var active []Run
-	for rows.Next() {
-		var run Run
-		if err := rows.Scan(&run.ID, &run.InstanceID, &run.Role, &run.PrincipalRef, &run.DeliveryRef, &run.Lane, &run.ExternalRunRef, &run.Action, &run.Status, &run.StartedAt, &run.CompletedAt, &run.TerminalResult, &run.LeaseOwner, &run.LeaseToken, &run.LeaseExpiresAt, &run.HeartbeatAt); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		active = append(active, run)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
 		return nil, err
 	}
 
@@ -85,36 +64,5 @@ func createDispositionEffectsTx(tx *sql.Tx, tpl *Template, resolved Instance, di
 	if tpl.Suspension != nil {
 		specs = tpl.Suspension.Effects[disposition]
 	}
-	created := make([]Effect, 0, len(specs))
-	for _, spec := range specs {
-		id, err := nextSeqID(tx, "workflow_effect_seq", "eff")
-		if err != nil {
-			return nil, err
-		}
-		seq, err := nextEffectSequenceTx(tx, resolved.ID)
-		if err != nil {
-			return nil, err
-		}
-		rendered, semanticKey, err := renderEffectSpec(spec, effectRenderContext{instance: resolved, outcomeID: disposition, sequence: seq})
-		if err != nil {
-			return nil, err
-		}
-		payload, err := json.Marshal(rendered)
-		if err != nil {
-			return nil, err
-		}
-		key := fmt.Sprintf("%s:%s", resolved.ID, semanticKey)
-		if _, err := tx.Exec(`
-			INSERT INTO workflow_effects (id, instance_id, revision, sequence, kind, payload_json, status, idempotency_key, semantic_key, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
-		`, id, resolved.ID, resolved.Revision, seq, rendered.Kind, string(payload), key, semanticKey, now, now); err != nil {
-			return nil, err
-		}
-		created = append(created, Effect{
-			ID: id, InstanceID: resolved.ID, Revision: resolved.Revision, Sequence: seq, Kind: rendered.Kind,
-			Payload: json.RawMessage(payload), Status: "pending", IdempotencyKey: key, SemanticKey: semanticKey,
-			CreatedAt: now, UpdatedAt: now,
-		})
-	}
-	return created, nil
+	return enqueueRenderedEffectsTx(tx, resolved, specs, disposition, "", now)
 }

@@ -996,7 +996,7 @@ func (s *Service) addActionEvidenceTx(tx *sql.Tx, inst *Instance, tpl *Template,
 		return nil, err
 	}
 	if kindSpec != nil && len(kindSpec.LinkageRefs) > 0 {
-		existing, err := listEvidenceTx(tx, inst.ID)
+		existing, err := listInstanceEvidence(tx, inst.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -1073,11 +1073,11 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 	if err != nil {
 		return nil, err
 	}
-	ev, err := listEvidenceTx(tx, inst.ID)
+	ev, err := listInstanceEvidence(tx, inst.ID)
 	if err != nil {
 		return nil, err
 	}
-	obl, err := listObligationsTx(tx, inst.ID, true)
+	obl, err := listObligations(tx, inst.ID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1161,76 +1161,13 @@ func (s *Service) applyActionTransitionTx(tx *sql.Tx, inst *Instance, tpl *Templ
 		return nil, staleRevisionError(updated.ID, inst.Revision, actual.revision)
 	}
 
-	createdObligations := make([]Obligation, 0, len(chosen.Obligations))
-	for _, ob := range chosen.Obligations {
-		id, err := nextSeqID(tx, "workflow_obligation_seq", "obl")
-		if err != nil {
-			return nil, err
-		}
-		blocking := 0
-		if ob.Blocking {
-			blocking = 1
-		}
-		noSelfWaive := true
-		if ob.NoSelfWaive != nil {
-			noSelfWaive = *ob.NoSelfWaive
-		}
-		noSelfWaiveInt := 0
-		if noSelfWaive {
-			noSelfWaiveInt = 1
-		}
-		obligeeRole := strings.TrimSpace(ob.ObligeeRole)
-		if obligeeRole == "" {
-			obligeeRole = "workflow"
-		}
-		waiveRole := strings.TrimSpace(ob.WaiveRole)
-		if waiveRole == "" && strings.TrimSpace(ob.WaivePrincipalRef) == "" {
-			waiveRole = "system"
-		}
-		_, err = tx.Exec(`
-			INSERT INTO workflow_obligations (
-				id, instance_id, kind, owner_role, owner_actor, owner_principal_ref, obligee_role, obligee_actor, obligee_principal_ref,
-				waive_role, waive_actor, waive_principal_ref, no_self_waive, blocking, status, reason, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
-		`, id, updated.ID, ob.Kind, nullIfEmpty(ob.OwnerRole), nullIfEmpty(ob.OwnerPrincipalRef), nullIfEmpty(ob.OwnerPrincipalRef), nullIfEmpty(obligeeRole), nullIfEmpty(ob.ObligeePrincipalRef), nullIfEmpty(ob.ObligeePrincipalRef), nullIfEmpty(waiveRole), nullIfEmpty(ob.WaivePrincipalRef), nullIfEmpty(ob.WaivePrincipalRef), noSelfWaiveInt, blocking, nullIfEmpty(ob.Reason), now, now)
-		if err != nil {
-			return nil, err
-		}
-		createdObligations = append(createdObligations, Obligation{
-			ID: id, InstanceID: updated.ID, Kind: ob.Kind, OwnerRole: ob.OwnerRole, OwnerPrincipalRef: ob.OwnerPrincipalRef,
-			ObligeeRole: obligeeRole, ObligeePrincipalRef: ob.ObligeePrincipalRef, WaiveRole: waiveRole, WaivePrincipalRef: ob.WaivePrincipalRef,
-			NoSelfWaive: noSelfWaive, Blocking: ob.Blocking, Status: "open", Reason: ob.Reason, CreatedAt: now, UpdatedAt: now,
-		})
+	createdObligations, err := insertOutcomeObligationsTx(tx, updated.ID, chosen.Obligations, now)
+	if err != nil {
+		return nil, err
 	}
-	createdEffects := make([]Effect, 0, len(chosen.Effects))
-	for _, ef := range chosen.Effects {
-		id, err := nextSeqID(tx, "workflow_effect_seq", "eff")
-		if err != nil {
-			return nil, err
-		}
-		seq, err := nextEffectSequenceTx(tx, updated.ID)
-		if err != nil {
-			return nil, err
-		}
-		renderedEffect, semanticKey, err := renderEffectSpec(ef, effectRenderContext{
-			instance: updated, outcomeID: chosen.ID, runID: runID, sequence: seq,
-		})
-		if err != nil {
-			return nil, err
-		}
-		payload, _ := json.Marshal(renderedEffect)
-		effectKey := fmt.Sprintf("%s:%s", updated.ID, semanticKey)
-		_, err = tx.Exec(`
-			INSERT INTO workflow_effects (id, instance_id, revision, sequence, kind, payload_json, status, idempotency_key, semantic_key, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
-		`, id, updated.ID, updated.Revision, seq, renderedEffect.Kind, string(payload), effectKey, semanticKey, now, now)
-		if err != nil {
-			return nil, err
-		}
-		createdEffects = append(createdEffects, Effect{
-			ID: id, InstanceID: updated.ID, Revision: updated.Revision, Sequence: seq, Kind: renderedEffect.Kind, Payload: json.RawMessage(payload),
-			Status: "pending", IdempotencyKey: effectKey, SemanticKey: semanticKey, CreatedAt: now, UpdatedAt: now,
-		})
+	createdEffects, err := enqueueRenderedEffectsTx(tx, updated, chosen.Effects, chosen.ID, runID, now)
+	if err != nil {
+		return nil, err
 	}
 	result := transitionResultMap(inst.TaskRef, updated, eventID, createdEffects, createdObligations)
 	result["transition"] = transitionID
