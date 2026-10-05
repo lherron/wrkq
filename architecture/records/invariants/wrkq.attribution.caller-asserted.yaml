@@ -33,7 +33,7 @@ source:
   - internal/wrkqapi/errors.go                 # NewForbiddenError: a coordination refusal, not an authentication result
 required_tests:
   - internal/nodeauth/nodeauth_test.go         # TestParseSpecResolvesTokenToExactlyOneNode: a token names a node, never a principal
-  - internal/wrkqapi/rooms_test.go             # addressee/sender guards refuse a mismatched asserted principal
+  - internal/wrkqapi/rooms_envelope_disposition_test.go # addressee/sender guards refuse a mismatched asserted principal
   - internal/wrkqapi/promises_test.go          # owner guard refuses a mismatched asserted principal
 last_verified:
   date: 2026-09-27
