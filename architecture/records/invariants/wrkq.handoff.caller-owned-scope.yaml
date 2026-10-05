@@ -47,7 +47,10 @@ enforced_by: "internal/scope.Resolve + scope.EnforceSelfScope at the caller call
 exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the bypassing call site"
 source:
   - internal/scope/resolve.go                  # Resolve + EnforceSelfScope (single source of truth; AGENT_SCOPE_REF canonical, ASP_* compat)
-  - internal/rpccli/handoff.go                 # caller scope.Resolve + EnforceSelfScope (create) + explicit params; no server env read
+  - internal/rpccli/handoff.go                 # handoff mirror root, wire shape, output modes, structured errors
+  - internal/rpccli/handoff_create.go          # caller scope.Resolve + EnforceSelfScope (create) + explicit params; no server env read
+  - internal/rpccli/handoff_list.go            # caller scope.Resolve for list/search + explicit scopeRef params
+  - internal/rpccli/handoff_ack.go             # caller acting-identity resolution + explicit actor/principal/scope params
   - internal/wrkqapi/handoffs.go               # server: HandoffCreate/Get/ListView/Acknowledge over EXPLICIT scope/principal; no ASP_* read
   - internal/workrpc/registry.go               # wrkq.handoff.* registration (shared wrkq + wrkf entrypoints via RegisterAPI)
 required_tests:
@@ -55,6 +58,7 @@ required_tests:
   - internal/workrpc/catview_catalog_test.go            # TestCatViewInCatalogs (handoff methods + DTOs in both catalogs)
   - internal/workrpc/handoff_test.go                    # server create/get/list/ack + idempotent replay/mismatch + ack ifMatch CAS + dryRun no-write + already-acknowledged + event payloads + TestHandoffCreate_IncoherentScopeRejected (scopeRef vs agentId/projectId coherence → WRKQ_VALIDATION, no write/event)
   - internal/scope/resolve_test.go                      # AGENT_SCOPE_REF precedence + AGENT/ASP disagreement diagnostics
+  - internal/rpccli/handoff_read_cli_test.go            # list/search/acknowledge output, validation errors, exit codes
   - internal/rpccli/handoff_test.go                     # mirror NO-server-env-read guard + self-scope violation (caller-side) + env scope precedence
   - internal/rpccli/parity_test.go                      # production contract handoff/read-write coverage
   - internal/rpccli/transport_test.go                   # TestTransportEquivalence (handoff get/listView agree in-proc vs subprocess)
