@@ -495,10 +495,9 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > resource_type, resource_uuid, event_type, etag?, payload? }`. `payload` stays a
 > raw STRING (not parsed JSON); `--patch` is rendered CLIENT-side from it (no extra
 > RPC, no server-side patch projection). Empty history encodes `--json` as `null`
-> (legacy `var events []logEvent`), NOT `[]`. PINNED DIVERGENCE: path-target
-> resolution is a legacy TODO (path args error today); the server reproduces the
-> exact `path resolution not yet implemented: <target>` message and does NOT add
-> path resolution. Legacy error wrapping is reproduced: the view returns the full
+> (legacy `var events []logEvent`), NOT `[]`. A path target resolves
+> to a task first, then a container (T-10327); a miss is
+> `resource not found: <target>`. Legacy error wrapping is reproduced: the view returns the full
 > `failed to resolve resource: …` / `failed to query event log: …` text
 > (prefixLogError preserves the domain code; the mirror strips the code prefix).
 > Project-root is CALLER-scoped (the mirror scopes the raw target before sending;

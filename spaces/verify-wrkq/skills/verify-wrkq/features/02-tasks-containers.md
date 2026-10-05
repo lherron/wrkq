@@ -32,7 +32,7 @@ its cascade, named subtasks, relations, the edit round trip (`cat --output raw` 
   `open_subtask_count`.
 - **Relations.** `wrkq relation add <a> blocks <b>` and `wrkq relation ls <a>`.
 - **Edit round trip.** `wrkq cat <task> --output raw > f.md`, edit the file, then `wrkq apply <task> f.md`.
-- **History.** `wrkq log <ID> [--oneline|--patch|--json]`.
+- **History.** `wrkq log <ID|path> [--oneline|--patch|--json]`. A path names a task first, then a container.
 
 ## How to get to it
 
@@ -60,9 +60,6 @@ wrkq index update && wrkq search alpha --state all --json | jq -c '[.results[].r
 
 ## Gotchas
 
-- **`wrkq log <path>` fails** with `failed to resolve resource: path resolution not yet implemented`, even though
-  its usage says `<PATHSPEC|ID>`. Pass the id (2026-10-05, T-10298 `02-tasks-containers/drive.txt`). This is a
-  product defect.
 - **`wrkq archive` is for containers only.** `wrkq archive T-00002` fails with `container not found: T-00002`.
   Archive a task with `wrkq rm`.
 - `touch --json` returns an array (`.[0].id`), `cat --json` returns an array unless you pass `--one`, and
@@ -78,7 +75,7 @@ wrkq index update && wrkq search alpha --state all --json | jq -c '[.results[].r
 On the scratch, the created task carries your principal, an etag-guarded set refuses a stale etag, `find` hides
 the completed task until `--state all`, `rm`/`restore` moves the task between `archived` and `open`, the
 container archive cascades to `cancelled` and `unarchive` reverses exactly that change, a named subtask raises
-`open_subtask_count`, and `log <ID>` shows `task.created` and `task.updated` attributed to you.
+`open_subtask_count`, and `log <ID>` and `log <path>` show `task.created` and `task.updated` attributed to you.
 
 Driven 2026-10-05 on wv `t-10298` (T-10298) with installed f43c308: `var/wrkq-artifacts/T-10298/02-tasks-containers/drive.txt`.
 `drive-attempt1-bad-commands.txt` beside it keeps the first, malformed attempt.

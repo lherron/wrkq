@@ -11,6 +11,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/id"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/taskfamily"
 )
 
@@ -96,7 +97,14 @@ func (a *API) resolveLogResource(ctx context.Context, target string) (string, st
 		return "", "", NewValidationError(fmt.Sprintf("UUID not found: %s", target), nil)
 	}
 
-	return "", "", NewValidationError(fmt.Sprintf("path resolution not yet implemented: %s", target), nil)
+	// A path names a task first, then a container (the same order cat uses).
+	if uuid, _, err := selectors.ResolveTaskByPath(a.db, target); err == nil {
+		return uuid, "task", nil
+	}
+	if uuid, _, err := selectors.WalkContainerPath(a.db, target); err == nil {
+		return uuid, "container", nil
+	}
+	return "", "", NewValidationError(fmt.Sprintf("resource not found: %s", target), nil)
 }
 
 // queryLogEventLog reproduces legacy queryEventLog: cursor.Apply over e.id DESC,
