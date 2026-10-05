@@ -34,7 +34,8 @@ source:
   - internal/workrpc/workflow_discontinued_acceptance_test.go
   - internal/wrkqapi/types.go
   - internal/wrkqapi/workflow.go
-  - internal/wrkfcli/root.go
+  - internal/wrkfcli/workflow.go
+  - internal/wrkfcli/task.go
   - packages/client/src/client.ts
   - packages/client/src/wrkf/facade.ts
   - packages/client/src/wrkf/types.ts

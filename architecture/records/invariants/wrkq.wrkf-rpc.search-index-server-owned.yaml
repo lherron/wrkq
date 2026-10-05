@@ -42,7 +42,7 @@ source:
   - internal/search/search.go                         # canonical task filtering, including exact label membership before paging
   - internal/workrpc/registry.go                      # registers wrkq.search.listView + wrkq.index.* (registerWrkqMethods → both entrypoints) + method/dto catalogs
   - internal/workrpc/bootstrap/bootstrap.go           # threads config.SearchConfig → RegistryOptions.Search (server DB config default sidecar path)
-  - internal/wrkfcli/root.go                           # wrkf rpc --stdio entrypoint also builds the search host (entrypoint equivalence)
+  - internal/wrkfcli/rpc.go                            # wrkf rpc --stdio entrypoint also builds the search host (entrypoint equivalence)
   - internal/rpccli/search.go                          # search mirror: scopes paths + presentation, never opens the sidecar
   - internal/rpccli/index.go                           # index mirror: lifecycle presentation, never opens the sidecar / EnsureLlamaReady
   - internal/rpccli/importguard_test.go                # forbids internal/search subtree in the mirror (structural proof)

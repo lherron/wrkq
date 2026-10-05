@@ -76,7 +76,7 @@ describe("T-05822 wrkf attach supersede contract", () => {
       readRepoFile("packages/client/src/wrkq/workflow-binding.ts"),
       "WrkqWorkflowAttachParams",
     );
-    const cli = readRepoFile("internal/wrkfcli/root.go");
+    const cli = readRepoFile("internal/wrkfcli/task.go");
 
     for (const [surface, source] of [
       ["Go RPC WorkflowAttachParams", goParams],

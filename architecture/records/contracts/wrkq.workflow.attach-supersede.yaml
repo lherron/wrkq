@@ -31,7 +31,7 @@ source:
   - internal/workflow/operator_resolution_test.go
   - internal/wrkqapi/types.go
   - internal/wrkqapi/workflow.go
-  - internal/wrkfcli/root.go
+  - internal/wrkfcli/task.go
   - packages/client/src/wrkq/workflow-binding.ts
   - packages/client/test/wrkf-attach-supersede-contract.test.ts
 required_tests:

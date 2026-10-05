@@ -503,3 +503,12 @@ func cliFilterList(value string) []string {
 	}
 	return []string{value}
 }
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
