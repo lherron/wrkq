@@ -570,9 +570,7 @@ func (cs *ContainerStore) ArchiveWithAttribution(attr attribution.Attribution, c
 		return nil
 	})
 	if err == nil {
-		for _, pending := range webhooksToDispatch {
-			webhooks.DispatchTaskEvent(cs.store.db, pending.taskUUID, pending.ctx)
-		}
+		dispatchTaskWebhooks(cs.store.db, webhooksToDispatch)
 	}
 
 	return newETag, err
@@ -630,9 +628,7 @@ func (cs *ContainerStore) RestoreWithAttribution(attr attribution.Attribution, c
 		return nil
 	})
 	if err == nil {
-		for _, pending := range webhooksToDispatch {
-			webhooks.DispatchTaskEvent(cs.store.db, pending.taskUUID, pending.ctx)
-		}
+		dispatchTaskWebhooks(cs.store.db, webhooksToDispatch)
 	}
 	return err
 }
@@ -718,17 +714,8 @@ func cascadeCancelTask(tx *sql.Tx, ew *events.Writer, attr attribution.Attributi
 		return pendingWebhook{}, fmt.Errorf("failed to cancel task %s during container archive: %w", task.UUID, err)
 	}
 	payload := map[string]any{"state": "cancelled", "state_from": task.State, "meta": string(metaJSON)}
-	if err := StampTaskCampaignContext(tx, task.UUID, payload); err != nil {
-		return pendingWebhook{}, err
-	}
-	payloadJSON, _ := json.Marshal(payload)
-	payloadStr := string(payloadJSON)
 	newETag := task.ETag + 1
-	eventMeta, err := ew.LogEventReturning(tx, &domain.Event{
-		PrincipalRef: attr.PrincipalRef, ScopeRef: attr.ScopeRef,
-		ResourceType: "task", ResourceUUID: &task.UUID, EventType: "task.updated",
-		ETag: &newETag, Payload: &payloadStr,
-	})
+	eventMeta, err := logTaskEvent(tx, ew, attr, task.UUID, "task.updated", &newETag, payload)
 	if err != nil {
 		return pendingWebhook{}, fmt.Errorf("failed to log archive cancellation for task %s: %w", task.UUID, err)
 	}
@@ -794,17 +781,8 @@ func restoreCascadeTask(tx *sql.Tx, ew *events.Writer, attr attribution.Attribut
 		changes["state"] = webhooks.Change{From: task.State, To: state}
 		transition = &webhooks.Transition{From: stringPtr(task.State), To: stringPtr(state)}
 	}
-	if err := StampTaskCampaignContext(tx, task.UUID, payload); err != nil {
-		return pendingWebhook{}, false, err
-	}
-	payloadJSON, _ := json.Marshal(payload)
-	payloadStr := string(payloadJSON)
 	newETag := task.ETag + 1
-	eventMeta, err := ew.LogEventReturning(tx, &domain.Event{
-		PrincipalRef: attr.PrincipalRef, ScopeRef: attr.ScopeRef,
-		ResourceType: "task", ResourceUUID: &task.UUID, EventType: "task.updated",
-		ETag: &newETag, Payload: &payloadStr,
-	})
+	eventMeta, err := logTaskEvent(tx, ew, attr, task.UUID, "task.updated", &newETag, payload)
 	if err != nil {
 		return pendingWebhook{}, false, fmt.Errorf("failed to log cascade restore for task %s: %w", task.UUID, err)
 	}
@@ -990,20 +968,8 @@ func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attrib
 				payload["attachment_count"] = task.AttachmentCount
 				payload["bytes_freed"] = task.Bytes
 			}
-			if err := StampTaskCampaignContext(tx, task.UUID, payload); err != nil {
+			if _, err := logTaskEvent(tx, ew, attr, task.UUID, "task.purged", nil, payload); err != nil {
 				return err
-			}
-			payloadJSON, _ := json.Marshal(payload)
-			payloadStr := string(payloadJSON)
-			if err := ew.LogEvent(tx, &domain.Event{
-				PrincipalRef: attr.PrincipalRef,
-				ScopeRef:     attr.ScopeRef,
-				ResourceType: "task",
-				ResourceUUID: &task.UUID,
-				EventType:    "task.purged",
-				Payload:      &payloadStr,
-			}); err != nil {
-				return fmt.Errorf("failed to log task purge event: %w", err)
 			}
 		}
 		if err := detachExternalSubtasksForParents(tx, attr, taskUUIDs); err != nil {

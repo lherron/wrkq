@@ -28,6 +28,7 @@ source:
   - internal/wrkqapi/claims_test.go
   - internal/wrkqapi/tasks.go
   - internal/store/tasks.go
+  - internal/store/task_update.go
   - internal/rpccli/claim.go
 required_tests:
   - TestDaemonClaimDerivesNodeFromBearerIdentity

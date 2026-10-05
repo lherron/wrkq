@@ -40,7 +40,7 @@ source:
   - architecture/records/invariants/wrkq.mutation.caller-owned-confirmation.yaml
   - architecture/records/invariants/wrkq.rpc.remote-transport-locator.yaml
   - internal/domain/validation.go
-  - internal/store/tasks.go
+  - internal/store/task_removal.go
   - internal/webhooks/webhooks.go
 required_tests: []
 last_verified: null

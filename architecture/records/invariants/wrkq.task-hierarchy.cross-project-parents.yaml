@@ -59,7 +59,7 @@ predicate: >
 authority:
   repo: wrkq
   surface: tasks table parent graph + wrkq task/container mutation/read-model surfaces
-enforced_by: "internal/db/migrations/000031_cross_project_parent_edges.sql; internal/store/tasks.go; internal/store/containers.go; internal/wrkqapi/treeview.go; internal/rpccli/tree.go; internal/wrkqd/tree_http.go; internal/store/cross_project_parent_test.go; internal/workrpc/taskmove_test.go"
+enforced_by: "internal/db/migrations/000031_cross_project_parent_edges.sql; internal/store/task_update.go; internal/store/task_move.go; internal/store/task_removal.go; internal/store/containers.go; internal/wrkqapi/treeview.go; internal/rpccli/tree.go; internal/wrkqd/tree_http.go; internal/store/cross_project_parent_test.go; internal/workrpc/taskmove_test.go"
 required_tests:
   - go test ./internal/store ./internal/wrkqapi ./internal/rpccli ./internal/wrkqd
   - internal/rpccli/container_archive_test.go
@@ -77,6 +77,9 @@ exception_channel: "// ARCH-EXCEPTION(T-id): <reason> at the hierarchy mutation/
 source:
   - internal/db/migrations/000026_external_principal_attribution.sql
   - internal/store/tasks.go
+  - internal/store/task_update.go
+  - internal/store/task_move.go
+  - internal/store/task_removal.go
   - internal/store/containers.go
   - internal/wrkqapi/tasks.go
   - internal/wrkqapi/treeview.go

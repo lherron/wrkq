@@ -36,6 +36,7 @@ source:
   - docs/wrkq-wrkf-rpc.md
   - internal/db/migrations/000031_cross_project_parent_edges.sql
   - internal/store/tasks.go
+  - internal/store/task_update.go
   - internal/wrkqapi/types.go
   - internal/wrkqapi/catview.go
   - internal/wrkqapi/findlistview.go
