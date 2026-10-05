@@ -61,7 +61,7 @@ source:
   - packages/client/src/wrkq/campaign.ts
   - packages/client/src/wrkq/timeline.ts
   - packages/client/src/wrkq/facade.ts
-  - packages/client/test/fake-transport.test.ts
+  - packages/client/test/wrkq-container-facade.test.ts
   - docs/SPEC.md
   - docs/wrkq-wrkf-rpc.md
 required_tests:

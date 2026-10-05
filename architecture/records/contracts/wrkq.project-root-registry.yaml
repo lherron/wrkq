@@ -46,7 +46,7 @@ source:
   - packages/client/src/client.ts
   - packages/client/src/wrkq/facade.ts
   - packages/client/src/wrkq/project.ts
-  - packages/client/test/fake-transport.test.ts
+  - packages/client/test/wrkq-container-facade.test.ts
   - docs/wrkq-wrkf-rpc-client-forward-spec.md
   - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
   - hrcchat#14672
@@ -57,7 +57,7 @@ required_tests:
   - TestProjectRootRegistryMethodIsRegistered
   - TestProjectRootSetRootStaleCASIsAtomic
   - TestProjectRootSetRootCanonicalAttributionAndInvalidIdentityNoOp
-  - bun test packages/client/test/fake-transport.test.ts
+  - bun test packages/client/test/wrkq-container-facade.test.ts
   - T-06366 isolated-DB project-root registry smoke
 last_verified:
   date: 2026-07-14

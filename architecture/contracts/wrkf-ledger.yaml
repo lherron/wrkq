@@ -45,7 +45,7 @@ source:
   - packages/client/src/client.ts
   - internal/workflow/instance_ledger_test.go
   - internal/workrpc/wrkfledger_acceptance_test.go
-  - packages/client/test/fake-transport.test.ts
+  - packages/client/test/wrkf-facade.test.ts
   - docs/wrkq-wrkf-rpc.md
   - architecture/records/risks/wrkq.wrkf-ledger.purge-path-undefined.yaml
   - architecture/records/risks/wrkq.wrkf-ledger.refs-vocabulary-drift.yaml
@@ -56,7 +56,7 @@ required_tests:
   - TestLedgerConcurrentAppendProducesContiguousSequence
   - TestLedgerProjectionPaginatesEqualTimestampWithoutGaps
   - TestWrkfLedgerAppendAndListOverRealRPC
-  - bun test packages/client/test/fake-transport.test.ts
+  - bun test packages/client/test/wrkf-facade.test.ts
   - installed wrkf ledger list --task T-06189 --json plus raw SQLite UPDATE/DELETE smoke
 last_verified:
   date: 2026-07-11

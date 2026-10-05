@@ -97,7 +97,9 @@ source:
   - packages/client/src/wrkq/container.ts
   - packages/client/src/wrkq/project.ts
   - packages/client/src/wrkq/workflow-binding.ts
-  - packages/client/test/fake-transport.test.ts
+  - packages/client/test/error-mapping.test.ts
+  - packages/client/test/wrkq-container-facade.test.ts
+  - packages/client/test/wrkq-workflow-binding.test.ts
   - packages/client/test/remote-locator.integration.test.ts
   - packages/client/test/workflow-template-discontinue-contract.test.ts
   - docs/wrkf-rpc.md                      # explanatory projection (companion)
@@ -136,7 +138,7 @@ required_tests:
   - TestLegacyDirectDBBootstrapCannotRegrow
   - TestEntrypointEquivalence
   - "cd packages/client && bun run typecheck"
-  - "bun test packages/client/test/fake-transport.test.ts"
+  - "bun test packages/client/test/error-mapping.test.ts packages/client/test/wrkq-container-facade.test.ts packages/client/test/wrkq-workflow-binding.test.ts"
   - "bun test packages/client/test/workflow-template-discontinue-contract.test.ts"
   - "packages/client (verify-rpc: client-test + client-integration)"
 last_verified:
