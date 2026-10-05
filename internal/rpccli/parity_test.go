@@ -88,7 +88,7 @@ func TestProductionCommandContract_ReadWriteCommentAttachment(t *testing.T) {
 		}
 	}
 
-	get := runCLIEnv(t, bins.wrkq, dir, []string{"attach", "get", "ATT-00001", "--as", "-"}, attachEnv)
+	get := runCLIEnv(t, bins.wrkq, dir, []string{"attach", "get", "ATT-00001", "--output-file", "-"}, attachEnv)
 	if get.exit != 0 {
 		t.Fatalf("attach-get exit=%d stdout=%q stderr=%q", get.exit, get.stdout, get.stderr)
 	}

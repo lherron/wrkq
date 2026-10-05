@@ -149,7 +149,7 @@ func TestAttachPutRemoteFileUsesByteTransfer(t *testing.T) {
 	// The bytes landed intact in the SERVER's attach dir, and read back whole.
 	getOut, getErr, err := runAttachCLI(t,
 		"--db", remote.locator, "--project", "rpccli-test-proj",
-		"attach", "get", "ATT-00001", "--as", "-",
+		"attach", "get", "ATT-00001", "--output-file", "-",
 	)
 	if err != nil {
 		t.Fatalf("remote attach get: %v\n%s", err, getErr)

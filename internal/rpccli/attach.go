@@ -239,7 +239,7 @@ func newAttachPutCmd() *cobra.Command {
 				"mime_type":     dto.MimeType,
 				"size_bytes":    dto.SizeBytes,
 			}
-			if !isStdoutTTY(cmd.OutOrStdout()) {
+			if jsonOutput(cmd) {
 				return encodeJSONIndent(cmd, out)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Attached: %s (%s, %d bytes)\n", dto.ID, dto.Filename, dto.SizeBytes)
@@ -248,47 +248,48 @@ func newAttachPutCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&mime, "mime", "", "MIME type (auto-detected if not specified)")
 	cmd.Flags().StringVar(&name, "name", "", "Filename (defaults to basename of file)")
+	cmd.Flags().Bool("json", false, "Output JSON")
 	return cmd
 }
 
 // newAttachGetCmd mirrors `wrkq attach get <id>`. Attachment CONTENT is pulled
 // back across the RPC boundary as base64 PROTOCOL DATA (chunked) via
 // wrkq.attachment.getBytes; the mirror decodes each frame and writes the RAW
-// bytes to stdout (default) or `--as <path>`. The server stdout stays
+// bytes to stdout (default) or `--output-file <path>`. The server stdout stays
 // JSON-RPC-pure — raw bytes are emitted only here, post-decode (T-05103,
 // daedalus OPTION 1; invariant wrkq.wrkf-rpc.attachment-byte-transfer).
 func newAttachGetCmd() *cobra.Command {
-	var as string
+	var outputFile string
 	cmd := &cobra.Command{
 		Use:   "get <attachment-id>",
 		Short: "Get an attachment file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAttachGet(cmd, args[0], as)
+			return runAttachGet(cmd, args[0], outputFile)
 		},
 	}
-	cmd.Flags().StringVar(&as, "as", "-", "Output path (use '-' for stdout)")
+	cmd.Flags().StringVarP(&outputFile, "output-file", "o", "-", "Output path (use '-' for stdout)")
 	return cmd
 }
 
 // runAttachGet streams an attachment's bytes via wrkq.attachment.getBytes and
-// writes the decoded content to stdout (`--as -`) or a local file (`--as path`).
+// writes the decoded content to stdout (`-o -`) or a local file (`-o path`).
 // The reassembled bytes are checksum/size-verified against the server metadata.
-func runAttachGet(cmd *cobra.Command, ref, as string) error {
+func runAttachGet(cmd *cobra.Command, ref, outputFile string) error {
 	tr, _, closeFn, err := openMirror(cmd)
 	if err != nil {
 		return err
 	}
 	defer closeFn()
 
-	// Resolve the destination writer. For `--as -` (stdout) write raw bytes
+	// Resolve the destination writer. For `-o -` (stdout) write raw bytes
 	// directly. For a file path, the CLI owns the local write.
 	var dst io.Writer
 	var fileWriter io.Closer
-	if as == "-" {
+	if outputFile == "-" {
 		dst = cmd.OutOrStdout()
 	} else {
-		f, ferr := createLocalFile(as)
+		f, ferr := createLocalFile(outputFile)
 		if ferr != nil {
 			return fmt.Errorf("failed to copy attachment: %w", ferr)
 		}
@@ -377,17 +378,17 @@ func runAttachGet(cmd *cobra.Command, ref, as string) error {
 		return fmt.Errorf("attachment size mismatch: got %d want %d", offset, meta.SizeBytes)
 	}
 
-	if as != "-" {
+	if outputFile != "-" {
 		if !isStdoutTTY(cmd.OutOrStdout()) {
 			return encodeJSONIndent(cmd, map[string]interface{}{
 				"id":       meta.ID,
 				"uuid":     meta.UUID,
 				"filename": meta.Filename,
-				"path":     as,
+				"path":     outputFile,
 				"copied":   true,
 			})
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Copied %s to %s\n", meta.Filename, as)
+		fmt.Fprintf(cmd.OutOrStdout(), "Copied %s to %s\n", meta.Filename, outputFile)
 	}
 	return nil
 }
@@ -493,7 +494,7 @@ func runAttachPutBytes(cmd *cobra.Command, tr Transport, sc *scoper, actor, task
 		"mime_type":     dto.MimeType,
 		"size_bytes":    dto.SizeBytes,
 	}
-	if !isStdoutTTY(cmd.OutOrStdout()) {
+	if jsonOutput(cmd) {
 		return encodeJSONIndent(cmd, out)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Attached: %s (%s, %d bytes)\n", dto.ID, dto.Filename, dto.SizeBytes)
@@ -627,7 +628,7 @@ func newAttachRmCmd() *cobra.Command {
 }
 
 // createLocalFile opens (creating parent dirs) a local destination file for
-// `attach get --as <path>`. The CLI owns the local write; the server never sees
+// `attach get --output-file <path>`. The CLI owns the local write; the server never sees
 // the destination path. Mirrors legacy attach.CopyFile's dst handling.
 func createLocalFile(path string) (*os.File, error) {
 	if dir := filepathDir(path); dir != "" && dir != "." {

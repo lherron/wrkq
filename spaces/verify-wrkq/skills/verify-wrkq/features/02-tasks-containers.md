@@ -63,7 +63,7 @@ wrkq index update && wrkq search alpha --state all --json | jq -c '[.results[].r
 - **`wrkq archive` is for containers only.** `wrkq archive T-00002` fails with `container not found: T-00002`.
   Archive a task with `wrkq rm`.
 - `touch --json` returns an array (`.[0].id`), `cat --json` returns an array unless you pass `--one`, and
-  `mkdir` has no `--json` flag (`unknown flag: --json`, exit 2). It prints JSON when stdout is not a TTY.
+  `mkdir --json` returns an array of `{path, created}`.
 - `wrkq set` prints `Processing 1/1...` on stderr and an `errors/failed/succeeded/total` summary when an item
   fails. Look at the exit code, not only the stdout JSON.
 - Closing a task prints a hint about reconciling worktrees under `~/praesidium/under-construction/`. On a scratch

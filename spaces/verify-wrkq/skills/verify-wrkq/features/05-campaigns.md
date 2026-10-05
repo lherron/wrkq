@@ -16,7 +16,7 @@ member and keeps its own project and path. Code: `internal/rpccli/campaign.go`, 
 - **Membership.** Tasks in the container are resident. `wrkq set <task> --campaign P-<n>` enrolls a task from
   elsewhere, and `wrkq cat` then shows `campaign: {id, path, membership: resident|enrolled}`.
   `wrkq find --campaign P-<n> --state all` lists all members.
-- **Portfolio.** `wrkq campaign portfolio --output json` is the aggregate of every campaign.
+- **Portfolio.** `wrkq campaign portfolio --json` is the aggregate of every campaign.
 - **Rooms.** `wrkc say T-<member>` coalesces to the campaign room (feature 6).
 
 ## How to get to it
@@ -27,20 +27,19 @@ Run `eval "$(wv env <name>)"`, then create a container in the scratch project to
 
 ```bash
 wrkq mkdir /wv-<name>/camp1 && wrkq touch camp1/member-a -t "resident member"
-wrkq campaign convert camp1 --state draft -d "WV campaign brief" --specification "WV spec v1" --output json
-wrkq campaign activate camp1 --output json
+wrkq campaign convert camp1 --state draft -d "WV campaign brief" --specification "WV spec v1" --json
+wrkq campaign activate camp1 --json
 wrkq touch inbox/wv-enrolled -t "enrolled from inbox"
 wrkq set inbox/wv-enrolled --campaign P-<camp1 id> && wrkq cat inbox/wv-enrolled --json --one | jq -c .campaign
 wrkq find --campaign P-<camp1 id> --state all --json | jq -c '[.[] | {id,path}]'
-wrkq campaign portfolio --output json | jq -c '[.. | objects | select(.id? == "P-<camp1 id>")][0] | {id,campaignState}'
-wrkq campaign close P-<camp1 id> --state completed --output json | jq -c '{previousState,campaignState,missingOutcomes}'
+wrkq campaign portfolio --json | jq -c '[.. | objects | select(.id? == "P-<camp1 id>")][0] | {id,campaignState}'
+wrkq campaign close P-<camp1 id> --state completed --json | jq -c '{previousState,campaignState,missingOutcomes}'
 wrkq log P-<camp1 id> --oneline
 ```
 
 ## Gotchas
 
-- **Campaign verbs take `--output json`, not `--json`.** `--json` fails `unknown flag: --json` (exit 2) on
-  `convert`, `activate` and `portfolio` (2026-10-05, T-10298 `05-campaigns/drive.txt`).
+- Campaign verbs take `--json` or `--output json` (both force JSON on a TTY; a non-TTY stdout gets JSON anyway).
 - An unknown `wrkq campaign <verb>` prints the group help instead of an error. `enroll` is not a verb.
   Enrollment is `wrkq set --campaign`.
 - `wrkq stat <container> --json` returns an array, and `wrkq cat P-<n> --json --one` doesn't carry the

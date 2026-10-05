@@ -119,6 +119,18 @@ func writeAckCounts(cmd *cobra.Command, total, acked, skipped int) error {
 	return nil
 }
 
+// jsonOutput reports whether a verb whose human form is TTY-only should emit
+// JSON: --json, --output json, or a non-TTY stdout.
+func jsonOutput(cmd *cobra.Command) bool {
+	if on, _ := cmd.Flags().GetBool("json"); on {
+		return true
+	}
+	if mode, _ := cmd.Flags().GetString("output"); mode == "json" {
+		return true
+	}
+	return !isStdoutTTY(cmd.OutOrStdout())
+}
+
 // isStdoutTTY mirrors internal/cli.isStdoutTTY so output-mode selection matches.
 func isStdoutTTY(w io.Writer) bool {
 	f, ok := w.(*os.File)

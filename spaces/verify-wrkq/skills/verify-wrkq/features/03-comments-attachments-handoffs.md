@@ -42,9 +42,9 @@ wrkq handoff list --scope clod@wv-<name> --json | jq -c '.handoffs'      # []
 - **The attachment path is server-local.** `attach put <task> <path>` makes the **daemon** stat the path. On a
   scratch the daemon is local, so it works. Against the canonical daemon from any node other than mini, pipe the
   file: `put <task> - --name x`.
-- `attach put` has no `--json` flag (`unknown flag`, exit 2). It prints JSON when stdout is not a TTY.
-  `attach ls --json` reports `size` as null. The size is in `put`'s `size_bytes`.
-- `attach get --as <path>` is the output path, and it shadows the global `--as` principal alias on that verb.
+- `attach put --json` (or a non-TTY stdout) prints JSON. `attach ls --json` reports `size` as null. The size is in `put`'s `size_bytes`.
+- `attach get --output-file`/`-o <path>` writes to a file (`-`, the default, is stdout). `--as` on `attach get` is
+  the global principal alias, like every other verb.
 - **A handoff acknowledge resolves the actor from the runtime env first.** In an HRC seat whose project
   (`HRC_SESSION_REF`/`ASP_PROJECT`) differs from the handoff's, it refuses with
   `ambiguous project: runtime scope resolved "<seat project>" but handoff row project_id is "<handoff project>"`.

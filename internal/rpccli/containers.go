@@ -29,6 +29,7 @@ func newMkdirCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&parents, "parents", "p", false, "Create parent containers as needed")
 	cmd.Flags().StringVar(&kind, "kind", "", "Container kind: project, directory, feature, area (default: directory)")
+	cmd.Flags().Bool("json", false, "Output JSON")
 	return refuseRepeatedFlags(cmd)
 }
 
@@ -220,7 +221,7 @@ func runMkdir(cmd *cobra.Command, args []string, kind string) error {
 		results = append(results, map[string]interface{}{"path": path, "created": true})
 	}
 
-	if isStdoutTTY(cmd.OutOrStdout()) {
+	if !jsonOutput(cmd) {
 		for _, r := range results {
 			fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", r["path"])
 		}

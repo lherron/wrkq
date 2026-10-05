@@ -83,6 +83,7 @@ func newCampaignConvertCmd() *cobra.Command {
 	cmd.Flags().StringVar(&labels, "labels", "", "Campaign labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
 	cmd.Flags().StringVar(&state, "state", "active", "Initial campaign state: draft or active")
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Only convert if the container etag matches")
+	cmd.Flags().Bool("json", false, "Output JSON")
 	return refuseRepeatedFlags(cmd)
 }
 
@@ -100,6 +101,7 @@ func newCampaignActivateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Only activate if the campaign etag matches")
+	cmd.Flags().Bool("json", false, "Output JSON")
 	return cmd
 }
 
@@ -134,6 +136,7 @@ edit. Use a kind=decision container comment for curated amendment rationale.`,
 	cmd.Flags().StringVar(&specification, "specification", "", "Campaign specification (literal, @file, or - for stdin; empty clears)")
 	cmd.Flags().StringVar(&labels, "labels", "", "Campaign labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Only edit if the container etag matches")
+	cmd.Flags().Bool("json", false, "Output JSON")
 	return refuseRepeatedFlags(cmd)
 }
 
@@ -163,6 +166,7 @@ wholesale abandonment and leaves open members unchanged.`,
 	}
 	cmd.Flags().StringVar(&state, "state", "", "Terminal campaign state: completed or cancelled")
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Only close if the container etag matches")
+	cmd.Flags().Bool("json", false, "Output JSON")
 	return refuseRepeatedFlags(cmd)
 }
 
@@ -237,7 +241,7 @@ func runCampaignContentMutation(
 	if err := json.Unmarshal(raw, &container); err != nil {
 		return err
 	}
-	if !isStdoutTTY(cmd.OutOrStdout()) {
+	if jsonOutput(cmd) {
 		return encodeJSONIndent(cmd, container)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Updated campaign content: %s\n", container.Path)
@@ -317,7 +321,7 @@ func newCampaignPortfolioCmd() *cobra.Command {
 			if err != nil {
 				return errors.New(rpcMessage(err))
 			}
-			if !isStdoutTTY(cmd.OutOrStdout()) {
+			if jsonOutput(cmd) {
 				return writeTimelineJSON(cmd.OutOrStdout(), raw)
 			}
 			var result campaignPortfolioResult
@@ -339,11 +343,12 @@ func newCampaignPortfolioCmd() *cobra.Command {
 	}
 	cmd.Flags().StringSliceVar(&states, "state", nil, "Campaign states to include (repeatable or comma-separated)")
 	cmd.Flags().BoolVar(&includeArchived, "include-archived", false, "Include archived campaign containers")
+	cmd.Flags().Bool("json", false, "Output JSON")
 	return cmd
 }
 
 func renderCampaignTransition(cmd *cobra.Command, result campaignTransitionResult, action string) error {
-	if !isStdoutTTY(cmd.OutOrStdout()) {
+	if jsonOutput(cmd) {
 		return encodeJSONIndent(cmd, result)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "%s: %s (%s)\n", action, result.Container.Path, result.CampaignState)
