@@ -1,0 +1,6 @@
+# False positive: test fixture idempotency-key constant in TestTransitionIdempotencyMismatch, not a credential
+0c87ad00cd8e59b393db18033ae890e189f1f3d4:internal/workflow/transition_cas_test.go:generic-api-key:393
+# False positive: throwaway bearer token for an ephemeral loopback wrkqd started by the smoke script itself
+1ec45e313fd934b2c22ef3007f8678e9fb95f9e0:test/smoke-wrkf-rpc.sh:curl-auth-header:562
+# False positive: throwaway bearer token for an ephemeral loopback wrkqd started by the smoke script itself
+1ec45e313fd934b2c22ef3007f8678e9fb95f9e0:test/smoke-wrkf-rpc.sh:curl-auth-header:567
