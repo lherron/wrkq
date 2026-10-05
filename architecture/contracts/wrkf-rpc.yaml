@@ -69,7 +69,7 @@ source:
   - internal/workrpc/container_task_counts_test.go
   - internal/workrpc/schema.go
   - internal/workrpc/schema_test.go
-  - internal/workrpc/wrkqapi_acceptance_test.go
+  - internal/workrpc/wrkqapi_task_workflow_acceptance_test.go
   - internal/wrkqapi/container_task_counts.go
   - internal/wrkqapi/container_task_counts_test.go
   - internal/wrkqapi/projectroots.go

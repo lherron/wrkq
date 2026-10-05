@@ -18,7 +18,7 @@ package workrpc_test
 //     no instanceId field; no dual-selector pre-mutation guard.
 //
 // All tests drive through the REAL workrpc server (go run ./cmd/wrkf rpc --stdio)
-// exactly as wrkqapi_acceptance_test.go does.
+// exactly as the wrkqapi_*_acceptance_test.go files do.
 // Do NOT set WRKQ_ACTOR in the environment when running these locally.
 
 import (
