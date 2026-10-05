@@ -208,7 +208,8 @@
             "available": true,
             "flags": [
               {
-                "name": "as",
+                "name": "output-file",
+                "shorthand": "o",
                 "usage": "Output path (use '-' for stdout)",
                 "type": "string",
                 "default": "-",
@@ -267,6 +268,13 @@
             "available": true,
             "flags": [
               {
+                "name": "json",
+                "usage": "Output JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
                 "name": "mime",
                 "usage": "MIME type (auto-detected if not specified)",
                 "type": "string",
@@ -318,6 +326,13 @@
                 "type": "int64",
                 "default": "0",
                 "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
               }
             ]
           },
@@ -333,6 +348,13 @@
                 "usage": "Only close if the container etag matches",
                 "type": "int64",
                 "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output JSON",
+                "type": "bool",
+                "default": "false",
                 "hidden": false
               },
               {
@@ -362,6 +384,13 @@
                 "usage": "Only convert if the container etag matches",
                 "type": "int64",
                 "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output JSON",
+                "type": "bool",
+                "default": "false",
                 "hidden": false
               },
               {
@@ -407,6 +436,13 @@
                 "hidden": false
               },
               {
+                "name": "json",
+                "usage": "Output JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
                 "name": "labels",
                 "usage": "Campaign labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)",
                 "type": "string",
@@ -430,6 +466,13 @@
               {
                 "name": "include-archived",
                 "usage": "Include archived campaign containers",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output JSON",
                 "type": "bool",
                 "default": "false",
                 "hidden": false
@@ -1906,6 +1949,13 @@
         "hidden": false,
         "available": true,
         "flags": [
+          {
+            "name": "json",
+            "usage": "Output JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": false
+          },
           {
             "name": "kind",
             "usage": "Container kind: project, directory, feature, area (default: directory)",
