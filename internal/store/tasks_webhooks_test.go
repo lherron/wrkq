@@ -1,1089 +1,199 @@
 package store
 
 import (
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/lherron/wrkq/internal/db"
-	"github.com/lherron/wrkq/internal/webhooks"
 )
-
-func setupWebhookTestDB(t *testing.T) *db.DB {
-	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "test.db")
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	if err := database.Migrate(); err != nil {
-		t.Fatalf("failed to migrate db: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	return database
-}
-
-func setupWebhookTestActor(t *testing.T, database *db.DB) string {
-	t.Helper()
-	result, err := database.Exec(`
-		INSERT INTO actors (id, slug, role) VALUES ('', 'test-actor', 'human')
-	`)
-	if err != nil {
-		t.Fatalf("failed to create test actor: %v", err)
-	}
-	rowID, _ := result.LastInsertId()
-	var uuid string
-	if err := database.QueryRow("SELECT uuid FROM actors WHERE rowid = ?", rowID).Scan(&uuid); err != nil {
-		t.Fatalf("failed to get actor uuid: %v", err)
-	}
-	return uuid
-}
 
 func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 	t.Setenv("WRKQ_CAUSATION_REF", "  jrun_parent_123  ")
-
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
-
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
-	}
-
+	f := newWebhookFixture(t)
+	container := f.project("project")
 	meta := `{"triage_status":"queued"}`
-	result, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "task",
-		Title:       "Task",
-		Description: "Test",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-		Meta:        &meta,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task: %v", err)
+	result := f.task(container, "task", "open", func(p *CreateParams) { p.Meta = &meta })
+	calls := f.captureWebhooks(container, "/hook/{ticket_id}", "ftp://invalid")
+
+	f.update(result, map[string]interface{}{"state": "in_progress"})
+
+	got := receiveWebhook(t, calls, 2*time.Second)
+	if expectedPath := "/hook/" + result.ID; got.path != expectedPath {
+		t.Fatalf("unexpected path: %s (expected %s)", got.path, expectedPath)
 	}
-
-	calls := make(chan struct {
-		path    string
-		payload webhooks.Payload
-	}, 1)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		_ = json.Unmarshal(body, &payload)
-		calls <- struct {
-			path    string
-			payload webhooks.Payload
-		}{path: r.URL.Path, payload: payload}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook/{ticket_id}", "ftp://invalid"})
-	_, err = s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0)
-	if err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
+	payload := got.payload
+	if payload.TicketID != result.ID {
+		t.Fatalf("unexpected ticket_id: %s", payload.TicketID)
 	}
-
-	if _, err := s.Tasks.UpdateFields(actorUUID, result.UUID, map[string]interface{}{"state": "in_progress"}, 0); err != nil {
-		t.Fatalf("failed to update task: %v", err)
+	if payload.TicketUUID != result.UUID {
+		t.Fatalf("unexpected ticket_uuid: %s", payload.TicketUUID)
 	}
-
-	select {
-	case got := <-calls:
-		expectedPath := "/hook/" + result.ID
-		if got.path != expectedPath {
-			t.Fatalf("unexpected path: %s (expected %s)", got.path, expectedPath)
-		}
-		if got.payload.TicketID != result.ID {
-			t.Fatalf("unexpected ticket_id: %s", got.payload.TicketID)
-		}
-		if got.payload.TicketUUID != result.UUID {
-			t.Fatalf("unexpected ticket_uuid: %s", got.payload.TicketUUID)
-		}
-		if got.payload.ProjectID != container.ID {
-			t.Fatalf("unexpected project_id: %s", got.payload.ProjectID)
-		}
-		if got.payload.ProjectUUID != container.UUID {
-			t.Fatalf("unexpected project_uuid: %s", got.payload.ProjectUUID)
-		}
-		if got.payload.State != "in_progress" {
-			t.Fatalf("unexpected state: %s", got.payload.State)
-		}
-		if got.payload.Priority != 2 {
-			t.Fatalf("unexpected priority: %d", got.payload.Priority)
-		}
-		if got.payload.Kind != "task" {
-			t.Fatalf("unexpected kind: %s", got.payload.Kind)
-		}
-		if string(got.payload.Meta) == "" || string(got.payload.Meta) == "null" {
-			t.Fatalf("unexpected meta payload: %s", string(got.payload.Meta))
-		}
-		if got.payload.ETag != 3 {
-			t.Fatalf("unexpected etag: %d", got.payload.ETag)
-		}
-		if got.payload.Resolution != nil {
-			t.Fatalf("unexpected resolution: %s", *got.payload.Resolution)
-		}
-		if got.payload.SchemaVersion != 2 {
-			t.Fatalf("unexpected schema_version: %d", got.payload.SchemaVersion)
-		}
-		if got.payload.Event != "updated" {
-			t.Fatalf("unexpected event: %s", got.payload.Event)
-		}
-		if got.payload.EventID == "" || got.payload.EventSeq == 0 || got.payload.OccurredAt == "" {
-			t.Fatalf("missing event identity fields: %+v", got.payload)
-		}
-		// Principal-only: origin.actor is now the bare principal ref (agent:<id>),
-		// not the legacy role:slug derived from the actors table.
-		if got.payload.Origin.Actor != "agent:"+actorUUID || got.payload.Origin.Via != "cli" {
-			t.Fatalf("unexpected origin: %+v", got.payload.Origin)
-		}
-		if got.payload.Origin.RunID != nil {
-			t.Fatalf("origin.run_id must remain untouched, got %q", *got.payload.Origin.RunID)
-		}
-		if got.payload.Origin.CausationRef == nil || *got.payload.Origin.CausationRef != "jrun_parent_123" {
-			t.Fatalf("origin.causation_ref: want jrun_parent_123, got %+v", got.payload.Origin.CausationRef)
-		}
-		if got.payload.ProjectScopeID != "project" || got.payload.ContainerPath != "project" {
-			t.Fatalf("unexpected scope/container: %s / %s", got.payload.ProjectScopeID, got.payload.ContainerPath)
-		}
-		if got.payload.Transition == nil || got.payload.Transition.From == nil || *got.payload.Transition.From != "open" ||
-			got.payload.Transition.To == nil || *got.payload.Transition.To != "in_progress" {
-			t.Fatalf("unexpected transition: %+v", got.payload.Transition)
-		}
-		if len(got.payload.Changed) != 1 || got.payload.Changed[0] != "state" {
-			t.Fatalf("unexpected changed: %+v", got.payload.Changed)
-		}
-		if change, ok := got.payload.Changes["state"]; !ok || change.From != "open" || change.To != "in_progress" {
-			t.Fatalf("unexpected state change: %+v", got.payload.Changes["state"])
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for webhook")
+	if payload.ProjectID != container.ID {
+		t.Fatalf("unexpected project_id: %s", payload.ProjectID)
+	}
+	if payload.ProjectUUID != container.UUID {
+		t.Fatalf("unexpected project_uuid: %s", payload.ProjectUUID)
+	}
+	if payload.State != "in_progress" {
+		t.Fatalf("unexpected state: %s", payload.State)
+	}
+	if payload.Priority != 2 {
+		t.Fatalf("unexpected priority: %d", payload.Priority)
+	}
+	if payload.Kind != "task" {
+		t.Fatalf("unexpected kind: %s", payload.Kind)
+	}
+	if string(payload.Meta) == "" || string(payload.Meta) == "null" {
+		t.Fatalf("unexpected meta payload: %s", string(payload.Meta))
+	}
+	if payload.ETag != 3 {
+		t.Fatalf("unexpected etag: %d", payload.ETag)
+	}
+	if payload.Resolution != nil {
+		t.Fatalf("unexpected resolution: %s", *payload.Resolution)
+	}
+	if payload.SchemaVersion != 2 {
+		t.Fatalf("unexpected schema_version: %d", payload.SchemaVersion)
+	}
+	if payload.Event != "updated" {
+		t.Fatalf("unexpected event: %s", payload.Event)
+	}
+	if payload.EventID == "" || payload.EventSeq == 0 || payload.OccurredAt == "" {
+		t.Fatalf("missing event identity fields: %+v", payload)
+	}
+	// Principal-only: origin.actor is now the bare principal ref (agent:<id>),
+	// not the legacy role:slug derived from the actors table.
+	if payload.Origin.Actor != "agent:"+f.actor || payload.Origin.Via != "cli" {
+		t.Fatalf("unexpected origin: %+v", payload.Origin)
+	}
+	if payload.Origin.RunID != nil {
+		t.Fatalf("origin.run_id must remain untouched, got %q", *payload.Origin.RunID)
+	}
+	if payload.Origin.CausationRef == nil || *payload.Origin.CausationRef != "jrun_parent_123" {
+		t.Fatalf("origin.causation_ref: want jrun_parent_123, got %+v", payload.Origin.CausationRef)
+	}
+	if payload.ProjectScopeID != "project" || payload.ContainerPath != "project" {
+		t.Fatalf("unexpected scope/container: %s / %s", payload.ProjectScopeID, payload.ContainerPath)
+	}
+	if payload.Transition == nil || payload.Transition.From == nil || *payload.Transition.From != "open" ||
+		payload.Transition.To == nil || *payload.Transition.To != "in_progress" {
+		t.Fatalf("unexpected transition: %+v", payload.Transition)
+	}
+	if len(payload.Changed) != 1 || payload.Changed[0] != "state" {
+		t.Fatalf("unexpected changed: %+v", payload.Changed)
+	}
+	if change, ok := payload.Changes["state"]; !ok || change.From != "open" || change.To != "in_progress" {
+		t.Fatalf("unexpected state change: %+v", payload.Changes["state"])
 	}
 }
 
 func TestTaskStoreCreateDispatchesWebhookV2(t *testing.T) {
-	previousCausationRef, hadCausationRef := os.LookupEnv("WRKQ_CAUSATION_REF")
+	t.Setenv("WRKQ_CAUSATION_REF", "") // restored after the test
 	if err := os.Unsetenv("WRKQ_CAUSATION_REF"); err != nil {
 		t.Fatalf("unset WRKQ_CAUSATION_REF: %v", err)
 	}
-	t.Cleanup(func() {
-		if hadCausationRef {
-			_ = os.Setenv("WRKQ_CAUSATION_REF", previousCausationRef)
-		} else {
-			_ = os.Unsetenv("WRKQ_CAUSATION_REF")
-		}
-	})
+	f := newWebhookFixture(t)
+	container := f.project("project")
+	calls := f.captureWebhooks(container, "/hook")
 
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
+	result := f.task(container, "task", "open", func(p *CreateParams) { p.Labels = `["alpha","beta"]` })
 
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
+	payload := receiveWebhook(t, calls, 2*time.Second).payload
+	if payload.TicketUUID != result.UUID || payload.Event != "created" || payload.SchemaVersion != 2 {
+		t.Fatalf("unexpected create payload: %+v", payload)
 	}
-
-	calls := make(chan webhooks.Payload, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		_ = json.Unmarshal(body, &payload)
-		calls <- payload
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
-	if _, err := s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0); err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
+	if payload.EventID == "" || payload.EventSeq == 0 || payload.OccurredAt == "" {
+		t.Fatalf("missing event identity: %+v", payload)
 	}
-
-	result, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "task",
-		Title:       "Task",
-		Description: "Test",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-		Labels:      `["alpha","beta"]`,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task: %v", err)
+	if payload.Transition == nil || payload.Transition.From != nil || payload.Transition.To == nil || *payload.Transition.To != "open" {
+		t.Fatalf("unexpected create transition: %+v", payload.Transition)
 	}
-
-	select {
-	case payload := <-calls:
-		if payload.TicketUUID != result.UUID || payload.Event != "created" || payload.SchemaVersion != 2 {
-			t.Fatalf("unexpected create payload: %+v", payload)
-		}
-		if payload.EventID == "" || payload.EventSeq == 0 || payload.OccurredAt == "" {
-			t.Fatalf("missing event identity: %+v", payload)
-		}
-		if payload.Transition == nil || payload.Transition.From != nil || payload.Transition.To == nil || *payload.Transition.To != "open" {
-			t.Fatalf("unexpected create transition: %+v", payload.Transition)
-		}
-		if len(payload.Labels) != 2 || payload.Labels[0] != "alpha" || payload.Labels[1] != "beta" {
-			t.Fatalf("unexpected labels: %+v", payload.Labels)
-		}
-		if payload.Origin.CausationRef != nil {
-			t.Fatalf("origin.causation_ref must be absent when WRKQ_CAUSATION_REF is unset, got %+v", payload.Origin.CausationRef)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for webhook")
+	if len(payload.Labels) != 2 || payload.Labels[0] != "alpha" || payload.Labels[1] != "beta" {
+		t.Fatalf("unexpected labels: %+v", payload.Labels)
+	}
+	if payload.Origin.CausationRef != nil {
+		t.Fatalf("origin.causation_ref must be absent when WRKQ_CAUSATION_REF is unset, got %+v", payload.Origin.CausationRef)
 	}
 }
 
 func TestTaskStoreCreateWebhookExposesNeedsSmoketestLabelEdge(t *testing.T) {
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
+	f := newWebhookFixture(t)
+	container := f.project("project")
+	calls := f.captureWebhooks(container, "/hook")
 
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
+	task := f.task(container, "created-needs-smoketest", "open", func(p *CreateParams) { p.Labels = `["needs_smoketest","ui"]` })
+
+	payload := receiveWebhook(t, calls, 2*time.Second).payload
+	if payload.TicketUUID != task.UUID || payload.Event != "created" {
+		t.Fatalf("unexpected create payload: %+v", payload)
 	}
-
-	calls := make(chan webhooks.Payload, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		_ = json.Unmarshal(body, &payload)
-		calls <- payload
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
-	if _, err := s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0); err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
+	if !webhookLabelsContainStrings(payload.Labels, "needs_smoketest") {
+		t.Fatalf("top-level labels missing needs_smoketest: %+v", payload.Labels)
 	}
-
-	task, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "created-needs-smoketest",
-		Title:       "Created needs smoketest",
-		Description: "Test",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-		Labels:      `["needs_smoketest","ui"]`,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task: %v", err)
+	change, ok := payload.Changes["labels"]
+	if !ok {
+		t.Fatalf("missing labels change: %+v", payload.Changes)
 	}
-
-	select {
-	case payload := <-calls:
-		if payload.TicketUUID != task.UUID || payload.Event != "created" {
-			t.Fatalf("unexpected create payload: %+v", payload)
-		}
-		if !webhookLabelsContainStrings(payload.Labels, "needs_smoketest") {
-			t.Fatalf("top-level labels missing needs_smoketest: %+v", payload.Labels)
-		}
-		change, ok := payload.Changes["labels"]
-		if !ok {
-			t.Fatalf("missing labels change: %+v", payload.Changes)
-		}
-		if change.From != nil {
-			t.Fatalf("labels from = %+v, want nil for create", change.From)
-		}
-		toLabels := webhookChangeLabels(t, change.To)
-		if !webhookLabelsContainInterfaces(toLabels, "needs_smoketest") {
-			t.Fatalf("labels to missing needs_smoketest: %+v", toLabels)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for webhook")
+	if change.From != nil {
+		t.Fatalf("labels from = %+v, want nil for create", change.From)
+	}
+	if toLabels := webhookChangeLabels(t, change.To); !webhookLabelsContainInterfaces(toLabels, "needs_smoketest") {
+		t.Fatalf("labels to missing needs_smoketest: %+v", toLabels)
 	}
 }
 
 func TestTaskStoreUpdateWebhookExposesNeedsSmoketestLabelAdditionEdge(t *testing.T) {
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
+	f := newWebhookFixture(t)
+	container := f.project("project")
+	task := f.task(container, "updated-needs-smoketest", "open", func(p *CreateParams) { p.Labels = `["ui"]` })
+	calls := f.captureWebhooks(container, "/hook")
 
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
+	f.update(task, map[string]interface{}{"labels": `["ui","needs_smoketest"]`})
+
+	payload := receiveWebhook(t, calls, 2*time.Second).payload
+	if payload.TicketUUID != task.UUID || payload.Event != "updated" {
+		t.Fatalf("unexpected update payload: %+v", payload)
 	}
-
-	task, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "updated-needs-smoketest",
-		Title:       "Updated needs smoketest",
-		Description: "Test",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-		Labels:      `["ui"]`,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task: %v", err)
+	if len(payload.Changed) != 1 || payload.Changed[0] != "labels" {
+		t.Fatalf("changed = %+v, want [labels]", payload.Changed)
 	}
-
-	calls := make(chan webhooks.Payload, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		_ = json.Unmarshal(body, &payload)
-		calls <- payload
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
-	if _, err := s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0); err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
+	if !webhookLabelsContainStrings(payload.Labels, "needs_smoketest") {
+		t.Fatalf("top-level labels missing needs_smoketest: %+v", payload.Labels)
 	}
-
-	if _, err := s.Tasks.UpdateFields(actorUUID, task.UUID, map[string]interface{}{"labels": `["ui","needs_smoketest"]`}, 0); err != nil {
-		t.Fatalf("failed to update labels: %v", err)
+	change, ok := payload.Changes["labels"]
+	if !ok {
+		t.Fatalf("missing labels change: %+v", payload.Changes)
 	}
-
-	select {
-	case payload := <-calls:
-		if payload.TicketUUID != task.UUID || payload.Event != "updated" {
-			t.Fatalf("unexpected update payload: %+v", payload)
-		}
-		if len(payload.Changed) != 1 || payload.Changed[0] != "labels" {
-			t.Fatalf("changed = %+v, want [labels]", payload.Changed)
-		}
-		if !webhookLabelsContainStrings(payload.Labels, "needs_smoketest") {
-			t.Fatalf("top-level labels missing needs_smoketest: %+v", payload.Labels)
-		}
-		change, ok := payload.Changes["labels"]
-		if !ok {
-			t.Fatalf("missing labels change: %+v", payload.Changes)
-		}
-		fromLabels := webhookChangeLabels(t, change.From)
-		toLabels := webhookChangeLabels(t, change.To)
-		if webhookLabelsContainInterfaces(fromLabels, "needs_smoketest") {
-			t.Fatalf("labels from should not contain needs_smoketest: %+v", fromLabels)
-		}
-		if !webhookLabelsContainInterfaces(toLabels, "needs_smoketest") {
-			t.Fatalf("labels to missing needs_smoketest: %+v", toLabels)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for webhook")
+	if fromLabels := webhookChangeLabels(t, change.From); webhookLabelsContainInterfaces(fromLabels, "needs_smoketest") {
+		t.Fatalf("labels from should not contain needs_smoketest: %+v", fromLabels)
+	}
+	if toLabels := webhookChangeLabels(t, change.To); !webhookLabelsContainInterfaces(toLabels, "needs_smoketest") {
+		t.Fatalf("labels to missing needs_smoketest: %+v", toLabels)
 	}
 }
 
 func TestTaskStoreMoveDispatchesWebhookV2(t *testing.T) {
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
+	f := newWebhookFixture(t)
+	source := f.project("source")
+	dest := f.project("dest")
+	task := f.task(source, "task", "open")
+	calls := f.captureWebhooks(dest, "/hook")
 
-	source, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "source", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create source: %v", err)
-	}
-	dest, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "dest", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create dest: %v", err)
-	}
-
-	task, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "task",
-		Title:       "Task",
-		Description: "Test",
-		ProjectUUID: source.UUID,
-		State:       "open",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task: %v", err)
-	}
-
-	calls := make(chan webhooks.Payload, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		_ = json.Unmarshal(body, &payload)
-		calls <- payload
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
-	if _, err := s.Containers.UpdateFields(actorUUID, dest.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0); err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
-	}
-
-	if _, err := s.Tasks.Move(actorUUID, task.UUID, dest.UUID, 0); err != nil {
+	if _, err := f.s.Tasks.Move(f.actor, task.UUID, dest.UUID, 0); err != nil {
 		t.Fatalf("failed to move task: %v", err)
 	}
 
-	select {
-	case payload := <-calls:
-		if payload.Event != "moved" {
-			t.Fatalf("unexpected move event: %s", payload.Event)
-		}
-		if payload.ProjectScopeID != "dest" || payload.ContainerPath != "dest" {
-			t.Fatalf("unexpected moved scope/container: %s / %s", payload.ProjectScopeID, payload.ContainerPath)
-		}
-		if payload.Transition != nil {
-			t.Fatalf("move should not report a state transition: %+v", payload.Transition)
-		}
-		if len(payload.Changed) != 2 || payload.Changed[0] != "container_path" || payload.Changed[1] != "project_uuid" {
-			t.Fatalf("unexpected changed fields: %+v", payload.Changed)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for move webhook")
+	payload := receiveWebhook(t, calls, 2*time.Second).payload
+	if payload.Event != "moved" {
+		t.Fatalf("unexpected move event: %s", payload.Event)
 	}
-}
-
-func TestUnblockWebhookSingleBlocker(t *testing.T) {
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
-
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
+	if payload.ProjectScopeID != "dest" || payload.ContainerPath != "dest" {
+		t.Fatalf("unexpected moved scope/container: %s / %s", payload.ProjectScopeID, payload.ContainerPath)
 	}
-
-	// Create task A (the blocker)
-	taskA, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker-task",
-		Title:       "Blocker Task",
-		Description: "This task blocks another",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task A: %v", err)
+	if payload.Transition != nil {
+		t.Fatalf("move should not report a state transition: %+v", payload.Transition)
 	}
-
-	// Create task B (blocked by A)
-	taskB, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocked-task",
-		Title:       "Blocked Task",
-		Description: "This task is blocked by task A",
-		ProjectUUID: container.UUID,
-		State:       "blocked",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task B: %v", err)
-	}
-
-	// Create blocking relation: A blocks B
-	_, err = database.Exec(`
-		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
-		VALUES (?, ?, 'blocks', ?)
-	`, taskA.UUID, taskB.UUID, actorUUID)
-	if err != nil {
-		t.Fatalf("failed to create blocking relation: %v", err)
-	}
-
-	// Set up webhook server to capture calls
-	calls := make(chan struct {
-		path    string
-		payload webhooks.Payload
-	}, 10) // Buffer for multiple webhooks
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		_ = json.Unmarshal(body, &payload)
-		calls <- struct {
-			path    string
-			payload webhooks.Payload
-		}{path: r.URL.Path, payload: payload}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	// Configure webhooks on the container
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook/{ticket_id}"})
-	_, err = s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0)
-	if err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
-	}
-
-	// Complete task A - this should trigger webhooks for both A and B
-	if _, err := s.Tasks.UpdateFields(actorUUID, taskA.UUID, map[string]interface{}{"state": "completed"}, 0); err != nil {
-		t.Fatalf("failed to complete task A: %v", err)
-	}
-
-	// Collect all webhook calls (expect 2: one for A, one for B)
-	receivedWebhooks := make(map[string]webhooks.Payload)
-	timeout := time.After(3 * time.Second)
-
-	for i := 0; i < 2; i++ {
-		select {
-		case got := <-calls:
-			receivedWebhooks[got.payload.TicketUUID] = got.payload
-		case <-timeout:
-			t.Fatalf("timed out waiting for webhook %d, received %d so far", i+1, len(receivedWebhooks))
-		}
-	}
-
-	// Verify we got webhook for task A (the completed task)
-	if payload, ok := receivedWebhooks[taskA.UUID]; !ok {
-		t.Fatalf("did not receive webhook for completed task A")
-	} else if payload.State != "completed" {
-		t.Fatalf("task A webhook has wrong state: %s (expected completed)", payload.State)
-	}
-
-	// Verify we got webhook for task B (the unblocked task)
-	if _, ok := receivedWebhooks[taskB.UUID]; !ok {
-		t.Fatalf("did not receive webhook for unblocked task B")
-	} else if payload := receivedWebhooks[taskB.UUID]; payload.Event != "unblocked" {
-		t.Fatalf("unblocked task webhook has wrong event: %s", payload.Event)
-	} else if payload.Transition != nil {
-		t.Fatalf("unblocked task should not report a state transition: %+v", payload.Transition)
-	} else if payload.EventID == "" || payload.EventSeq == 0 {
-		t.Fatalf("unblocked task missing event identity: %+v", payload)
-	} else if len(payload.Changed) != 1 || payload.Changed[0] != "blocked_by" {
-		t.Fatalf("unblocked task changed fields = %+v", payload.Changed)
-	}
-}
-
-func TestUnblockWebhookMultipleBlockers(t *testing.T) {
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
-
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
-	}
-
-	// Create task A1 (first blocker)
-	taskA1, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker-1",
-		Title:       "Blocker 1",
-		Description: "First blocker",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task A1: %v", err)
-	}
-
-	// Create task A2 (second blocker)
-	taskA2, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker-2",
-		Title:       "Blocker 2",
-		Description: "Second blocker",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task A2: %v", err)
-	}
-
-	// Create task B (blocked by both A1 and A2)
-	taskB, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocked-task",
-		Title:       "Blocked Task",
-		Description: "Blocked by two tasks",
-		ProjectUUID: container.UUID,
-		State:       "blocked",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task B: %v", err)
-	}
-
-	// Create blocking relations: A1 blocks B, A2 blocks B
-	_, err = database.Exec(`
-		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
-		VALUES (?, ?, 'blocks', ?), (?, ?, 'blocks', ?)
-	`, taskA1.UUID, taskB.UUID, actorUUID, taskA2.UUID, taskB.UUID, actorUUID)
-	if err != nil {
-		t.Fatalf("failed to create blocking relations: %v", err)
-	}
-
-	// Set up webhook server
-	calls := make(chan struct {
-		path    string
-		payload webhooks.Payload
-	}, 10)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		_ = json.Unmarshal(body, &payload)
-		calls <- struct {
-			path    string
-			payload webhooks.Payload
-		}{path: r.URL.Path, payload: payload}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook/{ticket_id}"})
-	_, err = s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0)
-	if err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
-	}
-
-	// Complete task A1 - task B should NOT be unblocked yet (A2 still blocks it)
-	if _, err := s.Tasks.UpdateFields(actorUUID, taskA1.UUID, map[string]interface{}{"state": "completed"}, 0); err != nil {
-		t.Fatalf("failed to complete task A1: %v", err)
-	}
-
-	// Should only get 1 webhook (for A1)
-	select {
-	case got := <-calls:
-		if got.payload.TicketUUID != taskA1.UUID {
-			t.Fatalf("expected webhook for A1, got %s", got.payload.TicketUUID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for A1 webhook")
-	}
-
-	// Make sure no additional webhook came (B should still be blocked)
-	select {
-	case got := <-calls:
-		t.Fatalf("unexpected webhook received for %s (B should still be blocked)", got.payload.TicketUUID)
-	case <-time.After(500 * time.Millisecond):
-		// Good - no extra webhook
-	}
-
-	// Complete task A2 - now B should be unblocked
-	if _, err := s.Tasks.UpdateFields(actorUUID, taskA2.UUID, map[string]interface{}{"state": "completed"}, 0); err != nil {
-		t.Fatalf("failed to complete task A2: %v", err)
-	}
-
-	// Should get 2 webhooks (for A2 and for B)
-	receivedWebhooks := make(map[string]bool)
-	for i := 0; i < 2; i++ {
-		select {
-		case got := <-calls:
-			receivedWebhooks[got.payload.TicketUUID] = true
-		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for webhook %d", i+1)
-		}
-	}
-
-	if !receivedWebhooks[taskA2.UUID] {
-		t.Fatalf("did not receive webhook for completed task A2")
-	}
-	if !receivedWebhooks[taskB.UUID] {
-		t.Fatalf("did not receive webhook for unblocked task B")
-	}
-}
-
-func TestUnblockWebhookCancelledState(t *testing.T) {
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
-
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
-	}
-
-	// Create blocker task
-	blocker, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker",
-		Title:       "Blocker",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create blocker: %v", err)
-	}
-
-	// Create blocked task
-	blocked, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocked",
-		Title:       "Blocked",
-		ProjectUUID: container.UUID,
-		State:       "blocked",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create blocked task: %v", err)
-	}
-
-	// Create blocking relation
-	_, err = database.Exec(`
-		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
-		VALUES (?, ?, 'blocks', ?)
-	`, blocker.UUID, blocked.UUID, actorUUID)
-	if err != nil {
-		t.Fatalf("failed to create blocking relation: %v", err)
-	}
-
-	// Set up webhook server
-	calls := make(chan webhooks.Payload, 10)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		_ = json.Unmarshal(body, &payload)
-		calls <- payload
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
-	_, err = s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0)
-	if err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
-	}
-
-	// Cancel the blocker (should also unblock the blocked task)
-	if _, err := s.Tasks.UpdateFields(actorUUID, blocker.UUID, map[string]interface{}{"state": "cancelled"}, 0); err != nil {
-		t.Fatalf("failed to cancel blocker: %v", err)
-	}
-
-	// Should get 2 webhooks
-	receivedUUIDs := make(map[string]bool)
-	for i := 0; i < 2; i++ {
-		select {
-		case got := <-calls:
-			receivedUUIDs[got.TicketUUID] = true
-		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for webhook %d", i+1)
-		}
-	}
-
-	if !receivedUUIDs[blocker.UUID] {
-		t.Fatalf("did not receive webhook for cancelled blocker")
-	}
-	if !receivedUUIDs[blocked.UUID] {
-		t.Fatalf("did not receive webhook for unblocked task")
-	}
-}
-
-func TestNoUnblockWebhookWhenAlreadyCompleted(t *testing.T) {
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
-
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
-	}
-
-	// Create blocker task that's already completed
-	blocker, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker",
-		Title:       "Blocker",
-		ProjectUUID: container.UUID,
-		State:       "completed",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create blocker: %v", err)
-	}
-
-	// Create blocked task
-	blocked, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocked",
-		Title:       "Blocked",
-		ProjectUUID: container.UUID,
-		State:       "blocked",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create blocked task: %v", err)
-	}
-
-	// Create blocking relation
-	_, err = database.Exec(`
-		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
-		VALUES (?, ?, 'blocks', ?)
-	`, blocker.UUID, blocked.UUID, actorUUID)
-	if err != nil {
-		t.Fatalf("failed to create blocking relation: %v", err)
-	}
-
-	// Set up webhook server
-	calls := make(chan webhooks.Payload, 10)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		_ = json.Unmarshal(body, &payload)
-		calls <- payload
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
-	_, err = s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0)
-	if err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
-	}
-
-	// Update the already-completed blocker (not a state transition to completion)
-	if _, err := s.Tasks.UpdateFields(actorUUID, blocker.UUID, map[string]interface{}{"title": "Updated Title"}, 0); err != nil {
-		t.Fatalf("failed to update blocker: %v", err)
-	}
-
-	// Should only get 1 webhook (for the blocker's title update, not for unblocking)
-	select {
-	case got := <-calls:
-		if got.TicketUUID != blocker.UUID {
-			t.Fatalf("expected webhook for blocker, got %s", got.TicketUUID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for blocker webhook")
-	}
-
-	// Verify no additional webhook came for the blocked task
-	select {
-	case got := <-calls:
-		t.Fatalf("unexpected webhook for %s", got.TicketUUID)
-	case <-time.After(500 * time.Millisecond):
-		// Good - no unblock webhook since blocker was already completed
-	}
-}
-
-func TestWebhookPayloadIncludesBlockedBy(t *testing.T) {
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
-
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
-	}
-
-	// Create blocker task A
-	taskA, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker-a",
-		Title:       "Blocker A",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task A: %v", err)
-	}
-
-	// Create blocker task B
-	taskB, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker-b",
-		Title:       "Blocker B",
-		ProjectUUID: container.UUID,
-		State:       "in_progress",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task B: %v", err)
-	}
-
-	// Create blocked task C
-	taskC, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocked-task",
-		Title:       "Blocked Task",
-		ProjectUUID: container.UUID,
-		State:       "blocked",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task C: %v", err)
-	}
-
-	// Create blocking relations: A blocks C, B blocks C
-	_, err = database.Exec(`
-		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
-		VALUES (?, ?, 'blocks', ?), (?, ?, 'blocks', ?)
-	`, taskA.UUID, taskC.UUID, actorUUID, taskB.UUID, taskC.UUID, actorUUID)
-	if err != nil {
-		t.Fatalf("failed to create blocking relations: %v", err)
-	}
-
-	// Set up webhook server
-	calls := make(chan webhooks.Payload, 10)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		var payload webhooks.Payload
-		_ = json.Unmarshal(body, &payload)
-		calls <- payload
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
-	_, err = s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0)
-	if err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
-	}
-
-	// Update task C to trigger a webhook
-	if _, err := s.Tasks.UpdateFields(actorUUID, taskC.UUID, map[string]interface{}{"priority": 1}, 0); err != nil {
-		t.Fatalf("failed to update task C: %v", err)
-	}
-
-	// Receive the webhook for task C
-	var taskCPayload webhooks.Payload
-	select {
-	case taskCPayload = <-calls:
-		if taskCPayload.TicketUUID != taskC.UUID {
-			t.Fatalf("expected webhook for task C, got %s", taskCPayload.TicketUUID)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for task C webhook")
-	}
-
-	// Verify blocked_by contains both blockers
-	if len(taskCPayload.BlockedBy) != 2 {
-		t.Fatalf("expected 2 blockers, got %d: %+v", len(taskCPayload.BlockedBy), taskCPayload.BlockedBy)
-	}
-
-	// Create a map of blocker IDs for easier verification
-	blockerIDs := make(map[string]string) // id -> state
-	for _, blocker := range taskCPayload.BlockedBy {
-		blockerIDs[blocker.ID] = blocker.State
-	}
-
-	// Verify task A is in blocked_by with correct state
-	if state, ok := blockerIDs[taskA.ID]; !ok {
-		t.Fatalf("task A (%s) not found in blocked_by", taskA.ID)
-	} else if state != "open" {
-		t.Fatalf("task A has wrong state in blocked_by: %s (expected open)", state)
-	}
-
-	// Verify task B is in blocked_by with correct state
-	if state, ok := blockerIDs[taskB.ID]; !ok {
-		t.Fatalf("task B (%s) not found in blocked_by", taskB.ID)
-	} else if state != "in_progress" {
-		t.Fatalf("task B has wrong state in blocked_by: %s (expected in_progress)", state)
-	}
-
-	// Now complete task A and verify blocked_by is updated
-	if _, err := s.Tasks.UpdateFields(actorUUID, taskA.UUID, map[string]interface{}{"state": "completed"}, 0); err != nil {
-		t.Fatalf("failed to complete task A: %v", err)
-	}
-
-	// Collect webhooks (expect A's completion webhook, then possibly C's)
-	receivedPayloads := make(map[string]webhooks.Payload)
-	for i := 0; i < 2; i++ {
-		select {
-		case got := <-calls:
-			receivedPayloads[got.TicketUUID] = got
-		case <-time.After(2 * time.Second):
-			if i == 0 {
-				t.Fatalf("timed out waiting for webhook")
-			}
-			// Second webhook might not come if C isn't fully unblocked
-		}
-	}
-
-	// If we got a webhook for C, verify it only shows B as blocker now
-	if payload, ok := receivedPayloads[taskC.UUID]; ok {
-		if len(payload.BlockedBy) != 1 {
-			t.Fatalf("after A completed, expected 1 blocker, got %d: %+v", len(payload.BlockedBy), payload.BlockedBy)
-		}
-		if payload.BlockedBy[0].ID != taskB.ID {
-			t.Fatalf("expected remaining blocker to be B (%s), got %s", taskB.ID, payload.BlockedBy[0].ID)
-		}
-	}
-
-	// Complete task B so C becomes fully unblocked
-	if _, err := s.Tasks.UpdateFields(actorUUID, taskB.UUID, map[string]interface{}{"state": "completed"}, 0); err != nil {
-		t.Fatalf("failed to complete task B: %v", err)
-	}
-
-	// Receive webhooks for B and C
-	receivedPayloads = make(map[string]webhooks.Payload)
-	for i := 0; i < 2; i++ {
-		select {
-		case got := <-calls:
-			receivedPayloads[got.TicketUUID] = got
-		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for webhook %d", i+1)
-		}
-	}
-
-	// Verify C's webhook now has empty blocked_by
-	if payload, ok := receivedPayloads[taskC.UUID]; !ok {
-		t.Fatalf("did not receive webhook for fully unblocked task C")
-	} else if len(payload.BlockedBy) != 0 {
-		t.Fatalf("expected empty blocked_by for fully unblocked task, got: %+v", payload.BlockedBy)
-	}
-}
-
-func TestWebhookPayloadBlockedByOmittedWhenEmpty(t *testing.T) {
-	database := setupWebhookTestDB(t)
-	actorUUID := setupWebhookTestActor(t, database)
-	s := New(database)
-
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project", Kind: "project"})
-	if err != nil {
-		t.Fatalf("failed to create container: %v", err)
-	}
-
-	// Create a task with no blockers
-	task, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "unblocked-task",
-		Title:       "Unblocked Task",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("failed to create task: %v", err)
-	}
-
-	// Set up webhook server to capture raw JSON
-	rawPayloads := make(chan []byte, 10)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() { _ = r.Body.Close() }()
-		body, _ := io.ReadAll(r.Body)
-		rawPayloads <- body
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	webhookURLs, _ := json.Marshal([]string{server.URL + "/hook"})
-	_, err = s.Containers.UpdateFields(actorUUID, container.UUID, map[string]interface{}{"webhook_urls": string(webhookURLs)}, 0)
-	if err != nil {
-		t.Fatalf("failed to set webhook urls: %v", err)
-	}
-
-	// Update the task to trigger a webhook
-	if _, err := s.Tasks.UpdateFields(actorUUID, task.UUID, map[string]interface{}{"state": "in_progress"}, 0); err != nil {
-		t.Fatalf("failed to update task: %v", err)
-	}
-
-	// Receive the raw payload
-	var rawPayload []byte
-	select {
-	case rawPayload = <-rawPayloads:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for webhook")
-	}
-
-	// Verify blocked_by is not present in the JSON (omitempty behavior)
-	var payloadMap map[string]interface{}
-	if err := json.Unmarshal(rawPayload, &payloadMap); err != nil {
-		t.Fatalf("failed to unmarshal payload: %v", err)
-	}
-
-	if _, exists := payloadMap["blocked_by"]; exists {
-		t.Fatalf("blocked_by should be omitted when empty, but found in payload: %s", string(rawPayload))
+	if len(payload.Changed) != 2 || payload.Changed[0] != "container_path" || payload.Changed[1] != "project_uuid" {
+		t.Fatalf("unexpected changed fields: %+v", payload.Changed)
 	}
 }
 
