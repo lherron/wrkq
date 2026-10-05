@@ -54,7 +54,7 @@ func TestServeRemoteStdioForwardsInitializeReadAndDomainError(t *testing.T) {
 		"",
 	}, "\n")
 	var out bytes.Buffer
-	if err := workrpc.ServeRemoteStdio(t.Context(), strings.NewReader(input), &out, strings.TrimPrefix(httpServer.URL, "http://"), ""); err != nil {
+	if err := workrpc.ServeRemoteStdio(t.Context(), strings.NewReader(input), &out, strings.TrimPrefix(httpServer.URL, "http://"), "", ""); err != nil {
 		t.Fatalf("ServeRemoteStdio: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestServeRemoteStdioPreservesRemoteAuthenticationFailure(t *testing.T) {
 		"",
 	}, "\n")
 	var out bytes.Buffer
-	if err := workrpc.ServeRemoteStdio(t.Context(), strings.NewReader(input), &out, strings.TrimPrefix(httpServer.URL, "http://"), secret); err != nil {
+	if err := workrpc.ServeRemoteStdio(t.Context(), strings.NewReader(input), &out, strings.TrimPrefix(httpServer.URL, "http://"), secret, ""); err != nil {
 		t.Fatalf("ServeRemoteStdio: %v", err)
 	}
 

@@ -31,7 +31,7 @@ func (a *API) TaskClaim(ctx context.Context, p TaskClaimParams) (*WrkqTaskClaim,
 	if err != nil {
 		return nil, err
 	}
-	attr, parsedScope, err := a.claimAttribution(p.PrincipalRef, p.Scope, "scope")
+	attr, parsedScope, err := a.claimAttribution(ctx, p.PrincipalRef, p.Scope, "scope")
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func (a *API) TaskClaimValidate(ctx context.Context, p TaskClaimValidateParams) 
 	if err != nil {
 		return nil, err
 	}
-	attr, parsedScope, err := a.claimAttribution(p.PrincipalRef, p.Scope, "scope")
+	attr, parsedScope, err := a.claimAttribution(ctx, p.PrincipalRef, p.Scope, "scope")
 	if err != nil {
 		return nil, err
 	}
@@ -157,13 +157,13 @@ func (a *API) TaskRelease(ctx context.Context, p TaskReleaseParams) (*WrkqTaskCl
 	if strings.TrimSpace(p.PrincipalRef) == "" {
 		return nil, NewValidationError("principalRef is required", map[string]any{"field": "principalRef"})
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
 	claimScope := strings.TrimSpace(p.Scope)
 	if !p.Force {
-		claimAttr, _, err := a.claimAttribution(p.PrincipalRef, p.Scope, "scope")
+		claimAttr, _, err := a.claimAttribution(ctx, p.PrincipalRef, p.Scope, "scope")
 		if err != nil {
 			return nil, err
 		}
@@ -222,11 +222,11 @@ func (a *API) TaskRelease(ctx context.Context, p TaskReleaseParams) (*WrkqTaskCl
 	return prior, nil
 }
 
-func (a *API) claimAttribution(principalRef, scopeRef, field string) (attribution.Attribution, scope.ParsedScopeRef, error) {
+func (a *API) claimAttribution(ctx context.Context, principalRef, scopeRef, field string) (attribution.Attribution, scope.ParsedScopeRef, error) {
 	if strings.TrimSpace(principalRef) == "" {
 		return attribution.Attribution{}, scope.ParsedScopeRef{}, NewValidationError("principalRef is required", map[string]any{"field": "principalRef"})
 	}
-	attr, err := a.attributionFor(principalRef)
+	attr, err := a.attributionFor(ctx, principalRef)
 	if err != nil {
 		return attribution.Attribution{}, scope.ParsedScopeRef{}, err
 	}

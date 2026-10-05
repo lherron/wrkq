@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/lherron/wrkq/internal/attribution"
 	"log"
 	"strings"
 
@@ -401,10 +402,10 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return wq.WorkflowTimeline(ctx, p)
 	}))
 	s.Register("wrkq.workflow.refresh", apiHandler(func(ctx context.Context, p taskActorParams) (any, error) {
-		return wq.WorkflowRefresh(ctx, p.TaskSelector, defaultString(p.Actor, wrkqDefaultPrincipalRef))
+		return wq.WorkflowRefresh(ctx, p.TaskSelector, defaultString(p.Actor, attribution.DefaultPrincipal(ctx, wrkqDefaultPrincipalRef)))
 	}))
 	s.Register("wrkq.workflow.syncMeta", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowSyncMetaParams) (any, error) {
-		p.Actor = defaultString(p.Actor, wrkqDefaultPrincipalRef)
+		p.Actor = defaultString(p.Actor, attribution.DefaultPrincipal(ctx, wrkqDefaultPrincipalRef))
 		return wq.WorkflowSyncMeta(ctx, p)
 	}))
 
@@ -467,11 +468,11 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.WorkflowDiff(ctx, p)
 	}))
 	s.Register("wrkf.workflow.install", apiHandler(func(ctx context.Context, p wrkfapi.WorkflowInstallParams) (any, error) {
-		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultPrincipalRef)
+		p.PrincipalRef = defaultString(p.PrincipalRef, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef))
 		return api.WorkflowInstall(ctx, p)
 	}))
 	s.Register("wrkf.workflow.discontinue", apiHandler(func(ctx context.Context, p templateLifecycleParams) (any, error) {
-		return api.WorkflowDiscontinue(ctx, p.Ref, defaultString(p.PrincipalRef, opts.DefaultPrincipalRef))
+		return api.WorkflowDiscontinue(ctx, p.Ref, defaultString(p.PrincipalRef, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef)))
 	}))
 	s.Register("wrkf.workflow.reinstate", apiHandler(func(ctx context.Context, p templateLifecycleParams) (any, error) {
 		return api.WorkflowReinstate(ctx, p.Ref)
@@ -483,12 +484,12 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.InstanceNext(ctx, p.TaskSelector, p.InstanceID, defaultString(p.Role, opts.DefaultRole))
 	}))
 	s.Register("wrkf.instance.cancel", apiHandler(func(ctx context.Context, p wrkfapi.InstanceCancelParams) (any, error) {
-		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultPrincipalRef)
+		p.PrincipalRef = defaultString(p.PrincipalRef, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef))
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.InstanceCancel(ctx, p)
 	}))
 	s.Register("wrkf.evidence.add", apiHandler(func(ctx context.Context, p wrkfapi.EvidenceAddParams) (any, error) {
-		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultPrincipalRef)
+		p.PrincipalRef = defaultString(p.PrincipalRef, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef))
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.EvidenceAdd(ctx, p)
 	}))
@@ -505,7 +506,7 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.EvidenceSchema(ctx, p)
 	}))
 	s.Register("wrkf.ledger.append", apiHandler(func(ctx context.Context, p wrkfapi.LedgerAppendParams) (any, error) {
-		p.WrittenBy = opts.DefaultPrincipalRef
+		p.WrittenBy = attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef)
 		return api.LedgerAppend(ctx, p)
 	}))
 	s.Register("wrkf.ledger.list", apiHandler(func(ctx context.Context, p wrkfapi.LedgerListParams) (any, error) {
@@ -542,7 +543,7 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.CheckPreflight(ctx, p.TaskSelector, p.Transition, defaultString(p.Role, opts.DefaultRole))
 	}))
 	s.Register("wrkf.check.run", apiHandler(func(ctx context.Context, p wrkfapi.CheckRunParams) (any, error) {
-		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultPrincipalRef)
+		p.PrincipalRef = defaultString(p.PrincipalRef, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef))
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.CheckRun(ctx, p)
 	}))
@@ -559,17 +560,17 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.HookShow(ctx, p.ID)
 	}))
 	s.Register("wrkf.hook.run", apiHandler(func(ctx context.Context, p wrkfapi.HookRunParams) (any, error) {
-		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultPrincipalRef)
+		p.PrincipalRef = defaultString(p.PrincipalRef, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef))
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.HookRun(ctx, p)
 	}))
 	s.Register("wrkf.transition.apply", apiHandler(func(ctx context.Context, p wrkfapi.TransitionApplyParams) (any, error) {
-		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultPrincipalRef)
+		p.PrincipalRef = defaultString(p.PrincipalRef, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef))
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.TransitionApply(ctx, p)
 	}))
 	s.Register("wrkf.suspension.resolve", apiHandler(func(ctx context.Context, p wrkfapi.SuspensionResolveParams) (any, error) {
-		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultPrincipalRef)
+		p.PrincipalRef = defaultString(p.PrincipalRef, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef))
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.SuspensionResolve(ctx, p)
 	}))
@@ -586,7 +587,7 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.WatchEvents(ctx, p)
 	}))
 	s.Register("wrkf.run.start", apiHandler(func(ctx context.Context, p wrkfapi.RunStartParams) (any, error) {
-		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultPrincipalRef)
+		p.PrincipalRef = defaultString(p.PrincipalRef, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef))
 		p.Role = defaultString(p.Role, opts.DefaultRole)
 		return api.RunStart(ctx, p)
 	}))
@@ -615,7 +616,7 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.ActionSettle(ctx, p)
 	}))
 	s.Register("wrkf.action.start", apiHandler(func(ctx context.Context, p wrkfapi.ActionStartParams) (any, error) {
-		p.PrincipalRef = defaultString(p.PrincipalRef, opts.DefaultPrincipalRef)
+		p.PrincipalRef = defaultString(p.PrincipalRef, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef))
 		return api.ActionStart(ctx, p)
 	}))
 	s.Register("wrkf.action.bindExternal", apiHandler(func(ctx context.Context, p wrkfapi.ActionBindExternalParams) (any, error) {
@@ -646,7 +647,7 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.EffectShow(ctx, p.ID)
 	}))
 	s.Register("wrkf.effect.claim", apiHandler(func(ctx context.Context, p wrkfapi.EffectClaimParams) (any, error) {
-		p.Adapter = defaultString(p.Adapter, opts.DefaultPrincipalRef)
+		p.Adapter = defaultString(p.Adapter, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef))
 		return api.EffectClaim(ctx, p)
 	}))
 	s.Register("wrkf.effect.ack", apiHandler(func(ctx context.Context, p wrkfapi.EffectAckParams) (any, error) {
@@ -663,7 +664,7 @@ func registerWrkfMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return api.EffectRetry(ctx, id)
 	}))
 	s.Register("wrkf.effect.deliver", apiHandler(func(ctx context.Context, p wrkfapi.EffectDeliverParams) (any, error) {
-		p.Adapter = defaultString(p.Adapter, opts.DefaultPrincipalRef)
+		p.Adapter = defaultString(p.Adapter, attribution.DefaultPrincipal(ctx, opts.DefaultPrincipalRef))
 		return api.EffectDeliver(ctx, p)
 	}))
 }

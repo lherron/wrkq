@@ -50,7 +50,7 @@ func (a *API) ProjectSetRoot(ctx context.Context, p ProjectSetRootParams) (*Wrkq
 	if p.Root != "" {
 		root = p.Root
 	}
-	attr, err := a.attributionFor(p.Actor)
+	attr, err := a.attributionFor(ctx, p.Actor)
 	if err != nil {
 		return nil, err
 	}

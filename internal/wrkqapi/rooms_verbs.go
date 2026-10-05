@@ -34,7 +34,7 @@ func (a *API) RoomList(ctx context.Context, p RoomListParams) (*WrkqRoomListResu
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (a *API) roomSetLabel(ctx context.Context, p RoomLabelParams, on bool) (*Wr
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (a *API) roomMemberMutation(ctx context.Context, p RoomMemberParams, join b
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}

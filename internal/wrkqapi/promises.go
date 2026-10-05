@@ -24,7 +24,7 @@ func (a *API) PromiseAdd(ctx context.Context, p PromiseAddParams) (*WrkqPromise,
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (a *API) PromiseList(ctx context.Context, p PromiseListParams) (*WrkqPromis
 		// An unscoped list is the caller's personal queue. A subject-scoped list
 		// deliberately leaves owner empty so unrestricted subject-side surfaces
 		// can show every principal who is carrying attention for that resource.
-		owner, err = a.promiseReadOwner("", p.PrincipalRef)
+		owner, err = a.promiseReadOwner(ctx, "", p.PrincipalRef)
 		if err != nil {
 			return nil, err
 		}
@@ -132,7 +132,7 @@ func (a *API) PromiseReady(ctx context.Context, p PromiseReadyParams) (*WrkqProm
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	owner, err := a.promiseReadOwner(p.OwnerPrincipalRef, p.PrincipalRef)
+	owner, err := a.promiseReadOwner(ctx, p.OwnerPrincipalRef, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +326,7 @@ func (a *API) ownedPromise(ctx context.Context, selector, principalRef string) (
 	if err := ctx.Err(); err != nil {
 		return nil, attribution.Attribution{}, err
 	}
-	attr, err := a.attributionFor(principalRef)
+	attr, err := a.attributionFor(ctx, principalRef)
 	if err != nil {
 		return nil, attribution.Attribution{}, err
 	}
@@ -355,11 +355,11 @@ func (a *API) getPromise(selector string) (*domain.Promise, error) {
 	return promise, nil
 }
 
-func (a *API) promiseReadOwner(rawOwner, principalRef string) (string, error) {
+func (a *API) promiseReadOwner(ctx context.Context, rawOwner, principalRef string) (string, error) {
 	if strings.TrimSpace(rawOwner) != "" {
 		return normalizePromiseOwner(rawOwner)
 	}
-	attr, err := a.attributionFor(principalRef)
+	attr, err := a.attributionFor(ctx, principalRef)
 	if err != nil {
 		return "", err
 	}

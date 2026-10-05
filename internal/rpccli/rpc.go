@@ -36,7 +36,13 @@ func newRPCCmd() *cobra.Command {
 				return err
 			}
 			if cfg.RemoteEndpoint != "" {
-				return workrpc.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, remoteTokenFromEnv())
+				// Remote mode forwards the same launch principal local mode
+				// installs as DefaultPrincipalRef; wrkqd applies it (T-10328).
+				principal, err := launchPrincipalRef(cmd)
+				if err != nil {
+					return err
+				}
+				return workrpc.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, remoteTokenFromEnv(), principal)
 			}
 			return serveLocalStdio(cmd, cfg)
 		},

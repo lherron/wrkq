@@ -43,7 +43,7 @@ func (a *API) WorkflowAttach(ctx context.Context, p WorkflowAttachParams) (*Wrkq
 		}
 	}
 
-	inst, err := a.wf.TaskAttach(ctx, p.Task, p.Workflow, defaultString(p.Actor, a.defaultPrincipalRef), workflow.AttachTaskOptions{
+	inst, err := a.wf.TaskAttach(ctx, p.Task, p.Workflow, defaultString(p.Actor, a.defaultPrincipal(ctx)), workflow.AttachTaskOptions{
 		Supersede:             p.Supersede,
 		PredecessorInstanceID: p.PredecessorInstanceID,
 		PredecessorRevision:   p.PredecessorRevision,
@@ -141,7 +141,7 @@ func (a *API) WorkflowRefresh(ctx context.Context, taskSelector, actor string) (
 	if _, err := a.resolveTaskUUID(taskSelector); err != nil {
 		return nil, err
 	}
-	inst, err := a.wf.TaskRefresh(ctx, taskSelector, defaultString(actor, a.defaultPrincipalRef))
+	inst, err := a.wf.TaskRefresh(ctx, taskSelector, defaultString(actor, a.defaultPrincipal(ctx)))
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (a *API) WorkflowSyncMeta(ctx context.Context, p WorkflowSyncMetaParams) (*
 			return nil, err
 		}
 	}
-	count, err := a.wf.TaskSyncMeta(ctx, p.Task, defaultString(p.Actor, a.defaultPrincipalRef))
+	count, err := a.wf.TaskSyncMeta(ctx, p.Task, defaultString(p.Actor, a.defaultPrincipal(ctx)))
 	if err != nil {
 		return nil, err
 	}

@@ -29,7 +29,7 @@ func TestForwardedAuthErrorNamesTokenSourceAndRedacts(t *testing.T) {
 
 	token, _ := ResolveToken()
 	_, err := forwardRemoteFrame(t.Context(), http.DefaultClient,
-		srv.URL+"/v1/rpc", token, Request{JSONRPC: "2.0", Method: "wrkq.task.show"})
+		srv.URL+"/v1/rpc", token, "", Request{JSONRPC: "2.0", Method: "wrkq.task.show"})
 	if err == nil {
 		t.Fatal("expected a forwarded auth failure")
 	}
@@ -58,7 +58,7 @@ func TestForwardedNonAuthErrorOmitsCredentialDetail(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	_, err := forwardRemoteFrame(t.Context(), http.DefaultClient,
-		srv.URL+"/v1/rpc", "some-token", Request{JSONRPC: "2.0", Method: "wrkq.task.show"})
+		srv.URL+"/v1/rpc", "some-token", "", Request{JSONRPC: "2.0", Method: "wrkq.task.show"})
 	if err == nil {
 		t.Fatal("expected a forwarded failure")
 	}

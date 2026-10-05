@@ -67,8 +67,11 @@ func mapRemoteForwardError(err error) *RPCError {
 // ServeRemoteStdio serves the stdio JSON-RPC protocol by forwarding request
 // frames to a remote wrkqd /v1/rpc endpoint. It preserves caller IDs and forwards
 // rpc.initialize to the canonical server; it does not synthesize protocol
-// metadata or open local durable state.
-func ServeRemoteStdio(ctx context.Context, in io.Reader, out io.Writer, endpoint, token string) error {
+// metadata or open local durable state. A non-empty principalRef (the launch
+// --principal-ref / --as) rides every forwarded request as X-Wrkq-Principal-Ref,
+// so wrkqd defaults unattributed frames to it exactly as a local rpc --stdio
+// defaults them to its DefaultPrincipalRef; frames are never rewritten.
+func ServeRemoteStdio(ctx context.Context, in io.Reader, out io.Writer, endpoint, token, principalRef string) error {
 	reader := NewReader(in, DefaultMaxFrameBytes)
 	writer := NewWriter(out)
 	client := http.DefaultClient
@@ -115,7 +118,7 @@ func ServeRemoteStdio(ctx context.Context, in io.Reader, out io.Writer, endpoint
 			}
 			continue
 		}
-		resp, err := forwardRemoteFrame(ctx, client, url, token, req)
+		resp, err := forwardRemoteFrame(ctx, client, url, token, principalRef, req)
 		if err != nil {
 			resp = Response{
 				JSONRPC: "2.0",
@@ -129,7 +132,7 @@ func ServeRemoteStdio(ctx context.Context, in io.Reader, out io.Writer, endpoint
 	}
 }
 
-func forwardRemoteFrame(ctx context.Context, client *http.Client, url, token string, frame Request) (Response, error) {
+func forwardRemoteFrame(ctx context.Context, client *http.Client, url, token, principalRef string, frame Request) (Response, error) {
 	body, err := json.Marshal(frame)
 	if err != nil {
 		return Response{}, err
@@ -141,6 +144,9 @@ func forwardRemoteFrame(ctx context.Context, client *http.Client, url, token str
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if principalRef != "" {
+		req.Header.Set("X-Wrkq-Principal-Ref", principalRef)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

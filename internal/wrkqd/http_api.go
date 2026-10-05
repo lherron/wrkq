@@ -157,7 +157,24 @@ func (s *daemonServer) handleWorkRPC(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusBadRequest, resp)
 		return
 	}
-	resp, ok := s.workrpc.HandleRequest(r.Context(), req)
+	// The rpc --stdio proxy forwards its launch principal (--principal-ref /
+	// --as) here; it becomes what an empty per-frame principal defaults to, the
+	// same role DefaultPrincipalRef plays for a local rpc --stdio (T-10328).
+	principalRef, err := parsePrincipalHeader(r)
+	if err != nil {
+		resp := workrpc.Response{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error: workrpc.MapError(&workrpc.ValidationError{
+				Message: err.Error(),
+				Code:    workrpc.CodeWRKQValidation,
+			}),
+		}
+		s.writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	ctx := attribution.WithCallerPrincipal(r.Context(), principalRef)
+	resp, ok := s.workrpc.HandleRequest(ctx, req)
 	if !ok {
 		resp = workrpc.Response{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{}`)}
 	}
@@ -170,11 +187,11 @@ func (s *daemonServer) resolveAttribution(r *http.Request) (attribution.Attribut
 		return attribution.Attribution{}, err
 	}
 
-	if raw := strings.TrimSpace(r.Header.Get("X-Wrkq-Principal-Ref")); raw != "" {
-		principalRef, err := attribution.NormalizeCanonical(raw)
-		if err != nil {
-			return attribution.Attribution{}, fmt.Errorf("invalid X-Wrkq-Principal-Ref: %w", err)
-		}
+	principalRef, err := parsePrincipalHeader(r)
+	if err != nil {
+		return attribution.Attribution{}, err
+	}
+	if principalRef != "" {
 		return attribution.Attribution{PrincipalRef: principalRef, ScopeRef: scopeRef}, nil
 	}
 
@@ -187,6 +204,21 @@ func (s *daemonServer) resolveAttribution(r *http.Request) (attribution.Attribut
 	}
 
 	return attribution.Attribution{}, fmt.Errorf("no principal configured (set X-Wrkq-Principal-Ref or X-Wrkq-Scope-Ref)")
+}
+
+// parsePrincipalHeader reads X-Wrkq-Principal-Ref, the caller principal a
+// client sends with its request. Empty means the header is absent; a malformed
+// value is refused, never ignored.
+func parsePrincipalHeader(r *http.Request) (string, error) {
+	raw := strings.TrimSpace(r.Header.Get("X-Wrkq-Principal-Ref"))
+	if raw == "" {
+		return "", nil
+	}
+	principalRef, err := attribution.NormalizeCanonical(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid X-Wrkq-Principal-Ref: %w", err)
+	}
+	return principalRef, nil
 }
 
 func parseDaemonScopeRef(r *http.Request) (string, *scope.ParsedScopeRef, error) {

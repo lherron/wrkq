@@ -30,7 +30,7 @@ func rpcCmd() *cobra.Command {
 				if flagHookCatalog != "" {
 					return fmt.Errorf("--hook-catalog is local-only; hook catalog is canonical-node configuration in remote mode")
 				}
-				return workrpcclient.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, workrpcclient.TokenFromEnv())
+				return workrpcclient.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, workrpcclient.TokenFromEnv(), principalRef)
 			}
 			return serveLocalStdio(cmd.Context(), cfg, principalRef)
 		},

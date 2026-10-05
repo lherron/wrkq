@@ -3,6 +3,7 @@
 package wrkqapi
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"strings"
@@ -48,12 +49,13 @@ func WithSearch(cfg SearchConfig) Option {
 // attributionFor resolves principal-only write attribution. The parameter name
 // remains actor while older RPC DTOs are retired. Accepted non-empty values are
 // agent:<id> or full agent ScopeRefs, both persisted as the durable agent:<id>
-// principal. Empty uses the configured default_principal_ref; if none is
-// configured the mutation fails.
-func (a *API) attributionFor(actor string) (attribution.Attribution, error) {
+// principal. Empty uses the request's caller principal (the X-Wrkq-Principal-Ref
+// header over rpc://), else the configured default_principal_ref; if neither is
+// set the mutation fails.
+func (a *API) attributionFor(ctx context.Context, actor string) (attribution.Attribution, error) {
 	principalInput := strings.TrimSpace(actor)
 	if principalInput == "" {
-		principalInput = strings.TrimSpace(a.defaultPrincipalRef)
+		principalInput = strings.TrimSpace(a.defaultPrincipal(ctx))
 	}
 	if principalInput == "" {
 		return attribution.Attribution{}, NewValidationError(
@@ -78,8 +80,13 @@ func (a *API) attributionFor(actor string) (attribution.Attribution, error) {
 	return attribution.Attribution{PrincipalRef: principal}, nil
 }
 
-func (a *API) attributionForScope(actor, scopeRef string) (attribution.Attribution, error) {
-	attr, err := a.attributionFor(actor)
+// defaultPrincipal is the principal an empty per-frame principal defaults to.
+func (a *API) defaultPrincipal(ctx context.Context) string {
+	return attribution.DefaultPrincipal(ctx, a.defaultPrincipalRef)
+}
+
+func (a *API) attributionForScope(ctx context.Context, actor, scopeRef string) (attribution.Attribution, error) {
+	attr, err := a.attributionFor(ctx, actor)
 	if err != nil || strings.TrimSpace(scopeRef) == "" {
 		return attr, err
 	}

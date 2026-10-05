@@ -35,7 +35,7 @@ func (a *API) ContainerCampaignConvert(
 	if err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.Actor)
+	attr, err := a.attributionFor(ctx, p.Actor)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (a *API) ContainerCampaignUpdate(
 	if p.Labels != nil {
 		fields["labels"] = labelsString(*p.Labels)
 	}
-	attr, err := a.attributionFor(p.Actor)
+	attr, err := a.attributionFor(ctx, p.Actor)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (a *API) ContainerCampaignActivate(
 	if err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.Actor)
+	attr, err := a.attributionFor(ctx, p.Actor)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (a *API) ContainerCampaignClose(
 	if err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.Actor)
+	attr, err := a.attributionFor(ctx, p.Actor)
 	if err != nil {
 		return nil, err
 	}

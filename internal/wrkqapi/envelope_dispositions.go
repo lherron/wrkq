@@ -22,7 +22,7 @@ func (a *API) EnvelopePresent(ctx context.Context, p EnvelopePresentParams) (*Wr
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (a *API) EnvelopeDefer(ctx context.Context, p EnvelopeDeferParams) (*WrkqEn
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func (a *API) EnvelopeAck(ctx context.Context, p EnvelopeAckParams) (*WrkqRoomLo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func (a *API) EnvelopeFail(ctx context.Context, p EnvelopeFailParams) (*WrkqEnve
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +255,7 @@ func (a *API) EnvelopeWithdraw(ctx context.Context, p EnvelopeWithdrawParams) (*
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}

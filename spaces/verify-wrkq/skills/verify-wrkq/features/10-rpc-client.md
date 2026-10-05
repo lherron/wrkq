@@ -41,19 +41,19 @@ printf '%s\n' "$INIT" '{"jsonrpc":"2.0","id":2,"method":"wrkq.nope"}' \
   '{"jsonrpc":"2.0","id":3,"method":"wrkq.task.show","params":{"task":"T-00001"}}' \
   | wrkq rpc --stdio | jq -c '{id, hash: .result.protocolSchemaHash, task: (.result.id // null), err: .error.code}'
 printf '%s\n' "$INIT" '{"jsonrpc":"2.0","id":2,"method":"wrkq.task.create","params":{"title":"x","path":"wv-<name>/inbox/x"}}' \
-  | wrkq --principal-ref agent:clod rpc --stdio | jq -c '{id, err: .error.data.code}'     # see Gotchas
+  | wrkq --principal-ref agent:clod rpc --stdio | jq -c '{id, by: .result.createdByPrincipalRef, err: .error.data.code}' # see Gotchas
 cd "$WV_STATE/client" && bun --env-file=/dev/null run client-drive.ts
 # {"created":{...}} {"replay_same_id":true} {"stale_update_refused":"WRKQ_CONFLICT"} {"cas_update":{"priority":1,...}}
 ```
 
 ## Gotchas
 
-- **Over `rpc://`, the session `--principal-ref` is not applied to writes.**
-  `wrkq --principal-ref agent:clod rpc --stdio` with an `rpc://` locator refuses `wrkq.task.create` with
-  `WRKQ_VALIDATION: principalRef is required ... or launch with --principal-ref`. The same frames against a local
-  `--db` path succeed. So `createClient({principalRef})` has no effect in remote mode, and every write has to
-  carry its principal: `principalRef` on create, `actor` on update (2026-10-05, T-10298
-  `10-rpc-client/drive.txt`). This is a product defect.
+- **The session principal is a default, not an override.** `wrkq --principal-ref agent:X rpc --stdio` (or
+  `--as`) attributes a write that carries no `principalRef`/`actor` to `agent:X`, locally and over `rpc://`: the
+  proxy sends it as the `X-Wrkq-Principal-Ref` header and wrkqd defaults from it (T-10328). A per-frame principal
+  still wins. Against a wrkqd older than T-10328 the header is ignored and the write is refused
+  `WRKQ_VALIDATION: principalRef is required`; if you see that over `rpc://`, check the serving revision
+  before calling it a defect. A malformed header value is refused `WRKQ_VALIDATION`, never ignored.
 - `dbPath` and `dbLocator` must not disagree, and the client refuses `actor` as a session option. Pass
   `principalRef`.
 - The repo's `packages/client/dist` may not be what consumers run. Drive the published version and record it

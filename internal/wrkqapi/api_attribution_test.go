@@ -10,9 +10,11 @@ package wrkqapi
 // such as bare slugs / system sentinels / actor IDs are rejected.
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/db"
 )
 
@@ -34,34 +36,48 @@ func TestAttributionFor_ResolvesAndRejects(t *testing.T) {
 	noDefault := newAttributionAPI(t, "")
 
 	// Empty selector + no default_principal_ref → error (no silent system fallback).
-	if _, err := noDefault.attributionFor(""); err == nil {
+	if _, err := noDefault.attributionFor(context.Background(), ""); err == nil {
 		t.Errorf("empty selector + no default: want error, got nil")
 	}
 
 	// Empty selector + configured default_principal_ref → honor it.
 	withDefault := newAttributionAPI(t, "agent:ops-bot")
-	if attr, err := withDefault.attributionFor(""); err != nil || attr.PrincipalRef != "agent:ops-bot" {
+	if attr, err := withDefault.attributionFor(context.Background(), ""); err != nil || attr.PrincipalRef != "agent:ops-bot" {
 		t.Errorf("default principal honor: want agent:ops-bot/nil, got %q/%v", attr.PrincipalRef, err)
 	}
 
+	// Empty selector + request caller principal (X-Wrkq-Principal-Ref over
+	// rpc://) → the request principal beats the configured default; an explicit
+	// per-frame principal still beats both.
+	reqCtx := attribution.WithCallerPrincipal(context.Background(), "agent:remote-caller")
+	if attr, err := withDefault.attributionFor(reqCtx, ""); err != nil || attr.PrincipalRef != "agent:remote-caller" {
+		t.Errorf("request principal: want agent:remote-caller/nil, got %q/%v", attr.PrincipalRef, err)
+	}
+	if attr, err := noDefault.attributionFor(reqCtx, ""); err != nil || attr.PrincipalRef != "agent:remote-caller" {
+		t.Errorf("request principal without default: want agent:remote-caller/nil, got %q/%v", attr.PrincipalRef, err)
+	}
+	if attr, err := withDefault.attributionFor(reqCtx, "agent:explicit"); err != nil || attr.PrincipalRef != "agent:explicit" {
+		t.Errorf("explicit beats request principal: want agent:explicit/nil, got %q/%v", attr.PrincipalRef, err)
+	}
+
 	// Canonical principal ref → recorded exactly.
-	if attr, err := noDefault.attributionFor("agent:flag-principal"); err != nil || attr.PrincipalRef != "agent:flag-principal" {
+	if attr, err := noDefault.attributionFor(context.Background(), "agent:flag-principal"); err != nil || attr.PrincipalRef != "agent:flag-principal" {
 		t.Errorf("canonical principal: want agent:flag-principal/nil, got %q/%v", attr.PrincipalRef, err)
 	}
 
 	// Full ScopeRef input → reduced to the durable agent principal.
-	if attr, err := noDefault.attributionFor("agent:cody:project:wrkq:task:T-05397"); err != nil || attr.PrincipalRef != "agent:cody" {
+	if attr, err := noDefault.attributionFor(context.Background(), "agent:cody:project:wrkq:task:T-05397"); err != nil || attr.PrincipalRef != "agent:cody" {
 		t.Errorf("full scope principal: want agent:cody/nil, got %q/%v", attr.PrincipalRef, err)
 	}
 
 	// Bare compat slug → REJECTED (NormalizeCanonical does not accept bare slugs).
-	if _, err := noDefault.attributionFor("bareslug"); err == nil {
+	if _, err := noDefault.attributionFor(context.Background(), "bareslug"); err == nil {
 		t.Errorf("bare slug: want rejection, got nil")
 	}
 
 	// The legacy "system:" sentinels are NOT valid caller principals → rejected.
 	for _, sentinel := range []string{"system:wrkq", "system:wrkf"} {
-		if _, err := noDefault.attributionFor(sentinel); err == nil {
+		if _, err := noDefault.attributionFor(context.Background(), sentinel); err == nil {
 			t.Errorf("system sentinel %q: want rejection, got nil", sentinel)
 		}
 	}
@@ -72,7 +88,7 @@ func TestAttributionFor_ResolvesAndRejects(t *testing.T) {
 		"agent:cody:role:reviewer", "A-00001",
 		"00000000-0000-4000-8000-0000000000a0",
 	} {
-		if _, err := noDefault.attributionFor(bad); err == nil {
+		if _, err := noDefault.attributionFor(context.Background(), bad); err == nil {
 			t.Errorf("invalid actor %q: want error, got nil", bad)
 		}
 	}

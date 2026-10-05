@@ -76,7 +76,7 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 		}
 	}
 
-	attr, aerr := a.attributionForScope(p.Actor, p.ScopeRef)
+	attr, aerr := a.attributionForScope(ctx, p.Actor, p.ScopeRef)
 	if aerr != nil {
 		return nil, aerr
 	}
@@ -293,7 +293,7 @@ func (a *API) TaskMove(ctx context.Context, p TaskMoveParams) (*WrkqTask, error)
 	if p.ExpectEtag != nil {
 		ifMatch = currentEtag
 	}
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}

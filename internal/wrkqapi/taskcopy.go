@@ -85,7 +85,7 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 		return nil, NewNotFoundError(p.Destination, "container")
 	}
 
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}

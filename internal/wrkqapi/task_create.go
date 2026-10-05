@@ -69,7 +69,7 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		if p.Slug != "" {
 			return nil, NewValidationError("slug requires subtaskOwner", nil)
 		}
-		projectUUID, slug, err = a.resolveCreateTarget(p)
+		projectUUID, slug, err = a.resolveCreateTarget(ctx, p)
 		if err != nil {
 			return nil, err
 		}
@@ -161,7 +161,7 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		campaignUUID = &uuid
 	}
 
-	attr, aerr := a.attributionFor(p.PrincipalRef)
+	attr, aerr := a.attributionFor(ctx, p.PrincipalRef)
 	if aerr != nil {
 		return nil, aerr
 	}
@@ -221,7 +221,7 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 
 // resolveCreateTarget resolves the destination project UUID and task slug for a
 // create request from its path/project selectors (or defaults).
-func (a *API) resolveCreateTarget(p TaskCreateParams) (projectUUID, slug string, err error) {
+func (a *API) resolveCreateTarget(ctx context.Context, p TaskCreateParams) (projectUUID, slug string, err error) {
 	switch {
 	case strings.TrimSpace(p.Path) != "":
 		parentUUID, finalSlug, _, rerr := selectors.ResolveParentContainer(a.db, p.Path)
@@ -234,7 +234,7 @@ func (a *API) resolveCreateTarget(p TaskCreateParams) (projectUUID, slug string,
 		if parentUUID != nil {
 			projectUUID = *parentUUID
 		} else {
-			projectUUID, err = a.defaultProjectUUID()
+			projectUUID, err = a.defaultProjectUUID(ctx)
 			if err != nil {
 				return "", "", err
 			}
@@ -247,7 +247,7 @@ func (a *API) resolveCreateTarget(p TaskCreateParams) (projectUUID, slug string,
 		projectUUID = uuid
 		slug = slugFromTitle(p.Title)
 	default:
-		projectUUID, err = a.defaultProjectUUID()
+		projectUUID, err = a.defaultProjectUUID(ctx)
 		if err != nil {
 			return "", "", err
 		}
@@ -259,7 +259,7 @@ func (a *API) resolveCreateTarget(p TaskCreateParams) (projectUUID, slug string,
 // defaultProjectUUID returns the first project container. Tasks cannot live
 // directly under the root container, so when no project exists yet (e.g. a
 // freshly migrated database) a default "inbox" project is auto-created.
-func (a *API) defaultProjectUUID() (string, error) {
+func (a *API) defaultProjectUUID(ctx context.Context) (string, error) {
 	var uuid string
 	err := a.db.QueryRow("SELECT uuid FROM containers WHERE kind = 'project' ORDER BY id LIMIT 1").Scan(&uuid)
 	if err == nil {
@@ -268,7 +268,7 @@ func (a *API) defaultProjectUUID() (string, error) {
 	if err != sql.ErrNoRows {
 		return "", NewInternalError(err)
 	}
-	attr, aerr := a.attributionFor("")
+	attr, aerr := a.attributionFor(ctx, "")
 	if aerr != nil {
 		return "", aerr
 	}

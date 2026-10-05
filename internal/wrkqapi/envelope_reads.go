@@ -21,7 +21,7 @@ func (a *API) EnvelopeShow(ctx context.Context, p EnvelopeShowParams) (*WrkqEnve
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +213,7 @@ func (a *API) EnvelopePendingView(ctx context.Context, p EnvelopePendingViewPara
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, err := a.attributionFor(p.PrincipalRef)
+	attr, err := a.attributionFor(ctx, p.PrincipalRef)
 	if err != nil {
 		return nil, err
 	}

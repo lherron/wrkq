@@ -58,7 +58,7 @@ func (a *API) TaskAcknowledge(ctx context.Context, p TaskAcknowledgeParams) (*Wr
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}
@@ -105,7 +105,7 @@ func (a *API) TaskDelete(ctx context.Context, p TaskDeleteParams) (*WrkqTask, er
 		return nil, NewInternalError(scanErr)
 	}
 
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}
@@ -256,7 +256,7 @@ func (a *API) TaskRestore(ctx context.Context, p TaskRestoreParams) (*WrkqTask, 
 		}
 	}
 
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}

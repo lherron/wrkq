@@ -44,7 +44,7 @@ func (a *API) WebhookAdd(ctx context.Context, p WebhookMutateParams) (json.RawMe
 	if !isValidWebhookURL(url) {
 		return nil, NewValidationError("invalid webhook url: "+url, map[string]any{"field": "url"})
 	}
-	return a.mutateRootWebhooks([]webhooksub.Subscription{{URL: url}}, nil, p.ExpectETag, p.Actor)
+	return a.mutateRootWebhooks(ctx, []webhooksub.Subscription{{URL: url}}, nil, p.ExpectETag, p.Actor)
 }
 
 // WebhookRemove removes a global webhook URL from the root container (idempotent:
@@ -56,7 +56,7 @@ func (a *API) WebhookRemove(ctx context.Context, p WebhookMutateParams) (json.Ra
 		return nil, err
 	}
 	url := strings.TrimSpace(p.URL)
-	return a.mutateRootWebhooks(nil, []string{url}, p.ExpectETag, p.Actor)
+	return a.mutateRootWebhooks(ctx, nil, []string{url}, p.ExpectETag, p.Actor)
 }
 
 // ContainerWebhookSet mirrors legacy `wrkq container set` webhook-url updates.
@@ -67,7 +67,7 @@ func (a *API) ContainerWebhookSet(ctx context.Context, p ContainerWebhookSetPara
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}
@@ -197,13 +197,14 @@ func normalizeWebhookSubscriptions(raw []webhooksub.Subscription, field string) 
 // encoding/json sorts the keys): changed = {changed,count,target,webhook_urls};
 // no-change = {changed,webhook_urls}.
 func (a *API) mutateRootWebhooks(
+	ctx context.Context,
 	add []webhooksub.Subscription,
 	remove []string,
 	expectEtag int64,
 	actor string,
 ) (json.RawMessage, error) {
 
-	attr, aerr := a.attributionFor(actor)
+	attr, aerr := a.attributionFor(ctx, actor)
 	if aerr != nil {
 		return nil, aerr
 	}

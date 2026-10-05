@@ -154,7 +154,7 @@ func (a *API) MonitorStateView(ctx context.Context, p MonitorStateViewParams) (*
 	// state=/all-terminal evaluate task lifecycle, acked/terminal evaluate
 	// envelope dispositions. Mixing them would make `unmet` meaningless.
 	if condition.isEnvelopeCondition() {
-		attr, aerr := a.attributionFor(p.PrincipalRef)
+		attr, aerr := a.attributionFor(ctx, p.PrincipalRef)
 		if aerr != nil {
 			return nil, aerr
 		}

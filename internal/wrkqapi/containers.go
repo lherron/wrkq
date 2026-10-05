@@ -40,7 +40,7 @@ func (a *API) ContainerCreate(ctx context.Context, p ContainerCreateParams) (*Wr
 		return nil, NewValidationError(serr.Error(), map[string]any{"field": "slug"})
 	}
 
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}
@@ -134,7 +134,7 @@ func (a *API) ContainerUpdate(ctx context.Context, p ContainerUpdateParams) (*Wr
 		}
 	}
 
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}
@@ -187,7 +187,7 @@ func (a *API) ContainerMove(ctx context.Context, p ContainerMoveParams) (*WrkqCo
 		if p.DryRun {
 			return a.loadContainer(containerUUID)
 		}
-		attr, aerr := a.attributionFor(p.Actor)
+		attr, aerr := a.attributionFor(ctx, p.Actor)
 		if aerr != nil {
 			return nil, aerr
 		}
@@ -207,7 +207,7 @@ func (a *API) ContainerMove(ctx context.Context, p ContainerMoveParams) (*WrkqCo
 	if p.DryRun {
 		return a.loadContainer(containerUUID)
 	}
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}
@@ -367,7 +367,7 @@ func (a *API) ContainerArchive(ctx context.Context, p ContainerArchiveParams) (*
 	if err != nil {
 		return nil, NewNotFoundError(selector, "container")
 	}
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}
@@ -390,7 +390,7 @@ func (a *API) ContainerRestore(ctx context.Context, p ContainerRestoreParams) (*
 	if err != nil {
 		return nil, NewNotFoundError(selector, "container")
 	}
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}
@@ -417,7 +417,7 @@ func (a *API) ContainerDelete(ctx context.Context, p ContainerDeleteParams) (*Wr
 	if err := a.rejectRootContainer(containerUUID); err != nil {
 		return nil, err
 	}
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}
@@ -467,7 +467,7 @@ func (a *API) ContainerDeleteRecursive(ctx context.Context, p ContainerDeleteRec
 		Attachments:   p.Expected.Attachments,
 		Bytes:         p.Expected.Bytes,
 	}
-	attr, aerr := a.attributionFor(p.Actor)
+	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}

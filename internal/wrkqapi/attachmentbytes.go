@@ -135,14 +135,14 @@ func (a *API) AttachmentAddBytes(ctx context.Context, p AttachmentAddBytesParams
 	}
 
 	if strings.TrimSpace(p.UploadID) == "" {
-		return a.attachmentAddBytesBegin(p)
+		return a.attachmentAddBytesBegin(ctx, p)
 	}
-	return a.attachmentAddBytesContinue(p)
+	return a.attachmentAddBytesContinue(ctx, p)
 }
 
 // attachmentAddBytesBegin handles the first chunk: validation, staging, and (when
 // the first chunk is also final) immediate finalize.
-func (a *API) attachmentAddBytesBegin(p AttachmentAddBytesParams) (*WrkqAttachmentAddBytesResult, error) {
+func (a *API) attachmentAddBytesBegin(ctx context.Context, p AttachmentAddBytesParams) (*WrkqAttachmentAddBytesResult, error) {
 	if p.Seq != 0 {
 		return nil, NewValidationError("first upload chunk must have seq 0", map[string]any{"field": "seq"})
 	}
@@ -236,7 +236,7 @@ func (a *API) attachmentAddBytesBegin(p AttachmentAddBytesParams) (*WrkqAttachme
 	a.uploads[uploadID] = up
 	a.uploadsMu.Unlock()
 
-	res, err := a.attachmentAddBytesWrite(uploadID, up, p)
+	res, err := a.attachmentAddBytesWrite(ctx, uploadID, up, p)
 	if err != nil {
 		return nil, err
 	}
@@ -245,14 +245,14 @@ func (a *API) attachmentAddBytesBegin(p AttachmentAddBytesParams) (*WrkqAttachme
 }
 
 // attachmentAddBytesContinue handles a non-first chunk.
-func (a *API) attachmentAddBytesContinue(p AttachmentAddBytesParams) (*WrkqAttachmentAddBytesResult, error) {
+func (a *API) attachmentAddBytesContinue(ctx context.Context, p AttachmentAddBytesParams) (*WrkqAttachmentAddBytesResult, error) {
 	a.uploadsMu.Lock()
 	up := a.uploads[p.UploadID]
 	a.uploadsMu.Unlock()
 	if up == nil {
 		return nil, NewNotFoundError(p.UploadID, "upload")
 	}
-	res, err := a.attachmentAddBytesWrite(p.UploadID, up, p)
+	res, err := a.attachmentAddBytesWrite(ctx, p.UploadID, up, p)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +263,7 @@ func (a *API) attachmentAddBytesContinue(p AttachmentAddBytesParams) (*WrkqAttac
 // attachmentAddBytesWrite appends one chunk, enforcing monotonic seq + the size
 // limit, and finalizes when the chunk is marked final. On any error it discards
 // the upload session and removes the temp file.
-func (a *API) attachmentAddBytesWrite(uploadID string, up *attachmentUpload, p AttachmentAddBytesParams) (*WrkqAttachmentAddBytesResult, error) {
+func (a *API) attachmentAddBytesWrite(ctx context.Context, uploadID string, up *attachmentUpload, p AttachmentAddBytesParams) (*WrkqAttachmentAddBytesResult, error) {
 	if p.Seq != up.nextSeq {
 		a.discardUpload(uploadID, up)
 		return nil, NewValidationError("upload chunk out of order", map[string]any{
@@ -300,7 +300,7 @@ func (a *API) attachmentAddBytesWrite(uploadID string, up *attachmentUpload, p A
 		}, nil
 	}
 
-	dto, err := a.finalizeUpload(uploadID, up)
+	dto, err := a.finalizeUpload(ctx, uploadID, up)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +315,7 @@ func (a *API) attachmentAddBytesWrite(uploadID string, up *attachmentUpload, p A
 // finalizeUpload flushes the staging file, validates the total size, atomically
 // renames it into the canonical attach path, inserts the metadata row + event,
 // and returns the committed DTO. The session + temp file are always removed.
-func (a *API) finalizeUpload(uploadID string, up *attachmentUpload) (*WrkqAttachment, error) {
+func (a *API) finalizeUpload(ctx context.Context, uploadID string, up *attachmentUpload) (*WrkqAttachment, error) {
 
 	a.uploadsMu.Lock()
 	delete(a.uploads, uploadID)
@@ -362,7 +362,7 @@ func (a *API) finalizeUpload(uploadID string, up *attachmentUpload) (*WrkqAttach
 		return nil, NewInternalError(rerr)
 	}
 
-	attr, aerr := a.attributionFor(up.actor)
+	attr, aerr := a.attributionFor(ctx, up.actor)
 	if aerr != nil {
 		return nil, aerr
 	}
