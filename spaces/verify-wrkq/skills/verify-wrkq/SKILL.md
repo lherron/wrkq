@@ -87,8 +87,9 @@ serve the agent guides.
   - `live/` for reads of the canonical daemon.
 
   `wv evidence` refuses a directory inside the scratch state, because `down` removes that state.
-- **Make it repeatable.** Someone else can rerun `drive.txt` on a fresh `wv up` and reach the same end state.
-  Ids are deterministic on a fresh store (`T-00001`, `EN-00001`, ...) when the drives run in file order.
+- **Make it repeatable.** Someone else can rerun your `<artifact_dir>/NN-<feature>/drive.txt` on a fresh
+  `wv up` and reach the same end state. Ids are deterministic on a fresh store (`T-00001`, `EN-00001`, ...)
+  when the drives run in file order.
 - **Reproduce before you fix.** For a defect, record the failing drive first. If you can't reproduce it, say so
   and show what you ran.
 - **Name what you couldn't drive,** and the concrete prerequisite that stopped you. On a scratch, HRC delivery
