@@ -51,8 +51,6 @@ files and the install-rewritten `packages/client/bun.lock` do not trip this chec
 See [daemon operations](docs/wrkq-operations.md) for launchd restart and
 codesigning details.
 
-If a project lacks `just install`, add it.
-
 ## Deterministic local validation
 
 For no-network or sandboxed environments, use:
@@ -90,8 +88,6 @@ Key authority and transport inputs:
   default to port `7171`.
 - `WRKQ_DB_PATH` / `WRKQ_DB_PATH_FILE` are local-path compatibility inputs and
   reject `rpc://` values. When `WRKQ_DB` or a config locator names a different
-  database they refuse (naming `WRKQ_DB`) rather than lose silently; isolate
-  smoke tests with `WRKQ_DB=<scratch.db>` or `--db`. When `WRKQ_DB` or a config locator names a different
   database they refuse (naming `WRKQ_DB`) rather than lose silently; isolate
   smoke tests with `WRKQ_DB=<scratch.db>` or `--db`.
 - `WRKQD_TOKEN` / `WRKQD_TOKEN_FILE` authenticate remote calls. An explicitly
