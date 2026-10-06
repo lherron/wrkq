@@ -309,8 +309,8 @@ own launchd environment (`scripts/resolve-job-db.sh`). If the database cannot be
 resolved, is missing, fails the dry-run probe, or has pending migrations, it
 does not restart. It prints the remediation and exits non-zero after the rest of
 the install has run. Migrate only with the daemon stopped: `launchctl bootout`
-the job, wait until `launchctl print` no longer finds it, run `wrkqadm --db
-<path> migrate`, then `launchctl bootstrap` the plist and check `wrkq server
+the job, wait until `launchctl print` no longer finds it, run
+`wrkqadm --db <path> migrate`, then `launchctl bootstrap` the plist and check `wrkq server
 health`. Never migrate under a serving daemon: on 2026-10-04 that corrupted
 the canonical store (T-10158). `wrkq server stop` refuses under launchd.
 `wrkq server status` reports `binaryStale`, and `wrkq server health` fails on
