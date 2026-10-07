@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -41,7 +43,9 @@ import (
 // inherited, and a failed post is one `wrkp just:` line on stderr.
 
 // The vocabulary. The first segment names the subject: a run. Attribute order
-// is the render order.
+// is the render order. `load1` and `ncpu` are the machine load sampled once
+// immediately before just starts (never at the end), so a duration can be read
+// against contention; the names are shared with hook.settled (T-10466).
 const (
 	wrkpJustEventType = "run.settled"
 	wrkpJustSource    = "wrkp-just"
@@ -225,6 +229,7 @@ func runWrkpJustObserved(cmd *cobra.Command, justBin string, args []string, inv 
 	signal.Notify(forwarded, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(forwarded)
 
+	load := sampleWrkpLoad()
 	started := time.Now()
 	if err := child.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "wrkp just: %s\n", err)
@@ -256,7 +261,7 @@ func runWrkpJustObserved(cmd *cobra.Command, justBin string, args []string, inv 
 			signalName = status.Signal().String()
 		}
 	}
-	if err := postWrkpJustSettled(cmd, inv, justfile, args, code, signalName, started, duration); err != nil {
+	if err := postWrkpJustSettled(cmd, inv, justfile, args, code, signalName, started, duration, load); err != nil {
 		fmt.Fprintf(os.Stderr, "wrkp just: %s\n", strings.Join(strings.Fields(err.Error()), " "))
 	}
 	return code
@@ -275,7 +280,7 @@ func resolveWrkpJustProject(ctx context.Context, tr Transport, git wrkpGitRunner
 	return project, repo, err
 }
 
-func postWrkpJustSettled(cmd *cobra.Command, inv wrkpJustInvocation, justfile string, args []string, code int, signalName string, started time.Time, duration time.Duration) error {
+func postWrkpJustSettled(cmd *cobra.Command, inv wrkpJustInvocation, justfile string, args []string, code int, signalName string, started time.Time, duration time.Duration, load []wrkpAttribute) error {
 	// A fresh context: the command's own is cancelled by the ^C that may have
 	// ended the run, and the fact of that run is still worth posting.
 	ctx, cancel := context.WithTimeout(context.Background(), wrkpJustTimeout)
@@ -318,6 +323,7 @@ func postWrkpJustSettled(cmd *cobra.Command, inv wrkpJustInvocation, justfile st
 		wrkpAttribute{"justfile", clampWrkpJust(justfile)},
 		wrkpAttribute{"started_at", started.UTC().Format(time.RFC3339)},
 	)
+	attributes = append(attributes, load...)
 	took := duration.Round(100 * time.Millisecond).String()
 	if duration < time.Second {
 		took = duration.Round(time.Millisecond).String()
@@ -358,6 +364,20 @@ func postWrkpJustSettled(cmd *cobra.Command, inv wrkpJustInvocation, justfile st
 		UUID string `json:"uuid"`
 	}
 	return json.Unmarshal(raw, &result)
+}
+
+// sampleWrkpLoad returns the `load1` and `ncpu` attributes for a run about to
+// start, or none when the load cannot be read: sampling never fails the run.
+func sampleWrkpLoad() []wrkpAttribute {
+	load1, err := readLoad1()
+	ncpu := runtime.NumCPU()
+	if err != nil || math.IsNaN(load1) || math.IsInf(load1, 0) || load1 < 0 || ncpu < 1 {
+		return nil
+	}
+	return []wrkpAttribute{
+		{"load1", strconv.FormatFloat(load1, 'f', 2, 64)},
+		{"ncpu", strconv.Itoa(ncpu)},
+	}
 }
 
 func clampWrkpJust(value string) string {

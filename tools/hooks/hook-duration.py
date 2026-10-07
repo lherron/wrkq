@@ -28,10 +28,21 @@ def journal():
     return Path(common) / 'praesidium/hook-timings.jsonl'
 
 
+def load():
+    """load1/ncpu sampled before the hook body runs; neither when unreadable."""
+    try:
+        load1, ncpu = os.getloadavg()[0], os.cpu_count()
+    except (OSError, AttributeError):
+        return {}
+    return dict(load1=f'{load1:.2f}', ncpu=str(ncpu)) if ncpu else {}
+
+
 def start(hook):
+    sampled = load()
     started_ns = time.monotonic_ns()
     record = dict(source='wrkq-git-hook', node=socket.gethostname(), hook=hook,
-                  run_id=str(uuid.uuid4()), started_at=now(), change_kind='unclassified')
+                  run_id=str(uuid.uuid4()), started_at=now(), change_kind='unclassified',
+                  **sampled)
     for key, value in [('head', git('rev-parse', '--verify', 'HEAD')),
                        ('branch', git('branch', '--show-current'))]:
         if value:

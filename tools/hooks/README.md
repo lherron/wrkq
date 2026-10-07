@@ -11,6 +11,8 @@ for the gate: an unavailable interpreter/helper disables measurement only.
 The helper appends genuine run records to
 `.git/praesidium/hook-timings.jsonl` (Git's common directory in worktrees).
 Metadata without a reliable value is omitted; changes are `unclassified`.
+`load1` (1-minute load average, 2 dp) and `ncpu` are sampled once at hook
+start, before any git probe, and omitted together when unreadable (T-10466).
 `file_count` counts staged paths for pre-commit and committed paths relative to
 the configured upstream for pre-push, when available. It does not parse or
 consume the pre-push ref stream.

@@ -130,7 +130,9 @@ main checkout, as for the Git hooks), threaded under the caller's task when the
 seat's scope names a task in that project. Attributes, in order: `source`
 (`wrkp-just`), `node`, `recipe`, `repo`, `status` (just's exit code, 128+N for
 a signal), `duration_ms`, `signal` (when signalled), `argv`, `justfile`,
-`started_at`. Listings and other non-run modes (`--list`, `--summary`,
+`started_at`, then `load1` (1-minute load average, 2 dp) and `ncpu` (logical
+CPUs), both sampled once just before just starts and omitted together when the
+load cannot be read. Listings and other non-run modes (`--list`, `--summary`,
 `--dry-run`, ...), recipes that just runs from inside an observed run, and
 justfiles without the marker are passed straight to the real `just` with exec.
 The exit status is always just's; a failed post is one `wrkp just:` line on
