@@ -186,6 +186,32 @@ func ExpandTaskID(s string) (string, bool) {
 	return FormatTask(seq), true
 }
 
+// TaskIDCandidates lists the task friendly IDs a bare sequence number may
+// name, highest first. A 1-4 digit number names the same low four digits in
+// every ten-thousand block ("639" -> T-90639 ... T-10639, T-00639) so the
+// shorthand keeps reaching current work after the sequence rolls past 10000;
+// resolvers pick the highest candidate that exists. A 5-digit number is a
+// literal ID and has exactly one candidate. It returns (nil, false) when s is
+// not a bare 1-5 digit number.
+func TaskIDCandidates(s string) ([]string, bool) {
+	s = strings.TrimSpace(s)
+	if !bareSeqPattern.MatchString(s) {
+		return nil, false
+	}
+	seq, err := strconv.Atoi(s)
+	if err != nil {
+		return nil, false
+	}
+	if len(s) == 5 {
+		return []string{FormatTask(seq)}, true
+	}
+	candidates := make([]string, 0, 10)
+	for block := 9; block >= 0; block-- {
+		candidates = append(candidates, FormatTask(block*10000+seq))
+	}
+	return candidates, true
+}
+
 // IsUUID checks if a string is a valid UUID
 func IsUUID(s string) bool {
 	return uuidPattern.MatchString(strings.ToLower(s))

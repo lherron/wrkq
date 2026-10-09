@@ -204,6 +204,37 @@ func ResolveTaskByPath(database *db.DB, path string) (string, string, error) {
 
 }
 
+// rowQueryer is the single-row query surface shared by *db.DB, *sql.DB and
+// *sql.Tx.
+type rowQueryer interface {
+	QueryRow(query string, args ...interface{}) *sql.Row
+}
+
+// ExpandBareTaskID expands a bare sequence number to the highest existing task
+// ID among id.TaskIDCandidates. When none exists it returns the lowest
+// candidate so the caller reports "task not found" for the literal number. It
+// returns (token, false, nil) when token is not a bare number.
+func ExpandBareTaskID(q rowQueryer, token string) (string, bool, error) {
+	candidates, ok := id.TaskIDCandidates(token)
+	if !ok {
+		return token, false, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(candidates)), ",")
+	args := make([]interface{}, len(candidates))
+	for i, c := range candidates {
+		args[i] = c
+	}
+	var found string
+	err := q.QueryRow("SELECT id FROM tasks WHERE id IN ("+placeholders+") ORDER BY id DESC LIMIT 1", args...).Scan(&found)
+	if err == sql.ErrNoRows {
+		return candidates[len(candidates)-1], true, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("database error: %w", err)
+	}
+	return found, true, nil
+}
+
 // ResolveTask resolves a task selector to its UUID.
 // Supports friendly IDs (T-00001), UUIDs, and paths (container/task-slug).
 // Returns (uuid, friendlyID, error).
@@ -217,9 +248,11 @@ func ResolveTask(database *db.DB, selector string) (string, string, error) {
 
 	token := parsed.Token
 
-	// Convenience: expand a bare sequence number ("1454") into a full task
-	// friendly ID ("T-01454") so it can be looked up like any other T- id.
-	if expanded, ok := id.ExpandTaskID(token); ok {
+	// Convenience: expand a bare sequence number ("1454") into the highest
+	// existing task ID it may name ("T-11454" over "T-01454").
+	if expanded, ok, err := ExpandBareTaskID(database, token); err != nil {
+		return "", "", err
+	} else if ok {
 		token = expanded
 	}
 

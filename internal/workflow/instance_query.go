@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/lherron/wrkq/internal/cursor"
-	"github.com/lherron/wrkq/internal/id"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 )
@@ -489,7 +488,9 @@ func resolveTaskUUIDQuery(q queryer, selector string) (string, error) {
 		return "", fmt.Errorf("expected task selector (t:), got %s selector", parsed.Type)
 	}
 	token := parsed.Token
-	if expanded, ok := id.ExpandTaskID(token); ok {
+	if expanded, ok, err := selectors.ExpandBareTaskID(q, token); err != nil {
+		return "", err
+	} else if ok {
 		token = expanded
 	}
 	if strings.HasPrefix(token, "T-") {

@@ -1,6 +1,7 @@
 package id
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -407,6 +408,22 @@ func TestExpandTaskID(t *testing.T) {
 		gotID, gotOK := ExpandTaskID(tt.in)
 		if gotID != tt.wantID || gotOK != tt.wantOK {
 			t.Errorf("ExpandTaskID(%q) = (%q, %v), want (%q, %v)", tt.in, gotID, gotOK, tt.wantID, tt.wantOK)
+		}
+	}
+}
+
+func TestTaskIDCandidates(t *testing.T) {
+	got, ok := TaskIDCandidates(" 639 ")
+	want := []string{"T-90639", "T-80639", "T-70639", "T-60639", "T-50639", "T-40639", "T-30639", "T-20639", "T-10639", "T-00639"}
+	if !ok || strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("TaskIDCandidates(639) = %v, %v", got, ok)
+	}
+	if got, ok := TaskIDCandidates("00639"); !ok || len(got) != 1 || got[0] != "T-00639" {
+		t.Fatalf("five digits must stay literal: %v, %v", got, ok)
+	}
+	for _, in := range []string{"", "T-00639", "123456", "12a"} {
+		if got, ok := TaskIDCandidates(in); ok || got != nil {
+			t.Fatalf("TaskIDCandidates(%q) = %v, %v", in, got, ok)
 		}
 	}
 }
