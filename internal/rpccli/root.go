@@ -155,6 +155,8 @@ func Execute() error {
 // ExecuteAs runs the RPC-backed CLI under a specific executable name, through
 // the shared help/error funnel (CLI standard §1, §4).
 func ExecuteAs(commandName string) error {
+	prof := startProfile()
+	defer prof.report(os.Stderr)
 	return clifunnel.Execute(context.Background(), NewRootCmdFor(commandName), os.Args[1:],
 		clifunnel.Options{NotFoundHint: wrkqNotFoundHint, OutputModes: wrkqOutputModes})
 }

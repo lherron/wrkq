@@ -13,11 +13,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lherron/wrkq/internal/workrpc"
 )
@@ -407,6 +409,21 @@ func (t *remoteTransport) Call(ctx context.Context, method string, params any) (
 }
 
 func (t *remoteTransport) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	obs := callObserver()
+	if obs == nil {
+		return t.roundTrip(ctx, method, params, nil)
+	}
+	ct := CallTiming{Method: method, Start: time.Now()}
+	res, err := t.roundTrip(httptrace.WithClientTrace(ctx, callTrace(&ct)), method, params, &ct)
+	ct.Total = time.Since(ct.Start)
+	ct.Err = err
+	obs(ct)
+	return res, err
+}
+
+// roundTrip performs one HTTP workrpc request. ct, when non-nil, receives the
+// phases httptrace cannot see (encode time, payload sizes).
+func (t *remoteTransport) roundTrip(ctx context.Context, method string, params any, ct *CallTiming) (json.RawMessage, error) {
 	t.nextID++
 	id := json.RawMessage(strconv.Itoa(t.nextID))
 	var raw json.RawMessage
@@ -421,6 +438,10 @@ func (t *remoteTransport) request(ctx context.Context, method string, params any
 	if err != nil {
 		return nil, err
 	}
+	if ct != nil {
+		ct.Encode = time.Since(ct.Start)
+		ct.ReqBytes = len(frame)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(frame))
 	if err != nil {
 		return nil, err
@@ -434,8 +455,12 @@ func (t *remoteTransport) request(ctx context.Context, method string, params any
 		return nil, newUnreachableError(t.url, method, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	var body io.Reader = resp.Body
+	if ct != nil {
+		body = &countingReader{r: resp.Body, n: &ct.RespBytes}
+	}
 	var rpcResp workrpc.Response
-	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+	if err := json.NewDecoder(body).Decode(&rpcResp); err != nil {
 		return nil, fmt.Errorf("decode remote workrpc response %s: %w", method, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
