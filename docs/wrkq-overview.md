@@ -19,14 +19,16 @@ repo wins over any other markdown when they conflict.
 
 ## Shipped binaries
 
-The repo builds four binaries (`just build`, `just install`):
+The repo builds six binaries (`just build`, `just install`):
 
 | Binary | Entry point | Role |
 | --- | --- | --- |
 | `wrkq` | `cmd/wrkq/main.go` | Day-to-day human/agent task surface. Routes durable operations through the `workrpc` JSON-RPC boundary rather than talking to SQLite directly. |
 | `wrkqadm` | `cmd/wrkqadm/main.go` | Administrative surface: DB init/migrate/snapshot, actors, patches, state export/import/verify, doctor. Local-path-only — rejects `rpc://` locators. |
 | `wrkqd` | `cmd/wrkqd/main.go` | Local daemon: token-auth HTTP + JSON-RPC API over the database. `wrkq server` wraps its lifecycle. |
-| `wrkf` | `cmd/wrkf/main.go` | Separate workflow engine that layers workflow instances, evidence, obligations, and transitions on top of wrkq tasks. Same repo, own DB (`var/db/wrkf.db`), own frozen RPC contract (`docs/wrkf-rpc.md`). |
+| `wrkf` | `cmd/wrkf/main.go` | Workflow engine that layers workflow instances, evidence, obligations, and transitions on top of wrkq tasks. Its tables live in the same database (wrkq migrations, from `000014_wrkf_schema.sql`) and it speaks the unified wrkq/wrkf RPC protocol (`docs/wrkq-wrkf-rpc.md`). |
+| `wrkc` | `cmd/wrkc/main.go` | Durable agent collaboration: rooms and envelopes (say, inbox, reply obligations). RPC-backed via `internal/rpccli`. |
+| `wrkp` | `cmd/wrkp/main.go` | Posts and reads foreign project facts (`wrkp post`, project events). RPC-backed via `internal/rpccli`. |
 
 ## Data model
 
@@ -95,7 +97,7 @@ be either:
 
 - a **local SQLite path** — direct file access, WAL mode; or
 - **`rpc://host[:port]`** (default port `7171`) — JSON-RPC frames sent over
-  HTTP `POST /v1/rpc` (`internal/workrpc/remote_stdio.go:17`) to a remote
+  HTTP `POST /v1/rpc` (`internal/workrpc/remote_stdio.go`) to a remote
   `wrkqd`.
 
 This lets a machine with no local canonical DB use a remote one as its store
@@ -118,7 +120,7 @@ Admin/daemon path-owning surfaces are intentionally local-only and reject
 
 | Path | Responsibility |
 | --- | --- |
-| `internal/rpccli` | RPC-backed production `wrkq` command adapters. |
+| `internal/rpccli` | RPC-backed production `wrkq`, `wrkc` and `wrkp` command adapters. |
 | `internal/admincli` | Local-path-only `wrkqadm` database lifecycle commands. |
 | `internal/wrkqd` | Authenticated daemon HTTP/workrpc surface + daemon-owned search indexer. |
 | `internal/config` | Config/env loading and precedence. |
@@ -135,9 +137,10 @@ Admin/daemon path-owning surfaces are intentionally local-only and reject
 
 ## What wrkq is not
 
-- Not the `wrkf` workflow engine — `wrkf` is a separate system in the same
-  repo with its own DB and frozen RPC contract; `tasks.state` is plain wrkq
-  lifecycle state, not a projection of workflow state.
+- Not the `wrkf` workflow engine — `wrkf` is a separate subsystem that shares
+  the repo, database and RPC protocol but keeps its own workflow tables;
+  `tasks.state` is plain wrkq lifecycle state, not a projection of workflow
+  state.
 - Not authn/authz — principal refs are attribution, not authentication.
 - Not a cloud/sync service — local-first, no hosted multi-tenant mode, not a
   real filesystem (no FUSE).
