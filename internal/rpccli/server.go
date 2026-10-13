@@ -476,7 +476,7 @@ func restartLaunchdDaemon(cmd *cobra.Command, owner *launchdOwner) error {
 		return relaunchLaunchdJob(owner)
 	}
 	if identity := inspectLaunchdBinary(owner); identity.stale() {
-		return fmt.Errorf("launchd job %s reports no plist path, so it cannot be bootstrapped again, and %s (%s) is not the image the running daemon loaded (%s); kickstarting it would respawn into a SIGKILL. Reinstall the plist (just install-launchd), then retry", owner.serviceTarget, identity.path, shortCDHash(identity.onDisk), shortCDHash(identity.running))
+		return fmt.Errorf("launchd job %s reports no plist path, so it cannot be bootstrapped again, and %s (%s) is not the image the running daemon loaded (%s); kickstarting it would respawn into a SIGKILL. Reinstall the plist (just launchd-install), then retry", owner.serviceTarget, identity.path, shortCDHash(identity.onDisk), shortCDHash(identity.running))
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "wrkq: launchd job %s reports no plist path; falling back to kickstart -k\n", owner.serviceTarget)
 	return launchctlKickstart(owner, true)

@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } fr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// `just install-launchd` / `install-llama-launchd` go through
+// `just launchd-install` / `launchd-uninstall` go through
 // scripts/launchd-install.sh (T-08044): absent → install, plist-equivalent →
 // no-op, any other difference → refuse unless --force. mini-wrkqd.plist is
 // fabricated from mini's captured `launchctl print` (launchctl-print fixture);

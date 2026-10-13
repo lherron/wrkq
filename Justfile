@@ -363,39 +363,74 @@ sync-downstream:
 sync-downstream-test:
   bun test test/sync-downstream.test.ts
 
+# Covers the launchd-install/uninstall recipes and overwrite guard (T-08044, T-10825) too.
+
 # Validate the launchd job database resolver behind just install's restart probe (T-08927)
-# and the install-launchd overwrite guard (T-08044).
 install-probe-test:
-  bun test test/t08927_install_job_db.test.ts test/t08044_install_launchd_guard.test.ts
+  bun test test/t08927_install_job_db.test.ts test/t08044_install_launchd_guard.test.ts test/t10825_launchd_recipes.test.ts
 
-# Install the wrkq launchd agent plist. Refuses (T-08044) when an installed plist
-# differs at all — on mini that is the canonical tailnet wrkqd, which this repo's
-# loopback dev plist would downgrade. Pass --force to overwrite anyway.
-install-launchd *flags:
+# global/launchd-jobs §2. Each copy goes through the T-08044 guard: a differing
+# installed plist (on mini, the canonical tailnet wrkqd, which this repo's
+# loopback dev plist would downgrade) refuses unless --force. Name jobs by label
+# or short name (`just launchd-install llama-server`) to install only those;
+# an unknown name refuses. Reload is bootout + bootstrap, never kickstart -k.
+# llama-server (dense embeddings for search) answers curl http://127.0.0.1:18480/health.
+
+# Copy, adopt and bootstrap launchd/ jobs; pass --force or job names (macOS)
+launchd-install *args:
   #!/usr/bin/env bash
   set -euo pipefail
-  src="launchd/com.praesidium.wrkq-server.plist"
-  dst="$HOME/Library/LaunchAgents/com.praesidium.wrkq-server.plist"
-  LAUNCHD_INSTALL_OVERRIDE="just install-launchd --force" bash scripts/launchd-install.sh "$src" "$dst" {{flags}}
-  # kickstart -k keeps the loaded job definition; a changed plist needs bootout + bootstrap.
-  echo "Load it with:"
-  echo "  launchctl bootout gui/$(id -u)/com.praesidium.wrkq-server 2>/dev/null; launchctl bootstrap gui/$(id -u) $dst"
+  force=""
+  jobs=()
+  for arg in {{args}}; do
+    case "$arg" in
+      --force) force="--force" ;;
+      -*) echo "launchd-install: unknown flag $arg" >&2; exit 2 ;;
+      *) jobs+=("$arg") ;;
+    esac
+  done
+  srcs="$(bash scripts/launchd-jobs.sh "${jobs[@]+"${jobs[@]}"}")"
+  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/praesidium/var/logs/llama-cpp"
+  while IFS= read -r src; do
+    dst="$HOME/Library/LaunchAgents/$(basename "$src")"
+    LAUNCHD_INSTALL_OVERRIDE="just launchd-install --force $(basename "$src" .plist)" bash scripts/launchd-install.sh "$src" "$dst" $force
+    if command -v praesidium-adopt >/dev/null; then praesidium-adopt "$dst"; fi
+    launchctl bootout "gui/$(id -u)" "$dst" 2>/dev/null || true
+    # bootout can return before launchd releases the label; bootstrap then fails with error 5.
+    for attempt in 1 2 3 4 5; do
+      launchctl bootstrap "gui/$(id -u)" "$dst" && break
+      [ "$attempt" = 5 ] && { echo "✗ launchctl bootstrap $dst failed after $attempt attempts" >&2; exit 1; }
+      sleep "${LAUNCHD_BOOTSTRAP_RETRY_SLEEP:-2}"
+    done
+    echo "✓ Bootstrapped $(basename "$src" .plist)"
+  done <<<"$srcs"
 
-# Install the llama-server launchd plist (dense embeddings for search index).
-# Same guard as install-launchd: a differing installed plist needs --force.
-install-llama-launchd *flags:
+# Same T-08044 guard: an installed copy that differs from the repo plist (mini's
+# canonical wrkqd) is not this repo's job to remove, so it refuses unless --force.
+
+# Boot out and remove installed launchd/ jobs; pass --force or job names (macOS)
+launchd-uninstall *args:
   #!/usr/bin/env bash
   set -euo pipefail
-  src="launchd/com.praesidium.llama-server.plist"
-  dst="$HOME/Library/LaunchAgents/com.praesidium.llama-server.plist"
-  mkdir -p "$HOME/praesidium/var/logs/llama-cpp"
-  LAUNCHD_INSTALL_OVERRIDE="just install-llama-launchd --force" bash scripts/launchd-install.sh "$src" "$dst" {{flags}}
-  echo "Bootstrap with:"
-  echo "  launchctl bootstrap gui/$(id -u) $dst"
-  echo "  launchctl kickstart -k gui/$(id -u)/com.praesidium.llama-server"
-  echo
-  echo "Verify with:"
-  echo "  curl http://127.0.0.1:18480/health"
+  force=""
+  jobs=()
+  for arg in {{args}}; do
+    case "$arg" in
+      --force) force=1 ;;
+      -*) echo "launchd-uninstall: unknown flag $arg" >&2; exit 2 ;;
+      *) jobs+=("$arg") ;;
+    esac
+  done
+  srcs="$(bash scripts/launchd-jobs.sh "${jobs[@]+"${jobs[@]}"}")"
+  while IFS= read -r src; do
+    dst="$HOME/Library/LaunchAgents/$(basename "$src")"
+    if [ -z "$force" ]; then
+      LAUNCHD_INSTALL_OVERRIDE="just launchd-uninstall --force $(basename "$src" .plist)" bash scripts/launchd-install.sh "$src" "$dst" --check
+    fi
+    launchctl bootout "gui/$(id -u)" "$dst" 2>/dev/null || true
+    rm -f "$dst"
+    echo "✓ Removed $(basename "$src" .plist)"
+  done <<<"$srcs"
 
 # Install CLI binaries to /usr/local/bin (requires sudo - run manually)
 install-system:
