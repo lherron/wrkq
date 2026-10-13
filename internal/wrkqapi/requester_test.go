@@ -146,9 +146,14 @@ func TestOwnerTimelineShowsDelegationFactsByDefault(t *testing.T) {
 	if !ok || released.Claim == nil || released.Claim.PrincipalRef != "agent:arris" || released.Claim.Generation != claim.ClaimGeneration {
 		t.Fatalf("claim_released entry = %+v", released)
 	}
+	// Every task's creation is default-visible (T-10783 reversed T-09978's
+	// quiet ordinary creation); a field edit stays quiet.
+	if _, ok := seen["task.created "+owner.ID]; !ok {
+		t.Fatalf("ordinary task creation missing from the default timeline: %+v", family.Entries)
+	}
 	for key := range seen {
-		if key == "task.created "+owner.ID || strings.HasPrefix(key, "task.edited ") {
-			t.Fatalf("ordinary creation/edit leaked into the default timeline: %s", key)
+		if strings.HasPrefix(key, "task.edited ") {
+			t.Fatalf("edit leaked into the default timeline: %s", key)
 		}
 	}
 
@@ -156,17 +161,20 @@ func TestOwnerTimelineShowsDelegationFactsByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requestVisible := false
+	requestVisible, ownerVisible := false, false
 	for _, entry := range project.Entries {
 		if entry.Type == "task.created" && entry.TaskID == request.ID {
 			requestVisible = entry.Requester != nil
 		}
 		if entry.Type == "task.created" && entry.TaskID == owner.ID {
-			t.Fatal("ordinary task.created is no longer quiet")
+			ownerVisible = entry.Requester == nil
 		}
 	}
 	if !requestVisible {
 		t.Fatal("task created with requester fields is not default-visible")
+	}
+	if !ownerVisible {
+		t.Fatal("ordinary task.created is not default-visible, or carries a requester it never had")
 	}
 
 	// A filter naming the type still reaches ordinary creation.

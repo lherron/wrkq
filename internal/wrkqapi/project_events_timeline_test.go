@@ -118,8 +118,23 @@ func TestProjectEventsI7LegacyAdditiveOnlyAndStateFrom(t *testing.T) {
 	setTaskState(t, api, task.ID, "in_progress")
 	legacy := timelineView(t, api, ContainerTimelineViewParams{Container: project.UUID})
 	explicit := timelineView(t, api, ContainerTimelineViewParams{Container: project.UUID, Scope: "container"})
-	if len(legacy.Entries) != len(explicit.Entries) {
-		t.Fatalf("container scope changed delivery: %d/%d", len(legacy.Entries), len(explicit.Entries))
+	// The legacy path is frozen and never carried task.created; the explicit
+	// container scope delivers every legacy entry plus the task's creation,
+	// which is default-visible on v2 since T-10783.
+	explicitIDs, created := map[int64]bool{}, 0
+	for _, entry := range explicit.Entries {
+		explicitIDs[entry.EventID] = true
+		if entry.Type == "task.created" && entry.TaskUUID == task.UUID {
+			created++
+		}
+	}
+	for _, entry := range legacy.Entries {
+		if entry.Type == "task.created" || !explicitIDs[entry.EventID] {
+			t.Fatalf("container scope changed legacy delivery: %#v vs %#v", legacy.Entries, explicit.Entries)
+		}
+	}
+	if created != 1 || len(explicit.Entries) != len(legacy.Entries)+1 {
+		t.Fatalf("container scope extras beyond the task's creation: %d/%d %#v", len(legacy.Entries), len(explicit.Entries), explicit.Entries)
 	}
 	found := false
 	for _, entry := range legacy.Entries {

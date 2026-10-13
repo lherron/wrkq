@@ -95,24 +95,24 @@ before listing gives a consistent cut: a change made during the listing is
 delivered again rather than lost. `--limit N` bounds one read; continue from
 the printed cursor.
 
-## Quiet task entries
+## Task entries
 
-`task.created`, `task.edited` (a task update that sets no state: title,
-priority, labels, description, ...) and `task.moved` are delivered only to a
-read whose `--type` filter names them, exactly or by glob (`task.*`). An
-unfiltered read never shows them. `task.created` carries the initial state in
-`taskState`; `task.edited` and `task.moved` carry only the task identity, and a
+`task.created` is visible by default for every task. It carries the initial
+state in `taskState`, and `requester` (`principalRef`, `scopeRef`) when the
+task was created with requester fields.
+
+`task.edited` (a task update that sets no state: title, priority, labels,
+description, ...) and `task.moved` are quiet: they are delivered only to a read
+whose `--type` filter names them, exactly or by glob (`task.*`), and an
+unfiltered read never shows them. They carry only the task identity, and a
 mirror re-reads the task.
 
-Delegated work is the exception: `task.created` for a named subtask, or for any
-task created with requester fields, is visible by default and carries
-`requester` (`principalRef`, `scopeRef`) when set. `task.claimed` and
-`task.claim_released` are always visible; their `claim` detail carries the
-holder `principalRef`, `scopeRef`, `node` and `generation` (a release's entry
-principal is whoever released it). `wrkp log --task T-12345` covers the owner
-and all its named subtasks. A move appears on the timeline of the container it
-left as well as the one it entered. Events written before the affiliation stamp
-existed are not placed on any timeline.
+`task.claimed` and `task.claim_released` are always visible; their `claim`
+detail carries the holder `principalRef`, `scopeRef`, `node` and `generation`
+(a release's entry principal is whoever released it). `wrkp log --task
+T-12345` covers the owner and all its named subtasks. A move appears on the
+timeline of the container it left as well as the one it entered. Events
+written before the affiliation stamp existed are not placed on any timeline.
 
 ## `just` runs: `run.settled`
 

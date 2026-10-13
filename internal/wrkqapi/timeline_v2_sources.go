@@ -29,8 +29,6 @@ type timelineRawEvent struct {
 	commentBody string
 	commentMeta sql.NullString
 	envelope    timelineRawEnvelope
-	// subtask is true when the event's task row has a subtask owner.
-	subtask bool
 }
 
 // timelineRawEnvelope carries the room-message columns for an envelope.created
@@ -92,8 +90,7 @@ func loadTimelineRawEvents(ctx context.Context, tx timelineQueryer, low, high in
 		       env.from_project_uuid,
 		       (SELECT group_concat(to_project_uuid) FROM envelopes sibling
 		         WHERE COALESCE(sibling.group_id, sibling.id) = COALESCE(env.group_id, env.id)
-		           AND sibling.to_project_uuid IS NOT NULL),
-		       t.subtask_owner_uuid IS NOT NULL
+		           AND sibling.to_project_uuid IS NOT NULL)
 		  FROM event_log e
 		  LEFT JOIN tasks t ON e.resource_type = 'task' AND t.uuid = e.resource_uuid
 		  LEFT JOIN v_task_paths tp ON tp.uuid = t.uuid
@@ -189,7 +186,6 @@ func loadTimelineRawEvents(ctx context.Context, tx timelineQueryer, low, high in
 			&raw.envelope.from, &raw.envelope.obligation, &raw.envelope.body,
 			&raw.envelope.container, &raw.envelope.campaign,
 			&raw.envelope.fromProject, &raw.envelope.toProjects,
-			&raw.subtask,
 		); err != nil {
 			return nil, false, NewInternalError(err)
 		}

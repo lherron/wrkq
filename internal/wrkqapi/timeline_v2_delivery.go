@@ -28,7 +28,7 @@ func deliverTimelineEvent(raw timelineRawEvent, root string, affiliation map[str
 	if err := normalizeTimelineEntry(&entry, raw.eventType, raw.payload, root); err != nil {
 		return WrkqTimelineEntry{}, false, NewInternalError(err)
 	}
-	if timelineQuietTypes[entry.Type] && !timelineCreatedVisible(entry, raw.subtask) &&
+	if timelineQuietTypes[entry.Type] &&
 		(len(filters) == 0 || !timelineTypeMatches(filters, entry.Type)) {
 		return WrkqTimelineEntry{}, false, nil
 	}
@@ -112,15 +112,10 @@ func timelineProjectListContains(raw, target string) bool {
 // timelineQuietTypes are delivered only to a read whose type filter names them
 // (exactly or by a trailing glob). An unfiltered read -- the human timeline --
 // never sees them. They exist for a cursor-driven reader that mirrors tasks
-// and must learn of every change it has to re-read.
-var timelineQuietTypes = map[string]bool{"task.created": true, "task.edited": true, "task.moved": true}
-
-// timelineCreatedVisible lifts task.created out of the quiet set for delegated
-// work: a named subtask (decided from the task row's owner relation) or a task
-// created with requester fields. Ordinary task creation stays quiet.
-func timelineCreatedVisible(entry WrkqTimelineEntry, subtask bool) bool {
-	return entry.Type == "task.created" && (subtask || entry.Requester != nil)
-}
+// and must learn of every change it has to re-read. task.created is not quiet:
+// every task's creation is default-visible (T-10783), so a reader of the
+// timeline can say when a task began.
+var timelineQuietTypes = map[string]bool{"task.edited": true, "task.moved": true}
 
 // applyTimelineMove affiliates a move by the container it LEFT as well as the
 // one it entered: a reader of the old project must learn the task went away.
