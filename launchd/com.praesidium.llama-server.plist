@@ -42,10 +42,10 @@
   <string>Interactive</string>
 
   <key>StandardOutPath</key>
-  <string>/Users/lherron/praesidium/var/logs/wrkq/llama-server.log</string>
+  <string>/Users/lherron/praesidium/var/logs/wrkq/llama-server.raw.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/lherron/praesidium/var/logs/wrkq/llama-server.err.log</string>
+  <string>/Users/lherron/praesidium/var/logs/wrkq/llama-server.raw.err.log</string>
 
   <key>EnvironmentVariables</key>
   <dict>

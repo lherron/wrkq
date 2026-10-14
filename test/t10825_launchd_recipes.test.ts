@@ -109,10 +109,14 @@ describe.skipIf(process.platform !== "darwin")("launchd-install / launchd-uninst
     expect(r.calls.some((c) => c.includes("kickstart"))).toBe(false);
   });
 
+  // Binaries wrkq does not author log under a .raw. segment, which exempts them
+  // from L2 (logging.md "Third-party processes"); T-10861.
+  const thirdParty = new Set(["com.praesidium.llama-server"]);
+
   test("every repo plist logs to <home>/praesidium/var/logs/wrkq/<name>.log and <name>.err.log (logging.md L1)", () => {
     for (const label of jobs) {
       const repo = json(join(repoLaunchd, `${label}.plist`));
-      const name = label.replace(/^com\.praesidium\./, "");
+      const name = label.replace(/^com\.praesidium\./, "") + (thirdParty.has(label) ? ".raw" : "");
       const logs = `${repo.EnvironmentVariables.HOME}/praesidium/var/logs/wrkq`;
       expect(repo.StandardOutPath).toBe(`${logs}/${name}.log`);
       expect(repo.StandardErrorPath).toBe(`${logs}/${name}.err.log`);
