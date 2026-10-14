@@ -143,6 +143,7 @@ func NewRootCmdFor(commandName string) *cobra.Command {
 	for _, mc := range topLevelCommands {
 		root.AddCommand(newStubCmd(mc))
 	}
+	addJSONFlagEverywhere(root)
 	applyHelpTemplates(root)
 	return root
 }

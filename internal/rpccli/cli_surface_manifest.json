@@ -52,6 +52,13 @@
             "type": "bool",
             "default": "false",
             "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": true
           }
         ]
       },
@@ -162,6 +169,13 @@
             "hidden": false
           },
           {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": true
+          },
+          {
             "name": "with-metadata",
             "usage": "Update metadata fields (title, state, priority, due_at) in addition to description/specification",
             "type": "bool",
@@ -183,6 +197,13 @@
             "type": "int64",
             "default": "0",
             "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": true
           },
           {
             "name": "yes",
@@ -207,6 +228,13 @@
             "hidden": false,
             "available": true,
             "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              },
               {
                 "name": "output-file",
                 "shorthand": "o",
@@ -295,6 +323,13 @@
             "hidden": false,
             "available": true,
             "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              },
               {
                 "name": "yes",
                 "usage": "Skip confirmation",
@@ -868,6 +903,13 @@
                 "hidden": false
               },
               {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              },
+              {
                 "name": "purge",
                 "usage": "Hard delete (remove from database)",
                 "type": "bool",
@@ -1032,6 +1074,13 @@
                 "type": "int64",
                 "default": "0",
                 "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
               },
               {
                 "name": "remove-webhook-url",
@@ -1698,7 +1747,16 @@
             "use": "pause",
             "short": "Pause background search indexing",
             "hidden": false,
-            "available": true
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
           },
           {
             "name": "rebuild",
@@ -1713,6 +1771,13 @@
                 "type": "bool",
                 "default": "false",
                 "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
               }
             ]
           },
@@ -1721,7 +1786,16 @@
             "use": "resume",
             "short": "Resume background search indexing",
             "hidden": false,
-            "available": true
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
           },
           {
             "name": "status",
@@ -1744,14 +1818,32 @@
             "use": "update",
             "short": "Index pending canonical changes",
             "hidden": false,
-            "available": true
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
           },
           {
             "name": "vacuum",
             "use": "vacuum",
             "short": "Vacuum the local search index",
             "hidden": false,
-            "available": true
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
           }
         ]
       },
@@ -1987,6 +2079,13 @@
             "available": true,
             "flags": [
               {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              },
+              {
                 "name": "stall-after",
                 "usage": "Exit after this duration with no new events",
                 "type": "string",
@@ -2024,6 +2123,13 @@
                 "usage": "Output format: ndjson or compact",
                 "type": "string",
                 "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
               },
               {
                 "name": "last",
@@ -2108,6 +2214,13 @@
             "type": "int64",
             "default": "0",
             "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": true
           },
           {
             "name": "nullglob",
@@ -2837,7 +2950,16 @@
             "use": "add \u003cfrom-task\u003e \u003ckind\u003e \u003cto-task\u003e",
             "short": "Created a relation between tasks",
             "hidden": false,
-            "available": true
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
           },
           {
             "name": "ls",
@@ -2874,7 +2996,16 @@
             "use": "rm \u003cfrom-task\u003e \u003ckind\u003e \u003cto-task\u003e",
             "short": "Removed a relation between tasks",
             "hidden": false,
-            "available": true
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
           }
         ]
       },
@@ -2949,6 +3080,13 @@
             "hidden": false
           },
           {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": true
+          },
+          {
             "name": "title",
             "usage": "Custom title (defaults to new slug)",
             "type": "string",
@@ -2987,6 +3125,13 @@
             "type": "int64",
             "default": "0",
             "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": true
           },
           {
             "name": "labels",
@@ -3124,6 +3269,13 @@
             "type": "bool",
             "default": "false",
             "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": true
           },
           {
             "name": "yes",
@@ -3313,7 +3465,16 @@
             "use": "health",
             "short": "Check wrkq daemon server health",
             "hidden": false,
-            "available": true
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
           },
           {
             "name": "restart",
@@ -3342,6 +3503,13 @@
                 "type": "bool",
                 "default": "false",
                 "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
               },
               {
                 "name": "timeout-ms",
@@ -3381,6 +3549,13 @@
                 "hidden": false
               },
               {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              },
+              {
                 "name": "timeout-ms",
                 "usage": "Startup timeout in milliseconds",
                 "type": "int",
@@ -3418,6 +3593,13 @@
                 "type": "bool",
                 "default": "false",
                 "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
               },
               {
                 "name": "timeout-ms",
@@ -3512,6 +3694,13 @@
             "type": "int",
             "default": "1",
             "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": true
           },
           {
             "name": "kind",
@@ -3667,6 +3856,13 @@
             "usage": "Continue an event-id-fenced snapshot page",
             "type": "string",
             "hidden": false
+          },
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": true
           },
           {
             "name": "limit",
@@ -3920,7 +4116,16 @@
         "use": "unarchive \u003cpath|id\u003e...",
         "short": "Unarchive one or more containers",
         "hidden": false,
-        "available": true
+        "available": true,
+        "flags": [
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": true
+          }
+        ]
       },
       {
         "name": "usage",
@@ -3976,14 +4181,32 @@
             "use": "add \u003curl\u003e",
             "short": "Add a global webhook URL",
             "hidden": false,
-            "available": true
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
           },
           {
             "name": "list",
             "use": "list",
             "short": "List global webhook URLs",
             "hidden": false,
-            "available": true
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
           },
           {
             "name": "rm",
@@ -3993,7 +4216,16 @@
             ],
             "short": "Remove a global webhook URL",
             "hidden": false,
-            "available": true
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
           }
         ]
       },
