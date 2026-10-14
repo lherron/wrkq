@@ -109,6 +109,25 @@ describe.skipIf(process.platform !== "darwin")("launchd-install / launchd-uninst
     expect(r.calls.some((c) => c.includes("kickstart"))).toBe(false);
   });
 
+  test("every repo plist logs to <home>/praesidium/var/logs/wrkq/<name>.log and <name>.err.log (logging.md L1)", () => {
+    for (const label of jobs) {
+      const repo = json(join(repoLaunchd, `${label}.plist`));
+      const name = label.replace(/^com\.praesidium\./, "");
+      const logs = `${repo.EnvironmentVariables.HOME}/praesidium/var/logs/wrkq`;
+      expect(repo.StandardOutPath).toBe(`${logs}/${name}.log`);
+      expect(repo.StandardErrorPath).toBe(`${logs}/${name}.err.log`);
+    }
+  });
+
+  test("install creates the wrkq log directory before the first bootstrap", () => {
+    const logs = join(home, "praesidium", "var", "logs", "wrkq");
+    stub("launchctl", `echo "launchctl $* logs=$([ -d "${logs}" ] && echo yes || echo no)" >> "${log}"; exit 0`);
+    const r = just(["launchd-install", "llama-server"]);
+    expect(r.status).toBe(0);
+    expect(r.calls.find((c) => c.startsWith("launchctl bootstrap"))).toEndWith("logs=yes");
+    expect(existsSync(join(home, "praesidium", "var", "logs", "llama-cpp"))).toBe(false);
+  });
+
   test("without an adopter on the host the step is skipped and the copy stays host-neutral", () => {
     const r = just(["launchd-install"]);
     expect(r.status).toBe(0);

@@ -390,7 +390,8 @@ launchd-install *args:
     esac
   done
   srcs="$(bash scripts/launchd-jobs.sh "${jobs[@]+"${jobs[@]}"}")"
-  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/praesidium/var/logs/llama-cpp"
+  # launchd does not create StandardOutPath/StandardErrorPath directories (logging.md L1).
+  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/praesidium/var/logs/wrkq"
   while IFS= read -r src; do
     dst="$HOME/Library/LaunchAgents/$(basename "$src")"
     LAUNCHD_INSTALL_OVERRIDE="just launchd-install --force $(basename "$src" .plist)" bash scripts/launchd-install.sh "$src" "$dst" $force

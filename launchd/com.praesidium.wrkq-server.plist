@@ -31,7 +31,7 @@
     <key>WRKQ_RUNTIME_DIR</key>
     <string>/Users/lherron/praesidium/var/run/wrkq</string>
     <key>WRKQ_LOG_PATH</key>
-    <string>/Users/lherron/praesidium/var/logs/wrkq-server.log</string>
+    <string>/Users/lherron/praesidium/var/logs/wrkq/wrkq-server.log</string>
   </dict>
 
   <key>WorkingDirectory</key>
@@ -50,8 +50,8 @@
   <string>Interactive</string>
 
   <key>StandardOutPath</key>
-  <string>/Users/lherron/praesidium/var/logs/wrkq-server.log</string>
+  <string>/Users/lherron/praesidium/var/logs/wrkq/wrkq-server.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/lherron/praesidium/var/logs/wrkq-server.err.log</string>
+  <string>/Users/lherron/praesidium/var/logs/wrkq/wrkq-server.err.log</string>
 </dict>
 </plist>
