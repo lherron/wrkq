@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/spf13/cobra"
@@ -157,6 +158,12 @@ agent:<id> to address a scope-less principal such as a human.`,
 func wrkcSayRef(args, to []string) (ref, bodyArg string, implicit bool, err error) {
 	implicit = len(args) == 0 || (len(args) == 1 && args[0] == "-" && len(to) > 0)
 	if !implicit {
+		// No ref contains whitespace. A quoted body in the ref slot would
+		// otherwise send the body read to stdin, which under an agent harness
+		// never reaches EOF, so refuse it before anything reads.
+		if strings.ContainsFunc(args[0], unicode.IsSpace) {
+			return "", "", false, fmt.Errorf("%q is not a room ref (refs never contain whitespace); pass the body as a second positional, with -m, or on stdin with -", truncateWrkcRef(args[0]))
+		}
 		bodyArg = "-"
 		if len(args) > 1 {
 			bodyArg = args[1]
@@ -174,6 +181,13 @@ func wrkcSayRef(args, to []string) (ref, bodyArg string, implicit bool, err erro
 		return "", "", true, errors.New("say without a room ref requires a full agent@project[:scope] --to address; bare names need an explicit ref")
 	}
 	return to[0], "-", true, nil
+}
+
+func truncateWrkcRef(ref string) string {
+	if r := []rune(ref); len(r) > 40 {
+		return string(r[:40]) + "…"
+	}
+	return ref
 }
 
 // printWrkcSayNotices writes the server's advisories to stderr so they never
