@@ -80,12 +80,20 @@ for it exactly as it would be on live work.
 
 ## Routing: `wrkc say <ref>`
 
+A ref never contains whitespace: a whitespace-bearing first positional is
+refused before anything reads stdin, with guidance to pass the body as the
+second positional, with `-m`, or on stdin with `-`.
+
 First match wins:
 
 1. `R-xxxxx` / `EN-xxxxx` → that room (an envelope resolves to its room).
 2. `T-xxxxx` → the task's **campaign** room if the task is in a campaign, else
    the task room. Strict coalesce, no override. The envelope is tagged with the
    task either way, so `wrkc log <campaign> --task T-xxxxx` narrows to it.
+   A named subtask `T-xxxxx.slug` routes through its **owner's** effective room
+   and keeps the subtask as its tag; no subtask room exists. An owner's
+   `--task` filter includes its subtasks' messages, a subtask's only its own,
+   and `wrkc show` reports the room's `openSubtaskCount`.
 3. container id/path → campaign-adorned → campaign room; project → project room;
    any other container is refused (`room_kind_unsupported`).
 4. `agent@project[:task]` — derived from the work context of both parties,
@@ -114,8 +122,9 @@ never enters it, so two seats of the same agent are two counterparties, and only
 a scope-less party (a human) matches on its principal. Sibling envelopes of a
 fan-out addressed to *other* scopes are untouched. To hold one back, `defer` it
 first.
-`--discharges EN-a,EN-b` narrows a reply to exactly the pending or presented
-envelopes named by the caller. The whole set is validated before the reply and
+`--discharges EN-a,EN-b` narrows a reply to exactly the pending, presented or
+deferred envelopes named by the caller; naming a deferred envelope there is
+how its addressee finishes it. The whole set is validated before the reply and
 acks commit together; omitting it keeps the wide rule above. A narrowed ack
 records reason `reply_scoped`.
 
@@ -127,9 +136,11 @@ send one pointer reminder; ending that reminder turn undisposed fails it as
 `ignored`. If you are not answering now, `defer` with a reason (and optionally a
 retry time): the deferral survives rotation and returns as a pointer.
 
-`defer` is paused, never terminal — replies leave it paused.
-`--retry-after` arms a wrkq promise; at expiry the envelope returns to the
-pending section of `wrkc inbox` and can then be acked by a reply. `wrkc show`
+`defer` is paused, never terminal — a plain reply leaves it paused. The
+addressee finishes it by naming it in `--discharges`; any terminal disposition
+(that, an operator `ack`, the sender's `withdraw`) resolves its retry promise.
+`--retry-after` (relative) or `--retry-at` (absolute) arms a wrkq promise; at
+expiry the envelope returns to the pending section of `wrkc inbox` and can then be acked by a reply. `wrkc show`
 continues to report the envelope's stored `deferred` state together with its
 `retryAt`; `inbox` is the surface that tells you what you currently owe.
 
@@ -178,7 +189,7 @@ carries no obligation and is acked at its own presentation.
 ## Verbs
 
 ```bash
-wrkc say <ref> [body|-|-m body] [--to a,b] [--fyi] [--new]
+wrkc say <ref> [body|-] [-m body] [--to a,b] [--fyi] [--new]
                         [--ttl d] [--preempt] [--discharges EN-a,EN-b]
                         [--wait [--timeout d]] [--respond-to p]
                         [--record] [--idempotency-key k] [--as p]
@@ -186,7 +197,7 @@ wrkc log <room> [--task T-x] [--limit n]
 wrkc show <EN-xxxxx|room>
 wrkc ls [--all] [--failed] [--scope me] [--kind k]
 wrkc inbox [--failed]
-wrkc defer <EN-xxxxx> --reason <t> [--retry-after d]
+wrkc defer <EN-xxxxx> --reason <t> [--retry-after d | --retry-at t] [--if-match n]
 wrkc withdraw <EN-xxxxx> [--group] [--reason t]
 wrkc hide|unhide <room>
 wrkc join|leave <room>
