@@ -80,9 +80,25 @@ for it exactly as it would be on live work.
 
 ## Routing: `wrkc say <ref>`
 
-A ref never contains whitespace: a whitespace-bearing first positional is
-refused before anything reads stdin, with guidance to pass the body as the
-second positional, with `-m`, or on stdin with `-`.
+The ref is say's only positional, and it is required. The body source is
+explicit and exactly one of `-m <body>` (a literal, or `@file`) or a positional
+`-` after the ref, which reads the body from stdin (a heredoc or a pipe):
+
+```bash
+wrkc say EN-xxxxx --to <replyTo> - <<'EOF'
+body
+EOF
+wrkc say EN-xxxxx --to <replyTo> -m 'one line'
+```
+
+wrkc never reads stdin unless the caller passes `-`. Under an agent harness
+stdin is an open socket that never sends EOF, so every other shape refuses
+with a usage error (exit 2, `WRKQ_USAGE` under `--json`) before anything
+reads: no body source, a second positional, `-m -`, or both `-m` and `-`. A
+`-` whose stdin is a terminal or a socket refuses too, since a heredoc or pipe
+never arrives as either. A ref never contains whitespace, so a quoted body in
+the ref slot is refused with that message. There is no implicit ref: `--to`
+never stands in for the ref.
 
 First match wins:
 
@@ -189,7 +205,7 @@ carries no obligation and is acked at its own presentation.
 ## Verbs
 
 ```bash
-wrkc say <ref> [body|-] [-m body] [--to a,b] [--fyi] [--new]
+wrkc say <ref> (-m <body> | -) [--to a,b] [--fyi] [--new]
                         [--ttl d] [--preempt] [--discharges EN-a,EN-b]
                         [--wait [--timeout d]] [--respond-to p]
                         [--record] [--idempotency-key k] [--as p]

@@ -7,10 +7,12 @@ package rpccli
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"unicode"
 
-	"github.com/lherron/wrkq/internal/scope"
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/spf13/cobra"
 )
 
@@ -21,13 +23,18 @@ func newWrkcSayCmd() *cobra.Command {
 	var wait, preempt bool
 	var output promiseOutputFlags
 	cmd := &cobra.Command{
-		Use:   "say [ref] [body|-] [-m body]",
+		Use:   "say <ref> (-m <body> | -)",
 		Short: "Send a message into a room; only --to presents it",
 		Long: `Say something in the room the ref routes to.
 
-With no ref, --to must name one full agent@project[:scope] addressee;
-that addressee becomes the ref. In this form, body is read from stdin
-directly or with a positional "-". A positional ref keeps its usual meaning.
+The ref is the one positional and is required. The body source is explicit
+and exactly one of:
+  -m <body>      a literal, or @file to read a file
+  -              the body on stdin, from a heredoc or a pipe:
+                 wrkc say EN-xxxxx --to <sender> - <<'EOF'
+                 ...
+                 EOF
+wrkc never reads stdin unless you pass "-".
 
 Routing (first match wins):
   R-xxxxx / EN-xxxxx   that room (an envelope resolves to its room)
@@ -65,26 +72,25 @@ Two members of that name and no obligation refuses and names them: reply to a
 seat that never asked and its obligation can fail unanswered. An envelope's
 replyTo is the exact token that answers it; a full handle always wins. Use
 agent:<id> to address a scope-less principal such as a human.`,
-		Args: cobra.MaximumNArgs(2),
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ref, bodyArg, implicitRef, err := wrkcSayRef(args, to)
+			fromStdin, err := wrkcSayBodySource(args, cmd.Flags().Changed("message"), message)
 			if err != nil {
-				return err
+				return &clifunnel.UsageError{Err: err, Cmd: cmd}
 			}
-			if message != "" && (len(args) > 1 || (implicitRef && len(args) == 1)) {
-				return errors.New("say takes the body either positionally or with -m, not both")
-			}
-			if message != "" {
-				// T-07624: -m/--message is the wrkq reflex (comment add -m, touch -d);
-				// the positional body stays canonical.
-				bodyArg = message
+			ref, bodyArg := args[0], message
+			if fromStdin {
+				if wrkcStdinCannotCarryABody(cmd.InOrStdin()) {
+					return &clifunnel.UsageError{Err: errors.New("body comes from stdin: use a heredoc (<<'EOF') or -m"), Cmd: cmd}
+				}
+				bodyArg = "-"
 			}
 			body, err := readTextValue(bodyArg, "body", cmd.InOrStdin(), &stdinClaims{})
 			if err != nil {
 				return err
 			}
 			if strings.TrimSpace(body) == "" {
-				return errors.New("say requires a body (literal, @file, or - for stdin)")
+				return errors.New("say requires a non-empty body")
 			}
 			if wait && len(to) == 0 {
 				return errors.New("--wait requires --to")
@@ -138,7 +144,7 @@ agent:<id> to address a scope-less principal such as a human.`,
 	}
 	cmd.Flags().StringSliceVar(&to, "to", nil, "Addressees (repeatable or comma-separated); fans out one envelope each")
 	cmd.Flags().BoolVar(&fyi, "fyi", false, "No reply obligation, never gates, never itself a wake; delivered like any say into a seated addressee (drives a turn there), may re-seat an existing session when that target is driven for another reason, never births a target that was never born")
-	cmd.Flags().StringVarP(&message, "message", "m", "", "Body (literal, @file, or - for stdin); alias for the positional body")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Body: a literal, or @file (for stdin pass a positional -)")
 	cmd.Flags().BoolVar(&newRoom, "new", false, "Force a fresh ad-hoc room instead of reusing the open pair room")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until every envelope in the group is terminal, then print each reply")
 	cmd.Flags().StringVar(&timeout, "timeout", "", "Maximum --wait duration (e.g. 10m)")
@@ -152,35 +158,49 @@ agent:<id> to address a scope-less principal such as a human.`,
 	return cmd
 }
 
-// wrkcSayRef resolves the room ref and the positional body argument. With no
-// ref (or only "-" alongside --to), the single full agent@project[:scope]
-// addressee is the ref and the body comes from stdin.
-func wrkcSayRef(args, to []string) (ref, bodyArg string, implicit bool, err error) {
-	implicit = len(args) == 0 || (len(args) == 1 && args[0] == "-" && len(to) > 0)
-	if !implicit {
-		// No ref contains whitespace. A quoted body in the ref slot would
-		// otherwise send the body read to stdin, which under an agent harness
-		// never reaches EOF, so refuse it before anything reads.
-		if strings.ContainsFunc(args[0], unicode.IsSpace) {
-			return "", "", false, fmt.Errorf("%q is not a room ref (refs never contain whitespace); pass the body as a second positional, with -m, or on stdin with -", truncateWrkcRef(args[0]))
-		}
-		bodyArg = "-"
-		if len(args) > 1 {
-			bodyArg = args[1]
-		}
-		return args[0], bodyArg, false, nil
+// wrkcSayBodySource checks say's one positional (the ref) and its explicit body
+// source, and reports whether the body comes from stdin. Every refusal here
+// happens before anything reads: under an agent harness stdin is an open
+// socket that never sends EOF, so an implicit read would park forever.
+func wrkcSayBodySource(args []string, messageSet bool, message string) (fromStdin bool, err error) {
+	const sources = "-m <body> (a literal or @file) or - with the body on stdin (- <<'EOF')"
+	if len(args) == 0 || args[0] == "-" {
+		return false, errors.New("say requires a room ref (R-/EN-/T-/container/agent@project) as its one positional")
 	}
-	if len(to) == 0 {
-		return "", "", true, errors.New("say requires a room ref (R-/EN-/T-/container/agent@project) or one full --to addressee")
+	// No ref contains whitespace; a quoted body in the ref slot gets the
+	// better message.
+	if strings.ContainsFunc(args[0], unicode.IsSpace) {
+		return false, fmt.Errorf("%q is not a room ref (refs never contain whitespace); pass the body with %s", truncateWrkcRef(args[0]), sources)
 	}
-	if len(to) != 1 {
-		return "", "", true, errors.New("say with multiple --to addressees requires an explicit room ref")
+	if messageSet && message == "-" {
+		return false, errors.New("-m takes a literal or @file; for stdin pass the positional - instead (- <<'EOF')")
 	}
-	parsed, perr := scope.ParseScopeHandle(strings.TrimSpace(to[0]))
-	if perr != nil || parsed.ProjectID == "" {
-		return "", "", true, errors.New("say without a room ref requires a full agent@project[:scope] --to address; bare names need an explicit ref")
+	switch {
+	case len(args) > 2 || (len(args) == 2 && args[1] != "-"):
+		return false, fmt.Errorf("say takes one positional, the ref; pass the body with %s", sources)
+	case len(args) == 2 && messageSet:
+		return false, errors.New("say takes the body from -m or from -, not both")
+	case len(args) == 2:
+		return true, nil
+	case !messageSet:
+		return false, fmt.Errorf("say needs a body source: %s", sources)
 	}
-	return to[0], "-", true, nil
+	return false, nil
+}
+
+// wrkcStdinCannotCarryABody reports a stdin that a heredoc or pipe never
+// arrives as: a terminal, or a socket (an agent harness's stdin, which never
+// sends EOF).
+func wrkcStdinCannotCarryABody(stdin io.Reader) bool {
+	if isReaderTTY(stdin) {
+		return true
+	}
+	f, ok := stdin.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeSocket != 0
 }
 
 func truncateWrkcRef(ref string) string {

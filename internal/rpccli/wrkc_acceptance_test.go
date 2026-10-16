@@ -90,62 +90,6 @@ func runWrkcSplit(t *testing.T, dbPath, principal string, args ...string) (strin
 	return stdout.String(), stderr.String(), err
 }
 
-func TestWrkcSayDefaultsMissingRefToSingleFullAddressee(t *testing.T) {
-	f := newWrkcFixture(t)
-	from := "alice@wrkc-proj:primary"
-	to := "bob@wrkc-proj:primary"
-	cases := []struct {
-		name  string
-		input string
-		args  []string
-	}{
-		{"explicit", "explicit body\n", []string{"say", to, "--to", to, "--fyi", "--scope-ref", from, "--json"}},
-		{"implicit stdin", "implicit body\n", []string{"say", "--to", to, "--fyi", "--scope-ref", from, "--json"}},
-		{"implicit dash", "dash body\n", []string{"say", "--to", to, "-", "--fyi", "--scope-ref", from, "--json"}},
-	}
-	var roomUUID string
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			out, err := runWrkcInput(t, f.dbPath, "agent:alice", tc.input, tc.args...)
-			if err != nil {
-				t.Fatalf("say: %v\n%s", err, out)
-			}
-			var said roomSayResultWire
-			if err := json.Unmarshal([]byte(out), &said); err != nil {
-				t.Fatalf("decode say: %v\n%s", err, out)
-			}
-			if said.Room.Kind != "adhoc" || len(said.Envelopes) != 1 {
-				t.Fatalf("unexpected say result: %+v", said)
-			}
-			if roomUUID == "" {
-				roomUUID = said.Room.UUID
-			} else if said.Room.UUID != roomUUID {
-				t.Fatalf("room UUID %s, want %s", said.Room.UUID, roomUUID)
-			}
-		})
-	}
-}
-
-func TestWrkcSayMissingRefRequiresUnambiguousAddressee(t *testing.T) {
-	f := newWrkcFixture(t)
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"no to", []string{"say"}, "room ref"},
-		{"fan out", []string{"say", "--to", "bob@wrkc-proj:primary,carol@wrkc-proj:primary"}, "room ref"},
-		{"bare name", []string{"say", "--to", "bob"}, "full agent@project"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			out, err := runWrkcInput(t, f.dbPath, "agent:alice", "body\n", tc.args...)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("want %q refusal, got err=%v output=%q", tc.want, err, out)
-			}
-		})
-	}
-}
-
 // backdateWrkcRoom ages every timestamp the activity clock folds, so a test can
 // reach `stale` without a clock injection.
 func backdateWrkcRoom(t *testing.T, dbPath, roomUUID string, age time.Duration) {
@@ -206,7 +150,7 @@ func TestWrkcSayWaitConsumesOnlyTheExactAddresseeReply(t *testing.T) {
 	}
 	waited := make(chan waitResult, 1)
 	go func() {
-		output, err := runWrkc(t, f.dbPath, "agent:alice", "say", f.taskID, "question for bob",
+		output, err := runWrkc(t, f.dbPath, "agent:alice", "say", f.taskID, "-m", "question for bob",
 			"--to", bScope, "--scope-ref", aScope, "--wait", "--timeout", "3s", "--json")
 		waited <- waitResult{output: output, err: err}
 	}()
@@ -231,7 +175,7 @@ func TestWrkcSayWaitConsumesOnlyTheExactAddresseeReply(t *testing.T) {
 	if err := presentationDB.Close(); err != nil {
 		t.Fatalf("close question presentation database: %v", err)
 	}
-	replyOut, err := runWrkc(t, f.dbPath, "agent:bob", "say", f.taskID, "answer for alice",
+	replyOut, err := runWrkc(t, f.dbPath, "agent:bob", "say", f.taskID, "-m", "answer for alice",
 		"--to", aScope, "--to", otherAliceScope, "--scope-ref", bScope, "--json")
 	if err != nil {
 		t.Fatalf("reply fan-out: %v\n%s", err, replyOut)
@@ -492,7 +436,7 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 
 	// reply-is-ack: cody says back to clod and the deferred obligation is
 	// deliberately NOT swept up, because defer is how you exclude one.
-	replyOut, err := runWrkc(t, f.dbPath, "agent:cody", "say", f.taskID, "on it",
+	replyOut, err := runWrkc(t, f.dbPath, "agent:cody", "say", f.taskID, "-m", "on it",
 		"--to", "clod", "--scope-ref", codySeat, "--json")
 	if err != nil {
 		t.Fatalf("wrkc reply: %v\n%s", err, replyOut)
@@ -531,7 +475,7 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 	if len(hidden.Labels) != 1 || hidden.Labels[0] != "hidden" {
 		t.Fatalf("hide = %+v", hidden.Labels)
 	}
-	if out, serr := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "hidden rooms still take talk"); serr != nil {
+	if out, serr := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "-m", "hidden rooms still take talk"); serr != nil {
 		t.Fatalf("say into a hidden room was refused: %v\n%s", serr, out)
 	}
 	lsOut, lerr := runWrkc(t, f.dbPath, "agent:clod", "ls", "--output", "raw")
@@ -556,7 +500,7 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 			t.Fatalf("wrkc %s still exists: %s", gone, out)
 		}
 	}
-	if out, serr := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "no topic flag", "--subject", "x"); serr == nil {
+	if out, serr := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "-m", "no topic flag", "--subject", "x"); serr == nil {
 		t.Fatalf("wrkc say --subject still exists: %s", out)
 	}
 
@@ -635,7 +579,7 @@ func TestWrkcAdmissionFlagsAndWithdrawWithNoHRCDaemon(t *testing.T) {
 		t.Fatalf("withdrawn = %+v", withdrawn)
 	}
 
-	for _, args := range [][]string{{"say", f.taskID, "body", "--ttl", "30s"}, {"say", f.taskID, "body", "--preempt"}, {"say", f.taskID, "body", "--discharges", "EN-00001"}} {
+	for _, args := range [][]string{{"say", f.taskID, "-m", "body", "--ttl", "30s"}, {"say", f.taskID, "-m", "body", "--preempt"}, {"say", f.taskID, "-m", "body", "--discharges", "EN-00001"}} {
 		if out, err := runWrkc(t, f.dbPath, "agent:clod", args...); err == nil {
 			t.Fatalf("%v unexpectedly succeeded: %s", args, out)
 		}
@@ -648,7 +592,7 @@ func TestWrkcAdmissionFlagsAndWithdrawWithNoHRCDaemon(t *testing.T) {
 // anything else is refused rather than silently ignored.
 func TestWrkcLsScopeIsAValueNotABoolean(t *testing.T) {
 	f := newWrkcFixture(t)
-	if out, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "hello",
+	if out, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "-m", "hello",
 		"--to", "cody", "--scope-ref", "clod@wrkc-proj:"+f.taskID); err != nil {
 		t.Fatalf("seed say: %v\n%s", err, out)
 	}
@@ -689,7 +633,7 @@ func TestWrkcLsScopeIsAValueNotABoolean(t *testing.T) {
 // legible without a JSON decoder: the envelope id, who it went to, and the room.
 func TestWrkcSayHumanRenderingShowsTheReplyPath(t *testing.T) {
 	f := newWrkcFixture(t)
-	out, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "hello",
+	out, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "-m", "hello",
 		"--to", "cody", "--pretty")
 	if err != nil {
 		t.Fatalf("wrkc say --pretty: %v\n%s", err, out)
@@ -704,7 +648,7 @@ func TestWrkcSayHumanRenderingShowsTheReplyPath(t *testing.T) {
 // human mode, not a table of truncated cells.
 func TestWrkcLogTranscriptRendersBodies(t *testing.T) {
 	f := newWrkcFixture(t)
-	if out, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "line one\nline two"); err != nil {
+	if out, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "-m", "line one\nline two"); err != nil {
 		t.Fatalf("say: %v\n%s", err, out)
 	}
 	out, err := runWrkc(t, f.dbPath, "agent:clod", "log", f.taskID, "--pretty")
@@ -727,7 +671,7 @@ func TestWrkcAdhocListShowAndLogRenderPairIdentity(t *testing.T) {
 
 	create := func(extra ...string) roomWire {
 		t.Helper()
-		args := []string{"say", targetSeat, body, "--to", targetSeat, "--scope-ref", senderSeat, "--json"}
+		args := []string{"say", targetSeat, "-m", body, "--to", targetSeat, "--scope-ref", senderSeat, "--json"}
 		args = append(args, extra...)
 		out, err := runWrkc(t, f.dbPath, "agent:clod", args...)
 		if err != nil {
@@ -777,7 +721,7 @@ func TestWrkcAdhocListShowAndLogRenderPairIdentity(t *testing.T) {
 // caller-side, before any write.
 func TestWrkcSayRefusesWaitWithoutTo(t *testing.T) {
 	f := newWrkcFixture(t)
-	out, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "nobody", "--wait")
+	out, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "-m", "nobody", "--wait")
 	if err == nil {
 		t.Fatalf("--wait without --to succeeded:\n%s", out)
 	}
@@ -798,7 +742,7 @@ func TestWrkcInboxListsEveryObligationUniformly(t *testing.T) {
 	f := newWrkcFixture(t)
 	codySeat := "cody@wrkc-proj:" + f.taskID
 
-	sayOut, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "answer me",
+	sayOut, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "-m", "answer me",
 		"--to", "cody", "--scope-ref", "clod@wrkc-proj:"+f.taskID, "--json")
 	if err != nil {
 		t.Fatalf("wrkc say: %v\n%s", err, sayOut)
@@ -844,7 +788,7 @@ func TestWrkcInboxListsEveryObligationUniformly(t *testing.T) {
 func TestWrkcSayIntoAStaleRoomWritesAndNoticesOnStderr(t *testing.T) {
 	f := newWrkcFixture(t)
 
-	sayOut, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "first", "--json")
+	sayOut, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "-m", "first", "--json")
 	if err != nil {
 		t.Fatalf("wrkc say: %v\n%s", err, sayOut)
 	}
@@ -863,7 +807,7 @@ func TestWrkcSayIntoAStaleRoomWritesAndNoticesOnStderr(t *testing.T) {
 		t.Fatalf("wrkc show does not print the projections: %q", showOut)
 	}
 
-	stdout, stderr, err := runWrkcSplit(t, f.dbPath, "agent:clod", "say", f.taskID, "still here?", "--json")
+	stdout, stderr, err := runWrkcSplit(t, f.dbPath, "agent:clod", "say", f.taskID, "-m", "still here?", "--json")
 	if err != nil {
 		t.Fatalf("say into a stale room was refused: %v\n%s\n%s", err, stdout, stderr)
 	}
@@ -907,7 +851,7 @@ func TestWrkcInboxSentRowsAreSummaries(t *testing.T) {
 	clodSeat := "clod@wrkc-proj:primary"
 	codySeat := "cody@wrkc-proj:" + f.taskID
 
-	sayOut, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "a long body the summary must not carry",
+	sayOut, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "-m", "a long body the summary must not carry",
 		"--to", codySeat, "--scope-ref", clodSeat, "--json")
 	if err != nil {
 		t.Fatalf("wrkc say: %v\n%s", err, sayOut)

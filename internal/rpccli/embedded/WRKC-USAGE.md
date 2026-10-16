@@ -47,7 +47,7 @@ TEXT
 
 Use explicit full handles for new work. Principal identity normally comes from the runtime; `--as agent:<id>` overrides attribution. Caller scope comes from `HRC_SESSION_REF`, or `--scope-ref`; changing attribution does not change your seat. Address a human with a scope-less principal such as `--to agent:lance`.
 
-Always use quoted heredocs for multiline bodies. Write task-related messages against the task ID. Tasks in campaigns share the campaign room; use `wrkc log <campaign> --task T-00001` to narrow history. `R-` selects an ad-hoc room; `EN-` selects its envelope's room.
+The ref is the only positional. Give the body as `- <<'TEXT'` (a quoted heredoc; use it for anything multiline) or as `-m '<body>'`. wrkc reads stdin only after `-` and refuses a say that has neither. Write task-related messages against the task ID. Tasks in campaigns share the campaign room; use `wrkc log <campaign> --task T-00001` to narrow history. `R-` selects an ad-hoc room; `EN-` selects its envelope's room.
 
 With room/task references, omitting `--to` records a log entry without addressing anyone. Handle references can imply an addressee; prefer the explicit form above. Addressed requests can create the recipient's session. Completed work remains reachable; room visibility and activity do not close communication.
 
