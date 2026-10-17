@@ -18,7 +18,7 @@ import (
 
 func newWrkcSayCmd() *cobra.Command {
 	var to, discharges []string
-	var fyi, newRoom, record bool
+	var fyi, note, newRoom, record bool
 	var respondTo, idempotencyKey, timeout, message, ttl string
 	var wait, preempt bool
 	var output promiseOutputFlags
@@ -51,6 +51,10 @@ Routing (first match wins):
                        --new.
 
 Only --to fires. Without it this is a log entry and nobody is presented.
+--note records addressed mail that is never presented: it never wakes, injects,
+steers, or births anyone, and is written terminal. The addressee reads it with
+wrkc notes. Use it for information the recipient doesn't need to see now. It
+needs --to and refuses --fyi, --preempt, --wait and --ttl.
 --to a,b fans out to one envelope per addressee sharing a group id, so one
 recipient's reply, defer, or failure never disposes another's obligation.
 
@@ -92,6 +96,16 @@ agent:<id> to address a scope-less principal such as a human.`,
 			if strings.TrimSpace(body) == "" {
 				return errors.New("say requires a non-empty body")
 			}
+			if note {
+				if len(to) == 0 {
+					return &clifunnel.UsageError{Err: errors.New("--note requires --to; a say without --to is already a log entry"), Cmd: cmd}
+				}
+				for _, flag := range []string{"fyi", "preempt", "wait", "ttl"} {
+					if cmd.Flags().Changed(flag) {
+						return &clifunnel.UsageError{Err: fmt.Errorf("--note cannot be combined with --%s: a note is never presented", flag), Cmd: cmd}
+					}
+				}
+			}
 			if wait && len(to) == 0 {
 				return errors.New("--wait requires --to")
 			}
@@ -119,7 +133,7 @@ agent:<id> to address a scope-less principal such as a human.`,
 			if cmd.Flags().Changed("discharges") {
 				params["dischargeEnvelopeIds"] = discharges
 			}
-			for key, set := range map[string]bool{"fyi": fyi, "new": newRoom, "record": record} {
+			for key, set := range map[string]bool{"fyi": fyi, "note": note, "new": newRoom, "record": record} {
 				if set {
 					params[key] = true
 				}
@@ -144,6 +158,7 @@ agent:<id> to address a scope-less principal such as a human.`,
 	}
 	cmd.Flags().StringSliceVar(&to, "to", nil, "Addressees (repeatable or comma-separated); fans out one envelope each")
 	cmd.Flags().BoolVar(&fyi, "fyi", false, "No reply obligation, never gates, never itself a wake; delivered like any say into a seated addressee (drives a turn there), may re-seat an existing session when that target is driven for another reason, never births a target that was never born")
+	cmd.Flags().BoolVar(&note, "note", false, "Record addressed mail that is never presented: never wakes, injects, or births anyone; the addressee reads it with wrkc notes. A reply with --note still acks, so it closes a thread without waking the other side")
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Body: a literal, or @file (for stdin pass a positional -)")
 	cmd.Flags().BoolVar(&newRoom, "new", false, "Force a fresh ad-hoc room instead of reusing the open pair room")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until every envelope in the group is terminal, then print each reply")

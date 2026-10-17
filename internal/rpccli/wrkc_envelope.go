@@ -1,8 +1,8 @@
 package rpccli
 
 // wrkc_envelope.go — the envelope verbs that act on obligations rather than
-// rooms: list your own (inbox), pause one (defer), take back unpresented mail
-// (withdraw), and the operator-only ack.
+// rooms: list your own (inbox) and the notes sent to you (notes), pause one
+// (defer), take back unpresented mail (withdraw), and the operator-only ack.
 
 import (
 	"errors"
@@ -70,6 +70,9 @@ Your own failed, expired and withdrawn sends are listed while they still ask
 something of you, judged at read time: never a fyi; a reply_required with a
 task while that task is open; one without a task while it is under 24h old and
 its room is not stale. show and log still read the rest.
+
+Notes are never listed here. When any were addressed to you in the last 24h, a
+trailing line points at wrkc notes; the JSON forms carry that as recentNotes.
 The JSON forms carry obligations as full envelopes and every sent line as a
 summary row {id, room, to, obligation, state, failureReason, taskId, createdAt}.`,
 		Args: cobra.NoArgs,
@@ -113,6 +116,69 @@ summary row {id, room, to, obligation, state, failureReason, taskId, createdAt}.
 	cmd.Flags().BoolVar(&includeFailed, "failed", false, "Also list failed envelopes addressed to you")
 	addPromiseOutputFlags(cmd, &output, true)
 	return cmd
+}
+
+func newWrkcNotesCmd() *cobra.Command {
+	var since string
+	var output promiseOutputFlags
+	cmd := &cobra.Command{
+		Use:   "notes",
+		Short: "Notes addressed to your scope, newest first",
+		Long: `List the notes (wrkc say --note) addressed to your scope, newest first, from
+the last 24h unless --since says otherwise.
+
+A note carries no obligation and was never presented: nothing woke you for it,
+and reading it changes nothing. There is no read/unread state; --since is the
+only window. Answer one with an ordinary say, or with --note to stay quiet.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			c, closeFn, err := openWrkcClient(cmd)
+			if err != nil {
+				return err
+			}
+			defer closeFn()
+			params := map[string]any{"includeNotes": true}
+			if since != "" {
+				params["notesSince"] = since
+			}
+			var view envelopeInboxViewWire
+			if _, err := c.call("wrkq.envelope.inboxView", params, &view); err != nil {
+				return err
+			}
+			mode, stable, err := resolvePromiseOutputMode(cmd, output, true)
+			if err != nil {
+				return err
+			}
+			notes := view.Notes
+			if notes == nil {
+				notes = []envelopeWire{}
+			}
+			if len(notes) == 0 && (mode == "human" || mode == "table") {
+				window := "the last 24h"
+				if since != "" {
+					window = since
+				}
+				return render.NewRenderer(cmd.OutOrStdout(), render.Options{}).RenderList([]string{"no notes in " + window})
+			}
+			if mode == "json" || mode == "yaml" {
+				// One object, like inbox: only `ls` answers with a bare array.
+				return render.NewRenderer(cmd.OutOrStdout(), render.Options{Porcelain: stable}).RenderJSON(wrkcNotesJSON{
+					ScopeRef: view.ScopeRef, PrincipalRef: view.PrincipalRef, Items: notes,
+				})
+			}
+			return renderWrkcEnvelopesMode(cmd, notes, mode, stable, false)
+		},
+	}
+	cmd.Flags().StringVar(&since, "since", "", "Window: a duration back from now (36h, 7d) or a timestamp (default 24h)")
+	addPromiseOutputFlags(cmd, &output, true)
+	return cmd
+}
+
+// wrkcNotesJSON is the --json form of `wrkc notes`.
+type wrkcNotesJSON struct {
+	ScopeRef     *string        `json:"scopeRef,omitempty"`
+	PrincipalRef string         `json:"principalRef"`
+	Items        []envelopeWire `json:"items"`
 }
 
 func newWrkcDeferCmd() *cobra.Command {

@@ -998,7 +998,7 @@ scope and accepts only a pending/presented reply-required envelope.
 type WrkqRoomKind = "campaign" | "task" | "project" | "adhoc";
 type WrkqRoomWork = "open" | "terminal";
 type WrkqRoomActivity = "active" | "quiet" | "stale";
-type WrkqEnvelopeObligation = "reply_required" | "fyi" | "none";
+type WrkqEnvelopeObligation = "reply_required" | "fyi" | "note" | "none";
 type WrkqEnvelopeState =
   | "pending" | "presented" | "acked" | "deferred" | "failed"
   | "expired" | "withdrawn";
@@ -1187,6 +1187,16 @@ Contract points a consumer must not have to rediscover:
   Presenting a fyi auto-acks it, which retires it from the read with no `ack`
   call. Consumers gate on this themselves: present a fyi only into a LIVE
   generation, otherwise leave it for the addressee's next attend.
+- **A `note` is recorded and never presented (T-11305).** `say` with
+  `note: true` (requires `to`; refuses `fyi`, `hold`, `ttl`) writes obligation
+  `note` already terminal — `acked`, `envelope.acked` reason `note_recorded` —
+  so `pendingView` (even with `includeFyi`), `birthEnvelope`, `present` and the
+  24h undeliverable rule never select it. Reply-is-ack and
+  `dischargeEnvelopeIds` apply to a note reply exactly as to any addressed say.
+  `inboxView` always returns `recentNotes`, the count of notes addressed to the
+  caller in the last 24h; `includeNotes: true` adds them newest first in
+  `notes`, bounded by `notesSince` (a duration such as `36h`/`7d` or a
+  timestamp; default 24h). There is no read state.
 - **`pendingView` is UNIFORM over rooms.** An obligation wakes and gates
   whatever its room's `work`, `activity`, or `hidden` label says. T-07633
   excluded a closed room's mail from both `items` and `blocking`; T-07642

@@ -210,6 +210,13 @@ type WrkqEnvelopeInboxView struct {
 	SentFailed    []WrkqEnvelope           `json:"sentFailed"`
 	SentExpired   []WrkqEnvelope           `json:"sentExpired"`
 	SentWithdrawn []WrkqEnvelope           `json:"sentWithdrawn"`
+	// RecentNotes counts the notes addressed to this scope in the last 24h.
+	// Notes carry no obligation and have no read state; the count only points
+	// at `wrkc notes`.
+	RecentNotes int `json:"recentNotes"`
+	// Notes lists those notes newest first, only when the caller asked for
+	// IncludeNotes, over NotesSince (default the same 24h).
+	Notes []WrkqEnvelope `json:"notes,omitempty"`
 }
 
 // WrkqEnvelopePresentResult is what HRC gets back after recording a
@@ -243,11 +250,14 @@ type WrkqEnvelopePendingView struct {
 
 // RoomSayParams is the single write verb of the collaboration ledger. Ref is
 // resolved by the §4 routing table; To is the addressee list that fans out.
+// Note records addressed mail that is never presented: it is written terminal
+// (acked, reason note_recorded), and like fyi a reply is the ack.
 type RoomSayParams struct {
 	Ref                  string         `json:"ref,omitempty"`
 	Body                 string         `json:"body"`
 	To                   []string       `json:"to,omitempty"`
 	FYI                  bool           `json:"fyi,omitempty"`
+	Note                 bool           `json:"note,omitempty"`
 	TTL                  string         `json:"ttl,omitempty"`
 	Hold                 bool           `json:"hold,omitempty"`
 	DischargeEnvelopeIDs []string       `json:"dischargeEnvelopeIds,omitempty"`
@@ -355,7 +365,12 @@ type EnvelopeShowParams struct {
 type EnvelopeInboxViewParams struct {
 	ScopeRef      string `json:"scopeRef,omitempty"`
 	IncludeFailed bool   `json:"includeFailed,omitempty"`
-	PrincipalRef  string `json:"principalRef,omitempty"`
+	// IncludeNotes lists the notes addressed to this scope. NotesSince bounds
+	// the list: a duration back from server time (36h, 7d) or a timestamp;
+	// empty means 24h.
+	IncludeNotes bool   `json:"includeNotes,omitempty"`
+	NotesSince   string `json:"notesSince,omitempty"`
+	PrincipalRef string `json:"principalRef,omitempty"`
 }
 
 // EnvelopeDeferParams pauses one obligation. RetryAfter is a relative duration

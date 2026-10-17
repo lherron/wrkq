@@ -156,6 +156,7 @@ const INBOX_VIEW: WrkqEnvelopeInboxView = {
   sentFailed: [],
   sentExpired: [],
   sentWithdrawn: [],
+  recentNotes: 0,
 };
 const PRESENT_RESULT: WrkqEnvelopePresentResult = {
   envelope: ENVELOPE,
@@ -439,6 +440,59 @@ describe("wrkq.envelope facade", () => {
         params: sent,
       })),
     ).toEqual([{ method: "wrkq.envelope.pendingView", params }]);
+  });
+
+  test("say note forwards the flag and inboxView reads notes with their count", async () => {
+    const note: WrkqEnvelope = {
+      ...ENVELOPE,
+      uuid: "envelope-uuid-note",
+      id: "EN-00003",
+      groupId: "EN-00003",
+      obligation: "note",
+      body: "nightly queue empty",
+      state: "acked",
+      terminal: true,
+    };
+    const transport = new FakeTransport()
+      .onResult("wrkq.room.say", {
+        room: ROOM,
+        groupId: note.id,
+        envelopes: [note],
+        acked: [],
+        notices: [],
+      })
+      .onResult("wrkq.envelope.inboxView", {
+        ...INBOX_VIEW,
+        groups: [],
+        recentNotes: 1,
+        notes: [note],
+      });
+    const client = await createClient({ transport, autoInitialize: false });
+
+    const say = {
+      ref: "T-07613",
+      body: "nightly queue empty",
+      to: ["cody"],
+      note: true,
+    };
+    const said = await client.wrkq.room.say(say);
+    expect(said.envelopes[0]?.obligation).toBe("note");
+    expect(said.envelopes[0]?.state).toBe("acked");
+
+    const inbox = {
+      scopeRef: "cody@wrkq:T-07613",
+      includeNotes: true,
+      notesSince: "2d",
+    };
+    const view = await client.wrkq.envelope.inboxView(inbox);
+    expect(view.recentNotes).toBe(1);
+    expect(view.notes?.map((item) => item.id)).toEqual([note.id]);
+    expect(
+      transport.capturedRequests.map(({ method, params }) => ({ method, params })),
+    ).toEqual([
+      { method: "wrkq.room.say", params: say },
+      { method: "wrkq.envelope.inboxView", params: inbox },
+    ]);
   });
 
   test("inboxView and pendingView default to empty parameter objects", async () => {

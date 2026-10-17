@@ -24,7 +24,11 @@ export type WrkqRoomWork = "open" | "terminal";
  * every room has exactly one value at every instant.
  */
 export type WrkqRoomActivity = "active" | "quiet" | "stale";
-export type WrkqEnvelopeObligation = "reply_required" | "fyi" | "none";
+/**
+ * `note` is addressed like `fyi` but written terminal (`acked`, reason
+ * `note_recorded`): recorded, never presented, never a wake.
+ */
+export type WrkqEnvelopeObligation = "reply_required" | "fyi" | "note" | "none";
 export type WrkqEnvelopeState =
   | "pending"
   | "presented"
@@ -185,6 +189,8 @@ export interface WrkqRoomSayParams {
   /** Fans out to one envelope per addressee. Only `to` fires. */
   to?: string[];
   fyi?: boolean;
+  /** Record addressed mail that is never presented. Requires `to`; refuses `fyi`, `hold`, `ttl`. */
+  note?: boolean;
   /** Server-relative TTL; expires only if never presented. */
   ttl?: string;
   /** Store hold delivery intent for HRC. */
@@ -352,6 +358,10 @@ export interface WrkqEnvelopeMemberPage {
 export interface WrkqEnvelopeInboxViewParams {
   scopeRef?: string;
   includeFailed?: boolean;
+  /** List the notes addressed to this scope in `notes`. */
+  includeNotes?: boolean;
+  /** Bounds `notes`: a duration back from server time (36h, 7d) or a timestamp; default 24h. */
+  notesSince?: string;
   principalRef?: string;
 }
 
@@ -377,6 +387,10 @@ export interface WrkqEnvelopeInboxView {
   sentFailed: WrkqEnvelope[];
   sentExpired: WrkqEnvelope[];
   sentWithdrawn: WrkqEnvelope[];
+  /** Notes addressed to this scope in the last 24h. Notes have no read state. */
+  recentNotes: number;
+  /** Those notes newest first, only with `includeNotes`, over `notesSince`. */
+  notes?: WrkqEnvelope[];
 }
 
 export interface WrkqEnvelopeWithdrawParams {

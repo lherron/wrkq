@@ -523,7 +523,22 @@ func renderWrkcInbox(cmd *cobra.Command, view envelopeInboxViewWire) error {
 			lines = append(lines, "  "+envelope.ID+"  "+envelope.RoomKey+target+"  "+envelope.State)
 		}
 	}
+	if line := wrkcRecentNotesLine(view.RecentNotes); line != "" {
+		lines = append(lines, "", line)
+	}
 	return render.NewRenderer(cmd.OutOrStdout(), render.Options{}).RenderList(lines)
+}
+
+// wrkcRecentNotesLine is the inbox's one pointer at `wrkc notes`; notes have no
+// read state, so it reports a window, not an unread count.
+func wrkcRecentNotesLine(count int) string {
+	switch count {
+	case 0:
+		return ""
+	case 1:
+		return "1 note in the last 24h: wrkc notes"
+	}
+	return fmt.Sprintf("%d notes in the last 24h: wrkc notes", count)
 }
 
 // sentEnvelopeRow is one sent-* line of the interactive inbox as data
@@ -552,6 +567,7 @@ type inboxJSONView struct {
 	SentFailed    []sentEnvelopeRow        `json:"sentFailed"`
 	SentExpired   []sentEnvelopeRow        `json:"sentExpired"`
 	SentWithdrawn []sentEnvelopeRow        `json:"sentWithdrawn"`
+	RecentNotes   int                      `json:"recentNotes"`
 }
 
 func sentEnvelopeRows(envelopes []envelopeWire, section string) []sentEnvelopeRow {
@@ -577,6 +593,7 @@ func wrkcInboxJSON(view envelopeInboxViewWire) inboxJSONView {
 		SentFailed:    sentEnvelopeRows(view.SentFailed, ""),
 		SentExpired:   sentEnvelopeRows(view.SentExpired, ""),
 		SentWithdrawn: sentEnvelopeRows(view.SentWithdrawn, ""),
+		RecentNotes:   view.RecentNotes,
 	}
 }
 

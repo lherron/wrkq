@@ -65,6 +65,7 @@ wrkc has no HRC dependency: every verb works with every HRC daemon down.`,
 	root.AddCommand(newWrkcNounShowCmd("room", "room"))
 	root.AddCommand(newWrkcLsCmd())
 	root.AddCommand(newWrkcInboxCmd())
+	root.AddCommand(newWrkcNotesCmd())
 	root.AddCommand(newWrkcDeferCmd())
 	root.AddCommand(newWrkcWithdrawCmd())
 	root.AddCommand(newWrkcVisibilityCmd("hide"))

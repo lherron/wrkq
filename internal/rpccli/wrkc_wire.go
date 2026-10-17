@@ -145,6 +145,8 @@ type envelopeInboxViewWire struct {
 	SentFailed    []envelopeWire           `json:"sentFailed"`
 	SentExpired   []envelopeWire           `json:"sentExpired"`
 	SentWithdrawn []envelopeWire           `json:"sentWithdrawn"`
+	RecentNotes   int                      `json:"recentNotes"`
+	Notes         []envelopeWire           `json:"notes,omitempty"`
 }
 
 func envelopePartyKey(party envelopePartyWire) string {

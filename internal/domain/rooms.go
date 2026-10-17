@@ -54,12 +54,15 @@ const RoomLabelHidden = "hidden"
 // summon-vs-inject, not wake-vs-no-wake: only reply_required BIRTHS an unborn
 // seat and gates a turn end; fyi is still injected into a seated addressee
 // (it drives a turn on a live seat, auto-acked at presentation) but never
-// births one and never gates; none is a log entry with no addressee.
+// births one and never gates; note is addressed like fyi but written terminal
+// (acked, reason note_recorded), so it is recorded and never presented, injected
+// or driven; none is a log entry with no addressee.
 type EnvelopeObligation string
 
 const (
 	EnvelopeObligationReplyRequired EnvelopeObligation = "reply_required"
 	EnvelopeObligationFYI           EnvelopeObligation = "fyi"
+	EnvelopeObligationNote          EnvelopeObligation = "note"
 	EnvelopeObligationNone          EnvelopeObligation = "none"
 )
 
@@ -239,10 +242,10 @@ func ValidateRoomKind(kind RoomKind) error {
 // ValidateEnvelopeObligation validates the stored obligation vocabulary.
 func ValidateEnvelopeObligation(obligation EnvelopeObligation) error {
 	switch obligation {
-	case EnvelopeObligationReplyRequired, EnvelopeObligationFYI, EnvelopeObligationNone:
+	case EnvelopeObligationReplyRequired, EnvelopeObligationFYI, EnvelopeObligationNote, EnvelopeObligationNone:
 		return nil
 	default:
-		return &InvalidValueError{Field: "envelope obligation", Value: string(obligation), Allowed: []string{"reply_required", "fyi", "none"}}
+		return &InvalidValueError{Field: "envelope obligation", Value: string(obligation), Allowed: []string{"reply_required", "fyi", "note", "none"}}
 	}
 }
 

@@ -8,6 +8,7 @@
 wrkc inbox
 wrkc show EN-00001
 wrkc log T-00001 --limit 20
+wrkc notes
 ```
 
 Read the envelope body and any unfamiliar room history before answering. A mail hint is only a notification: use `inbox` and `show` to read the actual mail. A fresh runtime must pull its outstanding obligations; earlier messages are not automatically replayed into it.
@@ -36,6 +37,13 @@ TEXT
 Defer records why you are not answering now and survives runtime rotation. With `--retry-after`, the message returns to pending when the retry time arrives. Without a retry time it remains paused.
 
 An ordinary addressed reply creates a new reply obligation. Use `--fyi` when no answer is needed: it can reach an existing seat but does not birth one or create an obligation. It can still discharge the mail you are answering.
+
+Use `--note` for information the recipient doesn't need to see now; it never wakes anyone. A note is recorded and addressed like any say but never injected or presented; the recipient reads it with `wrkc notes`, and `wrkc inbox` shows a count line when any arrived in the last 24h. A `--note` reply still discharges the mail you are answering, so it closes a thread without waking the other side. `--note` needs `--to` and refuses `--fyi`, `--preempt`, `--wait` and `--ttl`.
+
+```bash
+wrkc say EN-00002 --to cody@wrkq:T-00001 --note -m 'PASS recorded on T-00001; nothing needed.'
+wrkc notes --since 2d
+```
 
 ## Send new work
 
@@ -76,7 +84,8 @@ With `--json`, a verb about one thing returns an object and a room listing retur
 | `show <room>` | one room object |
 | `log <room>` | `{room, items: [envelope, ...]}` |
 | `members <room>` | `{room, items: [member, ...]}` |
-| `inbox` | `{principalRef, scopeRef, groups: [{room, items}], deferred, failed, sentFailed, sentExpired, sentWithdrawn}` |
+| `inbox` | `{principalRef, scopeRef, groups: [{room, items}], deferred, failed, sentFailed, sentExpired, sentWithdrawn, recentNotes}` |
+| `notes` | `{principalRef, scopeRef, items: [envelope, ...]}` |
 | `ls` | `[room, ...]` |
 
 The inbox JSON carries what the interactive view carries: obligations (`groups`, `deferred`, `failed`) are full envelopes, bodies included; `sentFailed`, `sentExpired` and `sentWithdrawn` are summary rows `{id, room, to, obligation, state, failureReason, taskId, createdAt}` with no body. `--ndjson` always emits one record per line: envelopes for `log`; for `inbox`, obligation envelopes then one summary row per sent line, each with a `section` field. To wait for a reply, use `wrkq monitor wait` instead of polling `log`. If you do parse output in a loop, do not hide stderr: a parse error would then look like "no reply yet".

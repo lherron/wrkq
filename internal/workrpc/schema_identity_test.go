@@ -82,7 +82,8 @@ import (
 // task, cat and find DTOs, and the timeline entry's claim and requester details.
 // T-10087 adds allTypes to timeline reads to include quiet turn.* facts.
 // T-10158 removes retired room verbs, section data and inert workflow fields.
-const pinnedProtocolSchemaHash = "sha256:1dc50502964c1221e097978d05d52bb23d299c6dbd0eeeea30f32326d1a4c1ec"
+// T-11305 adds say note, and inbox includeNotes/notesSince/recentNotes/notes.
+const pinnedProtocolSchemaHash = "sha256:3d3ffa73071c88551ed31d12a12342afc2ce40b6f64d9bca295d2d213041907d"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

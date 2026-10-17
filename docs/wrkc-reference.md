@@ -129,6 +129,14 @@ is driven for another reason (other mail, an open delivery, a reminder), that
 drive delivers the fyi through the seat door, which provisions a fresh runtime
 whose first turn carries it. A fyi never mints a session for a target that was
 never born.
+`--to X --note` → addressed mail that is never presented. Use it for information
+X doesn't need to see now: it never wakes anyone. It routes like any addressed
+say (same room, same addressee, in `log` and `show` as `obligation: note`) but is
+written terminal — `acked`, reason `note_recorded` — so it is never injected,
+steered, presented or driven, never births or re-seats a session, never takes
+part in the 24h `undeliverable` rule, and never produces a failure notice. X
+reads it with `wrkc notes`. `--note` needs `--to` and refuses `--fyi`,
+`--preempt`, `--wait` and `--ttl`.
 No `--to` → a log entry, nobody is presented.
 
 **Reply is the ack.** Saying `--to X` acks every pending or presented
@@ -137,7 +145,8 @@ X's scope. The match is seat-to-seat: the principal a say was attributed to
 never enters it, so two seats of the same agent are two counterparties, and only
 a scope-less party (a human) matches on its principal. Sibling envelopes of a
 fan-out addressed to *other* scopes are untouched. To hold one back, `defer` it
-first.
+first. A `--note` reply acks exactly the same way, which is how to close a thread
+without waking the other side.
 `--discharges EN-a,EN-b` narrows a reply to exactly the pending, presented or
 deferred envelopes named by the caller; naming a deferred envelope there is
 how its addressee finishes it. The whole set is validated before the reply and
@@ -163,7 +172,7 @@ continues to report the envelope's stored `deferred` state together with its
 `say --ttl 30s` gives addressed mail a server-normalized expiry. If it has no
 presentation receipt by then, the next authoritative read materializes terminal
 `expired`; a deferral does not extend the TTL. Independently, addressed mail
-(reply-required or fyi) that no presentation receipt has reached within 24
+(reply-required or fyi; never a note) that no presentation receipt has reached within 24
 hours of its server `createdAt` fails `undeliverable` on the next authoritative
 read or event-tail poll, and its sender gets the usual failure notice. A `--ttl`
 later than 24h does not extend that bound, and any receipt exempts the envelope
@@ -202,10 +211,16 @@ marks a group whose work has gone terminal — the seat that asked may have move
 on — and answering it is an ordinary say. `fyi` is never listed by `inbox`: it
 carries no obligation and is acked at its own presentation.
 
+Notes are not obligations and `inbox` never lists them. When any were addressed
+to you in the last 24h, `inbox` adds one trailing line, `N notes in the last 24h:
+wrkc notes`, and its JSON carries the count as `recentNotes`. `wrkc notes
+[--since <dur|time>]` lists them newest first, 24h by default. There is no
+read/unread state.
+
 ## Verbs
 
 ```bash
-wrkc say <ref> (-m <body> | -) [--to a,b] [--fyi] [--new]
+wrkc say <ref> (-m <body> | -) [--to a,b] [--fyi | --note] [--new]
                         [--ttl d] [--preempt] [--discharges EN-a,EN-b]
                         [--wait [--timeout d]] [--respond-to p]
                         [--record] [--idempotency-key k] [--as p]
@@ -213,6 +228,7 @@ wrkc log <room> [--task T-x] [--limit n]
 wrkc show <EN-xxxxx|room>
 wrkc ls [--all] [--failed] [--scope me] [--kind k]
 wrkc inbox [--failed]
+wrkc notes [--since d|t] [--json]
 wrkc defer <EN-xxxxx> --reason <t> [--retry-after d | --retry-at t] [--if-match n]
 wrkc withdraw <EN-xxxxx> [--group] [--reason t]
 wrkc hide|unhide <room>
@@ -299,6 +315,8 @@ failure reason.
 
 The inbox JSON carries what the interactive view carries. Obligations
 (`groups[].items`, `deferred`, `failed`) are full envelopes, bodies included.
+`recentNotes` is the count behind the trailing notes line; `wrkc notes --json`
+returns `{principalRef, scopeRef, items}` with the notes as full envelopes.
 `sentFailed`, `sentExpired` and `sentWithdrawn` are summary rows, one per
 interactive line:
 

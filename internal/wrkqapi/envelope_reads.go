@@ -177,7 +177,48 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 	if err != nil {
 		return nil, err
 	}
+
+	// Notes are mail, not obligations: a count that points at `wrkc notes`, and
+	// the list itself only on request. There is no read state.
+	notes := base
+	notes.Obligations = []domain.EnvelopeObligation{domain.EnvelopeObligationNote}
+	notes.CreatedSince = time.Now().UTC().Add(-recentNotesWindow).Format("2006-01-02T15:04:05Z")
+	view.RecentNotes, err = a.store.Rooms.CountEnvelopes(notes)
+	if err != nil {
+		return nil, mapRoomStoreError(err, "")
+	}
+	if p.IncludeNotes {
+		notes.CreatedSince, err = notesSince(p.NotesSince)
+		if err != nil {
+			return nil, err
+		}
+		notes.NewestFirst = true
+		view.Notes, err = a.envelopeListDTO(ctx, rooms, notes, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return view, nil
+}
+
+// recentNotesWindow is the inbox count line's window and `wrkc notes`' default.
+const recentNotesWindow = 24 * time.Hour
+
+// notesSince resolves a notes window — empty (24h), a duration back from server
+// time (36h, 7d), or a timestamp — to the created_at cutoff.
+func notesSince(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Now().UTC().Add(-recentNotesWindow).Format("2006-01-02T15:04:05Z"), nil
+	}
+	if duration, err := parsePromiseDuration(raw); err == nil {
+		return time.Now().UTC().Add(-duration).Format("2006-01-02T15:04:05Z"), nil
+	}
+	canonical, err := domain.NormalizePromiseReviewAt(raw)
+	if err != nil {
+		return "", NewValidationError("invalid notesSince: expected a duration such as 36h or 7d, or a timestamp", map[string]any{"field": "notesSince", "value": raw})
+	}
+	return canonical, nil
 }
 
 // sentFailureWindow bounds how long a taskless sent failure stays listed. Set

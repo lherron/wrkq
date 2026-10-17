@@ -57,7 +57,8 @@ type EnvelopeCreateParams struct {
 // transaction sharing a group id, records `addressed` membership for each, and
 // emits envelope.created per row. fyi envelopes are auto-acked at their own
 // presentation; a `none` envelope is acked at write because nothing will ever
-// present it.
+// present it, and a `note` is acked at write (reason note_recorded) so nothing
+// ever does.
 func (rs *RoomStore) CreateEnvelopesWithAttribution(attr attribution.Attribution, params EnvelopeCreateParams) ([]domain.Envelope, error) {
 	if err := requireAttribution(attr); err != nil {
 		return nil, err
@@ -80,8 +81,9 @@ func (rs *RoomStore) CreateEnvelopesWithAttribution(attr attribution.Attribution
 	if err := domain.ValidateEnvelopeDelivery(params.Delivery); err != nil {
 		return nil, err
 	}
-	if params.Obligation == domain.EnvelopeObligationNone && (params.ExpiresAt != nil || params.Delivery != domain.EnvelopeDeliveryQueue) {
-		return nil, fmt.Errorf("obligation none does not accept ttl or delivery intent")
+	if (params.Obligation == domain.EnvelopeObligationNone || params.Obligation == domain.EnvelopeObligationNote) &&
+		(params.ExpiresAt != nil || params.Delivery != domain.EnvelopeDeliveryQueue) {
+		return nil, fmt.Errorf("obligation %s does not accept ttl or delivery intent", params.Obligation)
 	}
 
 	var created []domain.Envelope
@@ -159,13 +161,23 @@ func (rs *RoomStore) createEnvelopesTx(tx *sql.Tx, ew *events.Writer, attr attri
 				intent = *addressee.MaterializationIntent
 			}
 		}
-		// A `none` envelope never fires, so it is disposed at write; every
-		// addressed envelope opens pending and is disposed by delivery.
+		// A `none` envelope never fires and a `note` is never presented, so both
+		// are disposed at write; every other addressed envelope opens pending
+		// and is disposed by delivery.
 		state := domain.EnvelopeStatePending
 		var terminalActor, terminalAt interface{}
-		if params.Obligation == domain.EnvelopeObligationNone {
+		switch params.Obligation {
+		case domain.EnvelopeObligationNone:
 			state = domain.EnvelopeStateAcked
 			terminalActor = attr.PrincipalRef
+		case domain.EnvelopeObligationNote:
+			state = domain.EnvelopeStateAcked
+			terminalActor = attr.PrincipalRef
+			now, err := serverNowTx(tx)
+			if err != nil {
+				return nil, err
+			}
+			terminalAt = now
 		}
 
 		// The idempotency key belongs to the SAY, so EVERY envelope it fanned
@@ -225,6 +237,13 @@ func (rs *RoomStore) createEnvelopesTx(tx *sql.Tx, ew *events.Writer, attr attri
 		payload := envelopeEventPayload(envelope)
 		if _, err := logEnvelopeEvent(tx, ew, attr, envelope.UUID, "envelope.created", envelope.ETag, payload); err != nil {
 			return nil, err
+		}
+		if params.Obligation == domain.EnvelopeObligationNote {
+			if _, err := logEnvelopeEvent(tx, ew, attr, envelope.UUID, "envelope.acked", envelope.ETag, map[string]interface{}{
+				"state": string(domain.EnvelopeStateAcked), "reason": "note_recorded", "room_uuid": envelope.RoomUUID,
+			}); err != nil {
+				return nil, err
+			}
 		}
 		created = append(created, *envelope)
 	}

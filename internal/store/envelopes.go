@@ -63,6 +63,8 @@ type EnvelopeListParams struct {
 	// half of the taskless rule is a read-time projection the API applies to
 	// the rows this bound already limits.
 	StillOwedSince string
+	// CreatedSince keeps envelopes created at or after this server timestamp.
+	CreatedSince string
 }
 
 // stillOwedSQL is StillOwedSince's predicate over the unaliased envelopes
@@ -142,6 +144,10 @@ func (rs *RoomStore) ListEnvelopes(ctx context.Context, params EnvelopeListParam
 	if params.StillOwedSince != "" {
 		clauses = append(clauses, stillOwedSQL)
 		args = append(args, params.StillOwedSince)
+	}
+	if params.CreatedSince != "" {
+		clauses = append(clauses, "created_at >= ?")
+		args = append(args, params.CreatedSince)
 	}
 
 	order := "ORDER BY id"

@@ -37,6 +37,19 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	if p.FYI && len(p.To) == 0 {
 		return nil, NewValidationError("--fyi requires --to; a say without an addressee is a log entry", map[string]any{"field": "to"})
 	}
+	if p.Note {
+		if len(p.To) == 0 {
+			return nil, NewValidationError("--note requires --to; a say without an addressee is already a log entry", map[string]any{"field": "to"})
+		}
+		for _, conflict := range []struct {
+			field, flag string
+			set         bool
+		}{{"fyi", "fyi", p.FYI}, {"hold", "preempt", p.Hold}, {"ttl", "ttl", strings.TrimSpace(p.TTL) != ""}} {
+			if conflict.set {
+				return nil, NewValidationError("--note cannot be combined with --"+conflict.flag+": a note is never presented", map[string]any{"field": conflict.field})
+			}
+		}
+	}
 	if strings.TrimSpace(p.TTL) != "" && len(p.To) == 0 {
 		return nil, NewValidationError("--ttl requires --to", map[string]any{"field": "to"})
 	}
@@ -76,12 +89,14 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	if err != nil {
 		return nil, err
 	}
-	pairNotices := a.pairRoomSayNotices(room, body, addressees, senderScope, attr.PrincipalRef, p.FYI)
+	pairNotices := a.pairRoomSayNotices(room, body, addressees, senderScope, attr.PrincipalRef, p.FYI || p.Note)
 	notices = append(notices, pairNotices...)
 	obligation := domain.EnvelopeObligationNone
 	switch {
 	case len(addressees) > 0 && p.FYI:
 		obligation = domain.EnvelopeObligationFYI
+	case len(addressees) > 0 && p.Note:
+		obligation = domain.EnvelopeObligationNote
 	case len(addressees) > 0:
 		obligation = domain.EnvelopeObligationReplyRequired
 	}
@@ -263,7 +278,7 @@ func (a *API) scopeProjectUUID(ctx context.Context, scopeHandle string) (*string
 // pairRoomSayNotices delivers doctrine at the point where a pair room can
 // silently cross-discharge two topics. The result is advice only: these reads
 // do not introduce a content validation path, an override, or persisted state.
-func (a *API) pairRoomSayNotices(room *roomState, body string, addressees []store.EnvelopeAddressee, senderScope, senderPrincipal string, fyi bool) []string {
+func (a *API) pairRoomSayNotices(room *roomState, body string, addressees []store.EnvelopeAddressee, senderScope, senderPrincipal string, unobliged bool) []string {
 	if room.row.Kind != domain.RoomKindAdhoc || len(addressees) == 0 {
 		return nil
 	}
@@ -290,7 +305,7 @@ func (a *API) pairRoomSayNotices(room *roomState, body string, addressees []stor
 		notices = append(notices, "this looks like "+tasks+" work — say into those task rooms so a reply here does not cross-discharge them")
 	}
 
-	if fyi {
+	if unobliged {
 		return notices
 	}
 	for _, addressee := range addressees {

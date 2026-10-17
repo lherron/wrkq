@@ -463,7 +463,8 @@ rebuild when indexing succeeds.
 
 wrkq is the sole durable authority for agent collaboration. Rooms are keyed by
 task, campaign, project, or ad-hoc pair; envelopes are single-addressee messages
-with obligation `none`, `fyi`, or `reply_required`. HRC owns runtime delivery and
+with obligation `none`, `fyi`, `note` (recorded, never presented), or
+`reply_required`. HRC owns runtime delivery and
 actuation, and persists only opaque presentation receipts back into wrkq.
 
 Addressed envelopes store immutable `delivery` (`queue` by default, `hold` when

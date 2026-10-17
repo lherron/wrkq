@@ -36,9 +36,12 @@ predicate: >
   obligation. The say's idempotency key rides every envelope of the fan-out and
   is unique per (key, addressee), so a retried say rolls the whole group back
   rather than half-writing it. The live obligation vocabulary is exactly none,
-  fyi, and reply_required. An addressee-less none say is disposed at write.
+  fyi, note, and reply_required. An addressee-less none say is disposed at write.
   Addressed fyi never births an unborn scope and never gates; when a seat exists
-  it is injected and acked at its own presentation. reply_required births,
+  it is injected and acked at its own presentation. An addressed note (T-11305)
+  is written terminal, acked with reason note_recorded, so no pendingView,
+  birth, presentation, or expiry path ever selects it; reply-is-ack and explicit
+  discharge apply to a note reply as to any addressed say. reply_required births,
   wakes, advances to presented, and remains owed.
 
   expires_at is a server-normalized immutable creation attribute. A due pending
