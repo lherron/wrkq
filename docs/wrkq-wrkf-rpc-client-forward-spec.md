@@ -572,7 +572,20 @@ wrkq.task.acknowledge
 wrkq.task.delete
 wrkq.task.restore
 wrkq.task.copy        # server-owned deep copy (T-05111); see WrkqTaskCopy* below
+wrkq.task.claim       # claim authority; see below
+wrkq.task.claimValidate
+wrkq.task.release
+wrkq.task.lsView      # CLI compatibility read models for `wrkq ls` / `wrkq tree`
+wrkq.task.treeView
 ```
+
+Claims (`claim`/`claimValidate`/`release`) return `WrkqTaskClaim`
+`{ task, claimedBy, claimedScope, claimedNode, claimedAt, claimGeneration,
+claimToken? }`. `claimedNode` is derived by wrkqd from the authenticated
+per-node bearer, never a request parameter; `claimToken` comes back only when a
+claim or takeover mints fresh authority. The authoritative semantics (refusal
+codes, generation, takeover, release) and the `lsView`/`treeView` shapes live in
+`docs/wrkq-wrkf-rpc.md` §6.2.
 
 > **Tranche B client catch-up (this section).** The authoritative method/DTO
 > shapes are `docs/wrkq-wrkf-rpc.md` §6.2 — this forward spec is descriptive and
@@ -956,22 +969,24 @@ wrkq.room.list
 wrkq.room.logView
 wrkq.room.hide                # discovery label only
 wrkq.room.unhide
-wrkq.room.close               # REMOVED; refuses room_lifecycle_removed (burn-in)
-wrkq.room.reopen              # REMOVED; refuses room_lifecycle_removed (burn-in)
 wrkq.room.join
 wrkq.room.leave
 wrkq.room.membersView
 
 wrkq.envelope.show
+wrkq.envelope.memberPage      # bounded cross-room history for one exact member
 wrkq.envelope.inboxView
 wrkq.envelope.defer
+wrkq.envelope.withdraw        # sender cancellation
 wrkq.envelope.ack
 wrkq.envelope.present         # HRC-facing
 wrkq.envelope.pendingView     # HRC-facing
 wrkq.envelope.fail            # HRC-facing
+wrkq.envelope.birthEnvelope   # HRC-facing (registry host)
 ```
 
-Three of these are the HRC-facing surface and nothing else should call them:
+`present`, `pendingView`, and `fail` are the HRC delivery surface and nothing
+else should call them:
 `present` records `presented_to` and emits `envelope.presented`; `pendingView` is
 the kicker's wake set AND the stop-hook predicate in one read model; `fail`
 records `failed{reason}` and emits `envelope.failed`. `envelope.ack` defaults to
@@ -984,7 +999,9 @@ type WrkqRoomKind = "campaign" | "task" | "project" | "adhoc";
 type WrkqRoomWork = "open" | "terminal";
 type WrkqRoomActivity = "active" | "quiet" | "stale";
 type WrkqEnvelopeObligation = "reply_required" | "fyi" | "none";
-type WrkqEnvelopeState = "pending" | "presented" | "acked" | "deferred" | "failed";
+type WrkqEnvelopeState =
+  | "pending" | "presented" | "acked" | "deferred" | "failed"
+  | "expired" | "withdrawn";
 type WrkqEnvelopeFailureReason =
   | "runtime_terminated" | "ignored" | "undeliverable" | "legacy";
 type WrkqRoomMemberSource = "spoke" | "addressed" | "joined";
@@ -1003,11 +1020,13 @@ interface WrkqRoomListParams {
   principalRef?: string; scopeRef?: string;
 }
 interface WrkqEnvelope {
-  uuid: string; id: string; roomUuid: string; roomKey: string;
+  uuid: string; id: string; messageSeq: number; roomUuid: string; roomKey: string;
   roomKind: WrkqRoomKind; groupId?: string;
   from: WrkqEnvelopeParty; to: WrkqEnvelopeParty | null; replyTo: string;
   obligation: WrkqEnvelopeObligation; body: string; taskId?: string;
-  state: WrkqEnvelopeState; terminal: boolean;
+  state: WrkqEnvelopeState;
+  terminal: boolean; // acked | failed | expired | withdrawn; deferred is paused
+  expiresAt?: string; delivery: "queue" | "hold";
   failureReason?: WrkqEnvelopeFailureReason;
   retryAt?: string; deferReason?: string; reason?: string; terminalActor?: string;
   materializationIntent?: string;
@@ -1032,6 +1051,16 @@ interface WrkqEnvelopePendingViewParams {
 interface WrkqEnvelopePendingView {
   items: WrkqEnvelope[]; blocking: string[]; repended: number;
 }
+interface WrkqEnvelopeWithdrawParams {
+  envelope: string; group?: boolean; reason?: string;
+  principalRef?: string; scopeRef?: string;
+}
+interface WrkqEnvelopeWithdrawResult {
+  withdrawn: WrkqEnvelope[];
+  refused: { envelopeId: string; reason: string; state?: WrkqEnvelopeState;
+             presentation?: WrkqEnvelopePresentation }[];
+}
+interface WrkqEnvelopeBirth { envelopeId: string; seq: number; from: WrkqEnvelopeParty; }
 interface WrkqEnvelopeFailParams {
   envelope: string;
   reason: Exclude<WrkqEnvelopeFailureReason, "legacy">;
@@ -1054,9 +1083,8 @@ Contract points a consumer must not have to rediscover:
 - **A room has NO lifecycle state, and nothing about a room can refuse a say.**
   A say into any room the caller can resolve writes — terminal work, stale
   activity, and the `hidden` label included. `room.close` and `room.reopen` are
-  REMOVED; for one burn-in window they answer `WRKQ_VALIDATION` with
-  `data.reason: "room_lifecycle_removed"` so an old client gets a name rather
-  than a method-not-found, and wave 5 deletes them.
+  gone: T-07642 removed them behind a `room_lifecycle_removed` burn-in refusal,
+  and T-10158 deleted the registrations, so they now answer method-not-found.
 - **`work` and `activity` are READ-TIME PROJECTIONS.** Render them; never gate
   on them. `work` is `open | terminal` from the task/campaign the room is keyed
   by (ad-hoc rooms are always `open`). `lastActivityAt` is the activity clock —
@@ -1081,7 +1109,26 @@ Contract points a consumer must not have to rediscover:
 - **`groupId` equals the first envelope's own id**, so a single addressee groups
   with itself and a fan-out shares one waitable handle. `wrkq monitor wait
   <groupId> --until terminal` blocks on the whole group; `terminal` is
-  `acked | failed`, so a failed obligation releases a waiter.
+  `acked | failed | expired | withdrawn`, so a failed, expired, or withdrawn
+  obligation releases a waiter.
+- **`withdraw` is the sender's cancellation.** It moves a pending or deferred
+  envelope that was never presented to `withdrawn` and emits
+  `envelope.withdrawn`; repeating it is idempotent. A single withdraw of a
+  presented or otherwise-terminal envelope refuses with a typed error.
+  `group: true` takes the whole fan-out in one transaction and reports the
+  siblings it could not take in `refused` (`already_presented`, `wrong_state`).
+  A scope-less operator already known to the ledger may override sender
+  ownership.
+- **Only a never-presented envelope can time out.** An explicit `expiresAt`
+  (from the say's server-relative `ttl`) earlier than `createdAt + 24h` ends it
+  as `expired` (reason `ttl`, emits `envelope.expired`); otherwise the implicit
+  24h undelivered horizon (T-09261) ends it as `failed` / `undeliverable`. A
+  presentation receipt exempts an envelope from both. `delivery: "hold"` stores
+  HRC's hold-delivery intent.
+- **`birthEnvelope { scopeRef }`** returns the lowest-seq `reply_required`
+  envelope ever addressed to that scope, in any state, or `null` when nothing
+  has fired at it. HRC's registry host reads it to pick the node a virgin scope
+  is born on; fyi never summons and is outside the domain.
 - **A reply returned by `wrkc say --wait` is terminally acknowledged as
   `consumed_by_wait`.** Its exact principal and scope must match the waiter;
   same-principal sibling scopes and other fan-out addressees remain untouched.
@@ -1149,11 +1196,13 @@ Contract points a consumer must not have to rediscover:
   every standing obligation; a group whose `room.work` is `"terminal"` is
   CONTEXT worth rendering, not a separate class of mail.
 
-`say` returns `WrkqRoomSayResult`; `open`/`show`/`hide`/`unhide` return one
+`say` returns `WrkqRoomSayResult`; `show`/`hide`/`unhide` return one
 `WrkqRoom`; `list` returns `{items: WrkqRoom[]}`; `logView` returns
 `{room, items}`; `join`/`leave`/`membersView` return `{room, items}` of members
 with their source and latest attendance. `envelope.show`/`defer`/`fail`
-return one `WrkqEnvelope`; `envelope.ack` returns `{room, items}`.
+return one `WrkqEnvelope`; `envelope.withdraw` returns
+`WrkqEnvelopeWithdrawResult`; `envelope.birthEnvelope` returns
+`WrkqEnvelopeBirth | null`; `envelope.ack` returns `{room, items}`.
 
 #### Container/project methods
 
@@ -1908,6 +1957,43 @@ run fence as instance cancel and return token-free `terminalizedRuns` summaries.
 
 Do not expose `wrkf.task.inspect`, `wrkf.task.timeline`, `wrkf.task.refresh`, or `wrkf.task.syncMeta`.
 
+#### Role bindings
+
+```text
+wrkf.role.list
+wrkf.role.bind
+wrkf.role.unbind
+wrkf.role.set
+```
+
+Role bindings are durable `{ instanceId, role, principal_ref, deliveryRef?,
+lane?, bindingMode, boundAt }` rows on a workflow instance, selected by `task`
+or `instanceId`. `bind` returns the new binding; `list`, `unbind`, and `set`
+return the instance's resulting binding list.
+
+#### Actions
+
+```text
+wrkf.action.next
+wrkf.action.claim
+wrkf.action.settle
+wrkf.action.start
+wrkf.action.bindExternal
+wrkf.action.complete
+wrkf.action.fail
+wrkf.action.heartbeat
+wrkf.action.renewLease
+wrkf.action.show
+wrkf.action.list
+```
+
+The action surface composes runs, evidence, and transitions into semantic
+task-lifecycle calls; an action run is a `workflow_runs` row with an `action`
+label, not a second ledger. `claim` takes an explicit predecessor CAS
+acknowledgment and refuses with `WRKF_SUSPENDED` while the instance is parked.
+Params and results are authoritative in `docs/wrkq-wrkf-rpc.md` §6.3
+("Actions").
+
 #### Action discovery and source bindings
 
 `wrkf.action.next` candidates and `wrkf.action.claim` run bindings carry the
@@ -1940,6 +2026,8 @@ wrkf.evidence.list
 wrkf.evidence.show
 wrkf.evidence.suggest
 wrkf.evidence.schema
+wrkf.ledger.append
+wrkf.ledger.list
 ```
 
 Evidence belongs to workflow state. Evidence add must support run linkage and richer metadata:
@@ -1977,6 +2065,18 @@ wrkf.obligation.create
 ```
 
 These mutate workflow obligations, not wrkq tasks directly.
+
+#### Event query
+
+```text
+wrkf.event.query
+```
+
+A replayable read model over durable workflow events (`workflow_events`), one
+item per admitted event in stable `(created_at, id)` order, filtered through
+typed workflow/task/project/role fields rather than SQL. It is distinct from
+`wrkq.history.listView`, which reads the generic `event_log`. Params are
+authoritative in `docs/wrkq-wrkf-rpc.md` §6.3 ("Event Query").
 
 #### Supervisor and watch
 
@@ -2243,7 +2343,8 @@ client.effect          // forbidden
 interface CreateClientOptions {
   command?: "wrkq" | "wrkf" | string;
   args?: string[];
-  dbPath?: string;
+  dbLocator?: string;      // local SQLite path or rpc:// remote wrkqd locator
+  dbPath?: string;         // legacy name for dbLocator
   principalRef?: string;
   role?: string;
   hookCatalogPath?: string;
@@ -2254,8 +2355,15 @@ interface CreateClientOptions {
   closeTimeoutMs?: number;
   clientInfo?: { name: string; version: string };
   autoInitialize?: boolean;
+  transport?: Transport;   // inject a transport directly (tests); bypasses spawning
 }
 ```
+
+A local `dbLocator` is passed as `--db`; an `rpc://` locator is passed through
+`WRKQ_DB` (clearing `WRKQ_DB_PATH*`). Setting
+both `dbLocator` and `dbPath` to different values throws, and `hookCatalogPath`
+is refused with a remote locator: the hook catalog is canonical-node
+configuration in remote mode.
 
 Defaults:
 
@@ -2318,6 +2426,9 @@ Do not expose separate error classes that force consumers to catch two unrelated
 `@wrkq/client/wrkq` should export wrkq types and the `WrkqFacade` type only.
 
 `@wrkq/client/wrkf` should export wrkf types and the `WrkfFacade` type only.
+
+`@wrkq/client/testing` exports test doubles (`FakeTransport`, `FakeHandler`)
+for injecting through `CreateClientOptions.transport`.
 
 The concrete client factory should live at the root package:
 
