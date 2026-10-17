@@ -6,13 +6,16 @@
 # the live fleet after cutover:
 #
 #   test/smoke-wrkc-note.sh --ref T-xxxxx --seat agent@project:scope \
-#     [--human agent:note-smoke] [--hrc-db PATH] [--settle 30] \
-#     [--check-fyi] [--fyi-timeout 120] [--out DIR]
+#     [--human agent:note-smoke] [--replier agent@project:scope|self] \
+#     [--hrc-db PATH] [--settle 30] [--check-fyi] [--fyi-timeout 120] [--out DIR]
 #
 # --seat is the recipient. For live acceptance pick a LIVE, IDLE seat: every
 # HRC check below is about that seat not being driven. --human is a scope-less
 # principal (never kicked or summoned) that plays the other party, so the only
-# mail that could reach a runtime is mail addressed to --seat.
+# mail that could reach a runtime is mail addressed to --seat. Every scope in
+# this driver is explicit: HRC_SESSION_REF is cleared after it is read, because
+# an inherited one turns --human into the runner's seat and reply-is-ack (which
+# matches scope to scope) then misses the ask entirely.
 #
 # Ledger checks (always):
 #   1. a note to --seat is created terminal (acked, obligation note) with no
@@ -22,8 +25,12 @@
 #      sibling scope (an fyi never births a seat), withdrawn right after;
 #   3. `wrkc notes` as --seat lists it; `wrkc inbox` shows the count line and
 #      --json carries recentNotes;
-#   4. --seat asks --human (reply_required; a scope-less addressee is never
-#      summoned); --human answers with --note and that reply discharges the ask.
+#   4. --seat asks the replier and the replier answers with --note; that reply
+#      discharges the ask. By default the replier is --human, so the ask stays
+#      pending (a scope-less addressee is never summoned). --replier names a
+#      SEATED replier instead (`self` = the runner's own HRC_SESSION_REF): the
+#      ask is then delivered to that seat (one real turn there), the driver
+#      waits for it to reach presented, and the note reply comes from that scope.
 # HRC checks (--hrc-db, the seat node's var/state/hrc/state.sqlite):
 #   5. after --settle seconds, no hrc_events row for the seat's scope since the
 #      baseline is a turn start/prompt/admission/presentation, and no event
@@ -38,19 +45,22 @@ set -euo pipefail
 
 WRKC="${WRKC:-wrkc}"
 WRKQ="${WRKQ:-wrkq}"
-REF="" SEAT="" HUMAN="agent:note-smoke" HRC_DB="" SETTLE=30 CHECK_FYI=0 FYI_TIMEOUT=120 OUT=""
+REF="" SEAT="" HUMAN="agent:note-smoke" REPLIER="" HRC_DB="" SETTLE=30 CHECK_FYI=0 FYI_TIMEOUT=120 OUT=""
+CALLER_SCOPE="${HRC_SESSION_REF:-}"
+unset HRC_SESSION_REF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ref) REF="$2"; shift 2 ;;
     --seat) SEAT="$2"; shift 2 ;;
     --human) HUMAN="$2"; shift 2 ;;
+    --replier) REPLIER="$2"; shift 2 ;;
     --hrc-db) HRC_DB="$2"; shift 2 ;;
     --settle) SETTLE="$2"; shift 2 ;;
     --check-fyi) CHECK_FYI=1; shift ;;
     --fyi-timeout) FYI_TIMEOUT="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
-    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,44p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -59,6 +69,15 @@ done
 SEAT_AGENT="${BASH_REMATCH[1]}"
 SEAT_PRINCIPAL="agent:$SEAT_AGENT"
 SEAT_SCOPE_REF="agent:${BASH_REMATCH[1]}:project:${BASH_REMATCH[2]}:task:${BASH_REMATCH[3]}"
+if [[ "$REPLIER" == self ]]; then
+  [[ -n "$CALLER_SCOPE" ]] || { echo "--replier self needs HRC_SESSION_REF" >&2; exit 2; }
+  REPLIER="$CALLER_SCOPE"
+fi
+if [[ -n "$REPLIER" ]]; then
+  [[ "$REPLIER" =~ ^([^@]+)@[^:]+:.+$ ]] || { echo "--replier must be agent@project:scope or self" >&2; exit 2; }
+  [[ "$REPLIER" != "$SEAT" ]] || { echo "--replier must differ from --seat" >&2; exit 2; }
+  REPLIER_PRINCIPAL="agent:${BASH_REMATCH[1]}"
+fi
 for tool in jq "$WRKC" "$WRKQ"; do
   command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 2; }
 done
@@ -106,7 +125,7 @@ pending_view() {
 hrc_baseline() { sqlite3 -readonly "$HRC_DB" "SELECT COALESCE(MAX(hrc_seq),0) FROM hrc_events"; }
 
 log "# wrkc --note E2E ($RUN_ID) $(date -u +%FT%TZ)"
-log "# ref=$REF seat=$SEAT ($SEAT_SCOPE_REF) human=$HUMAN hrc_db=${HRC_DB:-none} check_fyi=$CHECK_FYI"
+log "# ref=$REF seat=$SEAT ($SEAT_SCOPE_REF) human=$HUMAN replier=${REPLIER:-$HUMAN (scope-less)} hrc_db=${HRC_DB:-none} check_fyi=$CHECK_FYI"
 run "$WRKC" version || true
 [[ -z "$HRC_DB" ]] || BASELINE="$(hrc_baseline)"
 
@@ -117,6 +136,7 @@ SHOW="$(run "$WRKC" show "$NOTE_ID" --json)"
 check note-created-terminal \
   "$(jq -r 'if .obligation == "note" and .state == "acked" and .terminal == true and (.presentedTo | length) == 0 then 1 else 0 end' <<<"$SHOW")" \
   "$NOTE_ID $(jq -r '"obligation=\(.obligation) state=\(.state) terminal=\(.terminal) receipts=\(.presentedTo | length)"' <<<"$SHOW")"
+check human-is-scopeless "$(jq -r 'if .envelopes[0].from.scopeRef == null then 1 else 0 end' <<<"$NOTE_JSON")" "--human sends with no scope (from.scopeRef=$(jq -r '.envelopes[0].from.scopeRef' <<<"$NOTE_JSON"))"
 HUMAN_SHOW="$(run "$WRKC" show "$NOTE_ID" --output human || true)"
 check note-show-human "$([[ "$HUMAN_SHOW" == *"obligation: note"* ]] && echo 1 || echo 0)" "wrkc show prints obligation: note"
 LOG_JSON="$(run "$WRKC" log "$REF" --json --limit 50)"
@@ -139,9 +159,23 @@ INBOX_JSON="$(run "$WRKC" inbox --as "$SEAT_PRINCIPAL" --scope-ref "$SEAT" --jso
 check inbox-json-recent-notes "$(jq -r 'if (.recentNotes // 0) >= 1 then 1 else 0 end' <<<"$INBOX_JSON")" "inbox --json recentNotes=$(jq -r '.recentNotes' <<<"$INBOX_JSON")"
 
 # 4. A note reply discharges a reply_required ask.
-ASK_JSON="$(run "$WRKC" say "$REF" --to "$HUMAN" --as "$SEAT_PRINCIPAL" --scope-ref "$SEAT" --json -m "[$RUN_ID] ask: reply_required to a scope-less principal")"
-ASK_ID="$(jq -r '.envelopes[0].id' <<<"$ASK_JSON")"
-REPLY_JSON="$(run "$WRKC" say "$ASK_ID" --to "$SEAT" --note --as "$HUMAN" --json -m "[$RUN_ID] reply: answered by note")"
+if [[ -n "$REPLIER" ]]; then
+  ASK_JSON="$(run "$WRKC" say "$REF" --to "$REPLIER" --as "$SEAT_PRINCIPAL" --scope-ref "$SEAT" --json -m "[$RUN_ID] ask: reply_required to a seated replier; answer comes from the driver, no action needed")"
+  ASK_ID="$(jq -r '.envelopes[0].id' <<<"$ASK_JSON")"
+  deadline=$((SECONDS + FYI_TIMEOUT))
+  ask_state=pending
+  while (( SECONDS < deadline )); do
+    ask_state="$("$WRKC" show "$ASK_ID" --json | jq -r .state)"
+    [[ "$ask_state" == pending ]] || break
+    sleep 3
+  done
+  check ask-presented "$([[ "$ask_state" == presented ]] && echo 1 || echo 0)" "$ASK_ID reached $ask_state at $REPLIER within ${FYI_TIMEOUT}s"
+  REPLY_JSON="$(run "$WRKC" say "$ASK_ID" --to "$SEAT" --note --as "$REPLIER_PRINCIPAL" --scope-ref "$REPLIER" --json -m "[$RUN_ID] reply: answered by note")"
+else
+  ASK_JSON="$(run "$WRKC" say "$REF" --to "$HUMAN" --as "$SEAT_PRINCIPAL" --scope-ref "$SEAT" --json -m "[$RUN_ID] ask: reply_required to a scope-less principal")"
+  ASK_ID="$(jq -r '.envelopes[0].id' <<<"$ASK_JSON")"
+  REPLY_JSON="$(run "$WRKC" say "$ASK_ID" --to "$SEAT" --note --as "$HUMAN" --json -m "[$RUN_ID] reply: answered by note")"
+fi
 REPLY_ID="$(jq -r '.envelopes[0].id' <<<"$REPLY_JSON")"
 ASK_SHOW="$(run "$WRKC" show "$ASK_ID" --json)"
 check note-reply-discharges "$(jq -r --arg id "$ASK_ID" 'if (.acked | index($id)) != null then 1 else 0 end' <<<"$REPLY_JSON")" "reply $REPLY_ID acked [$(jq -r '.acked | join(",")' <<<"$REPLY_JSON")]"
