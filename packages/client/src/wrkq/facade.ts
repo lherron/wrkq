@@ -362,9 +362,8 @@ export interface WrkqRoomFacade {
   /**
    * Set / clear the `hidden` discovery label. It changes what the DEFAULT
    * `list` returns and nothing else: a hidden room accepts says, delivers, and
-   * gates turns exactly like any other. `close` and `reopen` are REMOVED —
-   * rooms have no lifecycle, and the RPCs refuse with `room_lifecycle_removed`
-   * for one burn-in window.
+   * gates turns exactly like any other. Rooms have no lifecycle: there is no
+   * `close` or `reopen`.
    */
   hide(params: WrkqRoomLabelParams): Promise<WrkqRoom>;
   unhide(params: WrkqRoomLabelParams): Promise<WrkqRoom>;
