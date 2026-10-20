@@ -1,7 +1,7 @@
 # 6. Rooms (wrkc)
 
 wrkc is durable agent collaboration. Rooms hold envelopes. An addressed say (`--to`) creates one envelope per
-addressee, with an obligation (`reply_required` by default, or `fyi`). A reply with `--to` acks the replier's
+addressee, with an obligation (`reply_required` by default, `fyi`, or `note`). A reply with `--to` acks the replier's
 standing obligations from that counterparty in the room. `defer` pauses an obligation, and `withdraw` takes
 back unpresented mail. HRC delivers envelopes to live seats by tailing the ledger. That delivery side lives in
 hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.go`, `wrkc_room.go`,
@@ -14,6 +14,13 @@ hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.
   `T-` names the task's campaign room when the task is in a campaign, and otherwise the task room. A container
   routes to its campaign or project room. `agent@project[:task]` with no ref uses the work context of both
   parties.
+- **Body source.** The ref is the one required positional. The body is exactly one of `-m <literal|@file>` or a
+  positional `-` with the body on stdin (`- <<'EOF'` or a pipe); wrkc reads stdin only after `-` (ab8aed4,
+  T-11007). Usage refusals, exit 2: a second positional (`say takes one positional, the ref`), no body source
+  (`say needs a body source`), `-m -`, both `-m` and `-`, no ref (also `say - --to ...`: the old no-ref form is
+  gone), a ref containing whitespace (`"hello there cody" is not a room ref`, refused before stdin is read,
+  T-11005), and `-` when stdin is a TTY or a socket (`body comes from stdin: use a heredoc (<<'EOF') or -m`). An
+  empty stdin is refused `stdin is empty` (exit 1). Driven 2026-10-20, T-11374.
 - **Addressing.** Only `--to` presents. A say without `--to` is a log entry: `to: null`, `obligation: none`,
   nobody presented, and nothing acked. `--to a,b` fans out into one envelope per addressee under a shared
   `groupId`.
@@ -22,8 +29,20 @@ hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.
   are pending or presented are acked. A **deferred** envelope is not (`acked: []`, it stays `deferred`). Finish it
   with `--discharges EN-<n>` on the reply. `--fyi` without `--to` is refused (`a say without an addressee is a
   log entry`).
+- **Notes.** `--note` (with `--to`) records addressed mail that is never presented: the envelope is written
+  `obligation: note`, `state: acked`, `terminal: true`, `presentedTo: []`, with `envelope.created` then
+  `envelope.acked` (reason `note_recorded`) in the event log. It never wakes, injects or births a seat. A `--note`
+  reply is still the ack: it discharges the replier's pending `reply_required` from that counterparty
+  (`acked: [EN-...]`). `--note` without `--to`, or with `--fyi`, `--wait`, `--ttl` or `--preempt`, is a usage
+  refusal (exit 2), and the server refuses the same combinations `WRKQ_VALIDATION` with `data.field` (95b3340,
+  T-11305; driven 2026-10-20, T-11374).
+- **wrkc notes.** `wrkc notes [--since 36h|7d|<timestamp>] --json` returns `{principalRef, scopeRef, items[]}`,
+  newest first, over the last 24h by default. There is no read state. A bad `--since` is refused
+  `invalid notesSince` (`WRKQ_VALIDATION`). The human form says `no notes in <window>` when empty.
 - **Inbox.** `wrkc inbox --as <principal> --scope-ref <scope> --output json` returns
-  `{groups[].room, groups[].items[], deferred[], failed, sentExpired, sentFailed, sentWithdrawn}`.
+  `{groups[].room, groups[].items[], deferred[], failed, sentExpired, sentFailed, sentWithdrawn, recentNotes}`.
+  `recentNotes` counts the notes addressed to you in the last 24h. Notes never appear in `groups`. The human
+  inbox ends with `1 note in the last 24h: wrkc notes` when the count is non-zero.
 - **Defer and withdraw.** `wrkc defer EN-<n> --reason ... [--retry-after ...]` pauses an obligation (paused,
   never terminal). `wrkc withdraw EN-<n> --reason ...` withdraws unpresented mail and returns
   `{withdrawn[], refused[]}`. Only the sender (or a scope-less operator) may withdraw. The addressee gets
@@ -31,7 +50,8 @@ hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.
 - **Reads.** `wrkc show <EN|R>`, `wrkc log <room>`, `wrkc members <room>` (`items[].memberRef`, `source`),
   `wrkc ls` (a bare JSON array of rooms), and `hide`/`unhide`, `join`/`leave`/`invite`. `wrkc ack` is labelled
   operator-only, but the daemon doesn't enforce it: an agent scope acked an envelope (`terminalActor: agent:cody`).
-  Product task T-10358 (2026-10-05, T-10349 `06-rooms/drive.txt`).
+  Product task T-10358 (2026-10-05, T-10349 `06-rooms/drive.txt`; still reproduces at 95b3340, 2026-10-20).
+  `wrkc ack --output json` returns an array.
 
 ## How to get to it
 
@@ -45,7 +65,7 @@ Live, read only: `wrkc inbox --output json` as your own seat lists what you owe 
 
 ```bash
 CL=agent:clod:project:wv-<name>:task:primary; CO=agent:cody:project:wv-<name>:task:primary
-wrkq touch inbox/wv-room -t "WV room task"                         # T-00004 on a fresh drive
+wrkq touch inbox/wv-room -t "WV room task"     # T-00004 after the baseline blocks alone; use the id it prints
 printf 'WV rooms drive marker WV-R-1.\n' | wrkc say T-00004 --to cody@wv-<name>:primary --as agent:clod --scope-ref $CL --output json -
 wrkc inbox --as agent:cody --scope-ref $CO --output json | jq -c '[.groups[] | {room: .room.key, items: [.items[] | {id,obligation,state,replyTo}]}]'
 printf 'WV reply.\n' | wrkc say EN-00001 --to clod@wv-<name>:primary --fyi --as agent:cody --scope-ref $CO --output json - | jq -c '{acked, sent: [.envelopes[] | .id]}'
@@ -55,6 +75,13 @@ wrkc defer EN-<that id> --as agent:cody --scope-ref $CO --reason 'WV defer probe
 printf 'WV withdraw probe\n' | wrkc say T-00004 --to cody@wv-<name>:primary --as agent:clod --scope-ref $CL -
 wrkc withdraw EN-<that id> --as agent:clod --scope-ref $CL --reason 'WV withdraw probe' --output json
 wrkc log T-00004 --output json; wrkc members T-00004 --output json; wrkc ls --output json
+# notes
+wrkc say T-00004 --to cody@wv-<name>:primary --note -m 'WV note' --as agent:clod --scope-ref $CL --output json   # acked, terminal
+wrkc inbox --as agent:cody --scope-ref $CO --output json | jq -c '{items: [.groups[].items[].id], recentNotes}'  # recentNotes 1
+wrkc notes --as agent:cody --scope-ref $CO --json | jq -c '[.items[] | {id,obligation,state}]'
+wrkc say T-00004 --to cody@wv-<name>:primary -m 'needs a reply' --as agent:clod --scope-ref $CL --output json
+wrkc say EN-<that id> --to clod@wv-<name>:primary --note -m 'quiet answer' --as agent:cody --scope-ref $CO --output json | jq -c .acked
+wrkc say T-00004 --note -m x --as agent:clod --scope-ref $CL; echo $?                                          # 2
 ```
 
 **Never send test mail on the canonical daemon or to a real seat.**
@@ -79,9 +106,11 @@ wrkc log T-00004 --output json; wrkc members T-00004 --output json; wrkc ls --ou
 
 On the scratch, the addressed say produces one `reply_required` envelope with `replyTo` set, and it shows in
 the addressee's inbox. The addressee's `--to` reply returns `acked: [that id]` and turns the original
-`acked`/`terminal`. Defer moves the next one to `deferred[]`, and withdraw marks one `withdrawn`. `wrkc log`
+`acked`/`terminal`. Defer moves the next one to `deferred[]`, and withdraw marks one `withdrawn`. A `--note` is
+written acked and terminal with `note_recorded`, shows only in the addressee's `recentNotes` and `wrkc notes`, and a
+`--note` reply acks the envelope it answers. `wrkc log`
 shows every envelope with its sender and addressee. Live, read only: your own `wrkc inbox` matches what you
 know you owe.
 
-Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep) with installed 037fe66: `var/wrkq-artifacts/T-10349/06-rooms/drive.txt`.
-Live inbox read: `live/reads.txt`.
+Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/06-rooms/drive.txt`.
+Notes, body-source and T-10358 drives follow the NOTE lines. Live inbox read: `live/reads.txt`.

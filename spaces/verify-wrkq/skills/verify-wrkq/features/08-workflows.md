@@ -68,17 +68,21 @@ T-10349 `08-workflows/drive.txt`).
 - **The workflow's closed state doesn't change the task's state.** After the workflow closed `completed`,
   `wrkq cat` still said `state: open` (2026-10-05, T-10298 `08-workflows/drive.txt`). Task state and workflow
   state are separate. Close the task yourself.
+- `wrkf check list <task> --json` returns `{checks: [...]}` (`id`, `hookId`, `exitCode`, `verdict`), not a bare
+  array. Template rows in `workflow list --json` have no status field: a template is active while `discontinuedAt`
+  is null.
 - `wrkf transition --json` and `task attach --json` don't nest the result under `.instance`. Read the final
   state with `task inspect` (`status`, `phase`, `outcome`, `revision`).
-- `wrkf` errors with `--json` print `{"error":{code,message}}` with exit 1. Source read, not driven
-  (`wv rec` merges the streams): they go to stderr (`internal/wrkfcli/root.go`), so a stdout-only capture is empty.
+- `wrkf` errors with `--json` print `{"error":{code,message}}` with exit 1, on **stderr**: a stdout-only capture
+  is empty (`... 2>/dev/null | wc -c` is 0). Driven 2026-10-20, T-11374.
 - After the instance closes, the task's `meta.workflow.state` reads `closed`/`completed` while its `state` stays
   `open`.
 - **A transition on a closed instance returns `WRKF_INTERNAL "internal error"`.** The from-state refusal is
-  uncoded, so the cause is lost. Product task T-10356.
+  uncoded, so the cause is lost. Product task T-10356 (still reproduces at 95b3340, 2026-10-20).
 - **`wrkf ledger append` over `rpc://` is refused even with `--principal-ref`** (`requires an explicit canonical
   agent:<id> principal`). The same call in local mode succeeds. The wrkf remote transport doesn't send the
-  principal. Product task T-10357.
+  principal. Product task T-10357 (still reproduces at 95b3340, 2026-10-20; `ledger append` also needs
+  `--about`, or it refuses `--task, --kind, --about, and --body are required` first).
 - A remote client can't pass `--hook-catalog`. The catalog belongs to the canonical node, and `@wrkq/client`
   throws `hookCatalogPath is local-only` in remote mode. The wrkf CLI refuses with `--hook-catalog is local-only;
   hook catalog is canonical-node configuration in remote mode`.
@@ -92,5 +96,5 @@ names the missing evidence. The transition is refused until that evidence exists
 `finish --run-checks` leave the instance `closed`/`completed` at revision 2, with a timeline of attached plus
 two transitioned events.
 
-Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep) with installed 037fe66: `var/wrkq-artifacts/T-10349/08-workflows/drive.txt`,
-both fixtures, on T-00007 (pass) and T-00008 (fail). Live read: `wrkf workflow list --json` (31 templates, 16 active) in `live/reads.txt`.
+Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/08-workflows/drive.txt`,
+both fixtures, on T-00009 (pass) and T-00010 (fail). Live read: `wrkf workflow list --json` (35 templates, 18 active) in `live/reads.txt`.

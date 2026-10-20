@@ -16,18 +16,22 @@ downward) or global, on the internal root. Code: `internal/rpccli/monitor.go`, `
   `scope_ref`, `payload` as a JSON string, so use `fromjson`). Without `--since` it **replays the whole log from
   event 1**, and it ignores task selectors (`monitor watch T-99999 --raw` still streams every event). Every watch
   ends with a `{"type":"wrkq.monitor.terminal",...}` row. A watch without `--until` that runs out of time exits 0
-  (`result: timeout`). Refusals, all exit 2: `--until` with no selector, `monitor wait` without `--until`, and
+  (`result: timeout`). `--stall-after D` ends a wait or a watch after D with no new events, with or without
+  `--until`: `monitor wait` reports `result: stall` and exits 1 (`Error: monitor wait ended: stall`), a watch without
+  `--until` reports `result: stall` and exits 0 (driven 2026-10-20, T-11374: both ended at 2s under `--timeout 30s`). Refusals, all exit 2: `--until` with no selector, `monitor wait` without `--until`, and
   `--scope` (`not implemented yet`).
 - **`wrkq watch` is gone.** It now fails, naming `wrkq monitor watch --raw`.
 - **Container webhooks.** `wrkq container set <c> --webhook-url URL [--webhook-events task|workflow|container|<name>]`,
   plus `--add-webhook-url`, `--remove-webhook-url`, `--webhook-urls '<json>'` and `--all`. `{ticket_id}` in a URL
   expands to the task id and `{project_id}` to the subscribing container's `P-<n>`. The body carries `event`,
   `ticket_id`, `event_seq` and more. A comment on a task posts `comment_added` to the `task` class.
-  `--webhook-events` without a URL is refused. Source read, not driven: `--webhook-url` replaces the container's
-  whole list (`container.go`).
+  `--webhook-events` without a URL is refused. `--webhook-url` replaces the container's whole list, and
+  `--add-webhook-url` appends. Without `--webhook-events` the result lists plain URL strings, with it
+  `{url, events}` objects (driven 2026-10-20, T-11374).
 - **Global webhooks.** `wrkq webhook list|add|rm <url>` manage subscriptions on the internal root, which every
   project inherits. A second `add` of the same URL returns `changed: false`, and a bad URL is refused
-  (`invalid webhook url`). `list` has no `--json`, so use `--output json`, which prints one object per line.
+  (`invalid webhook url`). `list --json` (hidden, feature 2) and `list --output json` both print one
+  `{"url": ...}` object per line, and an empty list prints nothing (2026-10-20, T-11374).
 
 ## How to get to it
 
@@ -72,5 +76,5 @@ for a state that never arrives. `watch --raw` streams event rows. With the conta
 and then updating a task in it POSTs exactly two `task` events (`created`, `updated`) to `/hook/<task id>`, with
 increasing `event_seq` (a comment adds a third, `comment_added`).
 
-Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep) with installed 037fe66: `var/wrkq-artifacts/T-10349/09-monitor-webhooks/drive.txt`
-and `sink.jsonl`. Live read of the global sinks: `live/reads.txt`.
+Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/09-monitor-webhooks/drive.txt`
+and `sink.jsonl`. Live read of the global sinks (three): `live/reads.txt`.

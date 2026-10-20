@@ -11,19 +11,23 @@ It is renewed, resolved or abandoned after review. Code: `internal/rpccli/claim.
 - **Claim.** `wrkq claim <task> --scope agent:<id>:project:<p>:task:<T> [--take-over --yes] --json` returns
   `{claimedBy, claimedScope, claimedNode, claimGeneration, claimToken}`. The daemon derives `claimedNode` from
   the bearer credential. Claiming moves an open task to `in_progress`. A completed task is refused
-  `wrong_state: completed` (source read, `claims.go`: `blocked` is also claimable, any other state is refused).
+  `wrong_state: completed`. A `blocked` task is claimable and moves to `in_progress` (driven 2026-10-20, T-11374).
+  Any other state is refused (source read, `claims.go`).
 - **Contention.** A second claimant is refused with `already_claimed: holder=... node=... scope=... generation=N`.
   `--take-over` supersedes and bumps the generation.
 - **Release.** `wrkq release <task> --scope ... --claim-token ... --claim-generation N`, run as the holder's
   principal. A superseded holder is refused (`claim_superseded: ...`), and so is a token that doesn't match the
   current claim, with the same message. Release prints the prior claim, records `task.claim_released`, and leaves
   the task state as it is. A holder re-claiming its own task is refused `already_claimed`. `--force` is the operator path.
+- **Reading a claim.** `wrkq cat <task> --json --one` carries the holder as flat fields: `claimed_by`,
+  `claimed_scope`, `claimed_node`, `claimed_at`, `claim_generation`. There is no nested `claim` object
+  (2026-10-20, T-11374).
 - **Promises.** `wrkq promise add --task|--container ... --subject ... --question ... --review-at|--in ...` creates
   `PR-<n>`. `promise ready` lists the promises that are due, `promise renew --if-match E --in 7d --note ...` sets
   the next review, and `promise resolve|abandon --if-match E --note ...` closes one. `promise list`,
   `promise attach|detach|edit` also exist. `wrkq log PR-<n>` gives the history. `--subject` defaults to the
   task's title. Only the owner sees a promise in `ready` or can change it (others get `WRKQ_FORBIDDEN: only the
-  promise owner may mutate it`).
+  promise owner may mutate it`, driven 2026-10-20).
 
 ## How to get to it
 
@@ -55,6 +59,9 @@ wrkq log PR-00001 --oneline
 - **Claims need a node identity.** A daemon started with plain `-token` (or none) refuses every claim:
   `WRKQ_NODE_IDENTITY_REQUIRED: node identity is required for task claims`. `wv up` starts with
   `-node-tokens-file` for this reason (2026-10-05, T-10298).
+- **zsh eats `$VAR:t...`.** Building a scope as `agent:clod:project:$WP:task:T-2` in zsh applies the `:t` (tail)
+  modifier, so the scope becomes `...:wv-<name>ask:T-2` and every claim is refused
+  `--scope must be a task-scoped sessionRef`. Brace it: `${WP}:task` (2026-10-20, T-11374 `04-claims-promises/drive.txt`).
 - `--scope` accepts the lane-suffixed `$HRC_SESSION_REF` form (`...:task:T-00001/lane:main`) and records
   the claim against the task scopeRef with the lane dropped. A non-task ref is still refused.
 - Release must run as the holder's principal: `WRKQ_VALIDATION: claim principal must match claim scope agent`.
@@ -71,6 +78,5 @@ feed (`wrkq monitor watch --raw`, feature 9) shows both `task.claimed` events, t
 `take_over: true`, then `task.claim_released`. A due promise appears in `ready`, a stale etag is refused, renewing
 it drops it from `ready`, and resolving it leaves `state: resolved` with three `promise.*` events in its log.
 
-Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep) with installed 037fe66: `var/wrkq-artifacts/T-10349/04-claims-promises/drive.txt`.
-The claim block above its first NOTE line ran on T-00001 and was refused `wrong_state: completed`. The re-drive on
-T-00002 follows that line, so its generations are one higher (the lane-ref probe took generation 1).
+Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/04-claims-promises/drive.txt`.
+The five claim refusals before its first NOTE line are a zsh driver error (see Gotchas), re-driven after it.

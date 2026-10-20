@@ -38,6 +38,7 @@ printf 'Objective: wv drive.\nNext: acknowledge.\n' | wrkq handoff create --scop
 wrkq handoff acknowledge H-00001 --as agent:clod:project:wv-<name> --if-match 2 --note "stale" --json   # etag_mismatch, exit 6
 wrkq handoff acknowledge H-00001 --as agent:clod:project:wv-<name> --if-match 1 --note "Consumed; wv drive" --json
 wrkq handoff list --scope clod@wv-<name> --json | jq -c '.handoffs'      # []
+wrkq handoff get H-00001 --json | jq -c '{id,status,etag,acknowledgement_note}'
 ```
 
 ## Gotchas
@@ -58,6 +59,13 @@ wrkq handoff list --scope clod@wv-<name> --json | jq -c '.handoffs'      # []
   (`handoff_ack.go`), so a `:project:` suffix on it is never checked.
 - Acknowledge exit codes: 6 `etag_mismatch` (stale `--if-match`), 5 `already_acknowledged`,
   4 `handoff_not_found`, 1 for validation.
+- **Handoff JSON shapes differ by verb.** `handoff create --json` and `acknowledge --json` wrap the row as
+  `{handoff: {...}, idempotent_replay}`. `handoff get --json` returns the row flat. The row's lifecycle field is
+  `status` (`pending`/`acknowledged`), not `state`, and the note is `acknowledgement_note`. `handoff list`
+  filters with `--status pending|acknowledged|all`; there is no `--state` (2026-10-20, T-11374
+  `03-comments-attachments-handoffs/drive.txt`).
+- `comment add` keeps its own `--json`, so the every-verb `--json` (feature 2) doesn't reach it. On a TTY,
+  `script -q /dev/null wrkq comment add T-2 -m x --json` still prints `Comment created: C-<n>` (2026-10-20, T-11374).
 
 ## Proven when
 
@@ -65,4 +73,4 @@ The comment comes back attributed to you, both attachments are listed and `get` 
 files exist under the daemon's attachment dir, a stale-etag acknowledge is refused, the right one moves the
 handoff to `acknowledged` with your note, and the pending list is empty afterwards.
 
-Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep) with installed 037fe66: `var/wrkq-artifacts/T-10349/03-comments-attachments-handoffs/drive.txt`.
+Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/03-comments-attachments-handoffs/drive.txt`.

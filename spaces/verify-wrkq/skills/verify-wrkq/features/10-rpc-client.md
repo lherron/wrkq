@@ -1,6 +1,7 @@
 # 10. RPC and @wrkq/client
 
-wrkq and wrkf share one JSON-RPC protocol (`protocolVersion` `2026-06-30`, pinned by `protocolSchemaHash`).
+wrkq and wrkf share one JSON-RPC protocol (`protocolVersion` `2026-06-30`, pinned by `protocolSchemaHash`;
+`sha256:3d3ffa73...` since T-11305's `note` fields, 95b3340).
 `wrkq rpc --stdio` and `wrkf rpc --stdio` serve it over stdin and stdout, either against a local store
 (`--db path`) or bridged to a daemon (`rpc://`). `@wrkq/client` is the Bun TypeScript client. It spawns that
 stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rides the same protocol. Code:
@@ -82,5 +83,6 @@ On the scratch, raw frames return the protocol hash, `-32601` for an unknown met
 `idempotencyKey`, refuses a stale `expectEtag` with `WRKQ_CONFLICT`, and applies a correct CAS update (etag +1).
 Live: `rpc.initialize` names the canonical revision.
 
-Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep), installed 037fe66, published `@wrkq/client@0.1.0-dev.20261005155132`:
-`var/wrkq-artifacts/T-10349/10-rpc-client/drive.txt` with `spaces/verify-wrkq/fixtures/client-drive.ts` (typed, re-driven in `fixup/drive.txt`). Live: `live/reads.txt` (canonical serves 037fe66).
+Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/10-rpc-client/drive.txt`, published
+`@wrkq/client@0.1.0-dev.20261017091821` with `spaces/verify-wrkq/fixtures/client-drive.ts` (run twice). Live: `live/reads.txt`
+(canonical serves 95b3340, hash `sha256:3d3ffa73...`).

@@ -13,7 +13,9 @@ MAINTAIN.md. Code: `cmd/wrkp/`, `internal/rpccli/wrkp*.go` (`wrkp.go`, `wrkp_log
   The same `--key` again returns the same uuid, so a repeated post is a single fact.
 - **Read.** `wrkp log <project> [--after CURSOR] [--since] [--type a,b,x.*] [--task T] [--json|--ndjson]`. Each
   entry is `{type: "project.event"|task.*|message, principalRef, projectEvent: {type, summary, attributes}}`.
-  `task.created`/`task.edited`/`task.moved` show only when `--type` names them.
+  `task.created` is visible by default for every task (781d176, T-10783). `task.edited` and `task.moved` stay
+  quiet: they show only when `--type` names them (`task.*` or exactly). Driven 2026-10-20, T-11374: an unfiltered
+  read after a create, an edit and a move returned only `task.created`.
 - **Forward cursor.** `wrkp cursor <project>` captures a point, and `wrkp log --after C` reads oldest-first from
   it up to now.
 - **Types.** `wrkp types <project>` lists every stored fact type with its count.
@@ -24,10 +26,15 @@ MAINTAIN.md. Code: `cmd/wrkp/`, `internal/rpccli/wrkp*.go` (`wrkp.go`, `wrkp_log
   (`attributes are required`).
 - **Git producers.** `wrkp git commit` (post-commit) and `wrkp git push` (pre-push, reads ref lines on stdin)
   resolve the checkout through the **registered project roots**. They always exit 0, and anything they can't do
-  is reported as one `wrkp git: ...` line on stderr.
+  is reported as one `wrkp git: ...` line on stderr. `wrkp git commit --project <slug>` skips the root lookup
+  and posts from an unregistered checkout, but still needs a git checkout as its cwd. `wrkp git push <remote>
+  <url>` reads pre-push ref lines on stdin and posts one `git.push` per ref (`local_ref`, `local_sha`,
+  `remote_ref`, `remote_sha`, `commits`, `forced`); with no ref lines it posts nothing (driven 2026-10-20, T-11374).
 - **just producer.** The shim at `~/.local/bin/just` (installed by `just install`, ahead of the real `just`)
   hands every invocation to `wrkp just`. A justfile that contains the line `# wrkp: run.settled` gets one
-  `run.settled` fact per top-level recipe run (`recipe`, `status`, `duration_ms`, `source: wrkp-just`, ...).
+  `run.settled` fact per top-level recipe run (`recipe`, `status`, `duration_ms`, `source: wrkp-just`, ...,
+  then `load1` and `ncpu`, the machine load sampled once before just starts, omitted together when unreadable;
+  f05b312, T-10466).
   Listings and other non-run modes go straight to the real `just`. The exit status is always just's.
 - **Project roots.** `wrkq set <project> --root <dir>` stores a top-level project's checkout root (as `~/...`
   under `$HOME`). `wrkq projects --json` shows it as `root`.
@@ -52,7 +59,12 @@ wrkp git commit                                   # "wrkp git: ... is not a regi
 wrkq set wv-<name> --root "$WV_STATE/repo"
 wrkp git commit && wrkp log wv-<name> --type git.commit --json | jq -c '[.[].projectEvent | {summary, attributes}]'
 just hello; just fail; just --list >/dev/null
-wrkp log wv-<name> --type run.settled --json | jq -c '[.[].projectEvent | {summary, recipe: .attributes.recipe, status: .attributes.status}]'
+wrkp log wv-<name> --type run.settled --json | jq -c '[.[].projectEvent | {summary, recipe: .attributes.recipe, status: .attributes.status, load1: .attributes.load1, ncpu: .attributes.ncpu}]'
+C1=$(wrkp cursor wv-<name>); wrkq touch inbox/wv-visible -t "WV visible"; wrkq set inbox/wv-visible --priority 1; wrkq mv inbox/wv-visible area2/
+wrkp log wv-<name> --after "$C1" --ndjson | jq -c .type                      # "task.created" only
+wrkp log wv-<name> --after "$C1" --type 'task.*' --ndjson | jq -c .type      # task.created, task.edited, task.moved
+printf 'refs/heads/main %s refs/heads/main %s\n' "$(git rev-parse HEAD)" 0000000000000000000000000000000000000000 \
+  | wrkp git push origin file:///dev/null                                     # one git.push
 ```
 
 Live, read only: `wrkp types wrkq` and `wrkp log wrkq --type verify.upkeep --limit 1 --json`.
@@ -60,7 +72,7 @@ Live, read only: `wrkp types wrkq` and `wrkp log wrkq --type verify.upkeep --lim
 ## Gotchas
 
 - **Producers need a registered root.** Without `--root`, `wrkp git` and `wrkp just` resolve no project
-  (source read, not driven: `wrkp git --project <slug>` skips the root lookup). They
+  (`wrkp git --project <slug>` skips the root lookup, driven 2026-10-20). They
   skip with a one-line stderr notice and exit 0, so nothing fails visibly. A linked worktree resolves to the
   registered main checkout that owns it.
 - The shim posts with the caller's environment, so a `just` run inside a shell with `wv env` evaluated posts to
@@ -72,7 +84,8 @@ Live, read only: `wrkp types wrkq` and `wrkp log wrkq --type verify.upkeep --lim
   `{"uuid": <same>, "created": false}`. A replay with a different summary or attributes still returns the
   original row unchanged, with no conflict (2026-10-05, T-10349 `07-project-facts/drive.txt`).
 - Scratch facts carry your seat's canonical `scopeRef` (SKILL.md "Launch").
-- `wrkp log` hides `turn.*` facts and the quiet task entries unless `--type` names them. `--timeout` and
+- `wrkp log` hides `turn.*` facts and the quiet task entries (`task.edited`, `task.moved`) unless `--type` names
+  them. `--timeout` and
   `--stall-after` without `--follow` are a usage error (exit 2).
 - `just -n <recipe>` and `just --summary` are non-run modes, like `--list`. They post nothing.
 
@@ -81,7 +94,9 @@ Live, read only: `wrkp types wrkq` and `wrkp log wrkq --type verify.upkeep --lim
 The keyed post repeats to the same uuid and `types` counts it once. The forward read after the cursor returns
 exactly the new fact, with its attributes and your principal. `wrkp git commit` skips before `--root` and
 posts a `git.commit` (sha, branch, author, `files_changed`, plus node, insertions, deletions, parents) after it. `just hello`/`just fail` post
-`run.settled` with status 0 and 3, the listing posts nothing, and just's exit code passes through (3).
+`run.settled` with status 0 and 3, each carrying `load1` and `ncpu`, the listing and `just -n` post nothing, and
+just's exit code passes through (3). An unfiltered `wrkp log` shows a new task's `task.created` but not its
+`task.edited` or `task.moved`.
 
-Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep), shim from installed 037fe66: `var/wrkq-artifacts/T-10349/07-project-facts/drive.txt`.
-Live reads: `live/reads.txt` (`wrkp types wrkq`; no `verify.upkeep` before this pass).
+Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/07-project-facts/drive.txt`.
+Live reads: `live/reads.txt` (`wrkp types wrkq`; the T-10349 `verify.upkeep` fact).

@@ -14,11 +14,15 @@ its cascade, named subtasks, relations, the edit round trip (`cat --output raw` 
   attributed to `--as`/`WRKQ_PRINCIPAL_REF` (`created_by_principal_ref`).
 - **Read.** `wrkq cat <sel> --json --one` (one object; without `--one`, JSON `cat` returns an array),
   `--output raw` (the task as Markdown), and `wrkq stat`.
+- **Bare numbers.** A bare 1-4 digit number names the **highest existing** task with those low four digits
+  (`639` tries T-90639 down to T-00639). A 5-digit number is the literal id. With no match it reports
+  `task not found: 99`. `wrkf` task selectors resolve the same way (5f10780; driven 2026-10-20, T-11374:
+  `wrkq cat 2`, `wrkf task inspect 9`).
 - **Update.** `wrkq set <sel> --state ... --priority ... [--if-match <etag>]`. A stale etag fails with
   `task etag precondition failed` (exit 1).
 - **List.** `wrkq ls <container> --type t`, `wrkq tree` (JSON lines when stdout is not a TTY), and
   `wrkq find --state open|all --type t [--campaign P]`. Without `--state`, completed, archived and deleted
-  tasks are hidden (source read, `find.go`: `idea` and `cancelled` too).
+  tasks are hidden, and so are `cancelled` (driven 2026-10-20, T-11374) and `idea` (source read, `find.go`).
 - **Search.** `wrkq search '<words>' --state all --json` returns
   `{query, stale, status, results[].resource_id}`. Dense search uses the local embedding model, so a word can
   match a neighbouring task.
@@ -27,7 +31,9 @@ its cascade, named subtasks, relations, the edit round trip (`cat --output raw` 
   `wrkq restore <task>` returns it to `open` (a task that isn't archived or deleted is refused,
   `task is not deleted or archived (current state: completed)`). `wrkq rm <container> --yes` archives the
   container and cancels its live tasks, like `archive`. `--purge` hard-deletes and cascades away the task's room and its
-  envelopes. Never purge a task that has a room.
+  envelopes. Never purge a task that has a room. Without `--yes` on a non-TTY, `--purge` prints the warning,
+  reads EOF at `Type 'yes' to confirm:` and aborts (`Error: aborted`, exit 1), leaving the task as it was
+  (driven 2026-10-20, T-11374, on a roomless task).
 - **Container archive.** `wrkq archive <container> --yes` cancels the live tasks below it, and `wrkq unarchive`
   restores exactly the task states that the archive changed. Without `--yes` on a non-TTY it prompts, reads EOF
   and aborts (`Error: aborted`, exit 1), changing nothing.
@@ -40,11 +46,16 @@ its cascade, named subtasks, relations, the edit round trip (`cat --output raw` 
   warns `Metadata ignored without --with-metadata`.
 - **The other verbs.** `wrkq cp <task> <container>/` copies a task (a new `T-<n>`, so it shifts later ids;
   its JSON row reports `dest_path: ""`). `wrkq diff <a> <b>` lists `fields_changed`. `wrkq stat <sel> --json`
-  returns an array. `wrkq rename-container <c> <new-slug>` (no `--json`). `wrkq rmdir <c> [--force]`
+  returns an array. `wrkq rename-container <c> <new-slug>` (prints JSON off a TTY). `wrkq rmdir <c> [--force]`
   hard-deletes, and `--force` cascades with no undo. Never use it on shared data. `wrkq ack <task>` acknowledges completed
   tasks (`--force` for others). `wrkq check` is a group (`wrkq check T-1` is an unknown command, exit 2).
-  `wrkq check-inbox --json` lists open inbox tasks. `wrkq timeline <container>` is the composite timeline
-  (no `--json`; use `--output json`).
+  `wrkq check-inbox --json` lists open inbox tasks. `wrkq timeline <container> --json` is the composite timeline
+  (one object: `campaign`, `container`, `entries`, `members`, `rollup`, ...).
+- **`--json` on every verb.** Since c720cb5 every runnable leaf accepts `--json`, hidden from `--help` where
+  the verb has none of its own. It forces the non-TTY rendering, which is JSON for these verbs. Before it, `set`,
+  `mv`, `relation add`, `archive`, `restore`, `rename-container`, `timeline` and others refused `--json` with
+  exit 2 before writing. Exempt: `agent`, `rpc`, `server serve` and the `watch` shim (driven 2026-10-20,
+  T-11374: `set --json`, `rename-container --json`, `timeline --json`).
 - **History.** `wrkq log <ID|path> [--oneline|--patch|--json]`. A path names a task first, then a container.
 
 ## How to get to it
@@ -85,7 +96,7 @@ wrkq index update && wrkq search alpha --state all --json | jq -c '[.results[].r
 - **A one-character slug fails with a raw store error.** `wrkq touch inbox/x -t x` returns `WRKQ_ERROR`
   `CHECK constraint failed: slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' ...`, because that GLOB needs
   two characters. Use slugs of two or more characters. Product task T-10355 (2026-10-05, T-10349
-  `02-tasks-containers/drive.txt`).
+  `02-tasks-containers/drive.txt`; still reproduces at 95b3340, 2026-10-20, T-11374).
 
 ## Proven when
 
@@ -94,5 +105,5 @@ the completed task until `--state all`, `rm`/`restore` moves the task between `a
 container archive cascades to `cancelled` and `unarchive` reverses exactly that change, a named subtask raises
 `open_subtask_count`, and `log <ID>` and `log <path>` show `task.created` and `task.updated` attributed to you.
 
-Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep) with installed 037fe66: `var/wrkq-artifacts/T-10349/02-tasks-containers/drive.txt`
-(baseline, then the drift drives after the NOTE line, which ran after features 3–7, so their ids are higher).
+Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/02-tasks-containers/drive.txt`
+(baseline, then the drift drives after the NOTE line).

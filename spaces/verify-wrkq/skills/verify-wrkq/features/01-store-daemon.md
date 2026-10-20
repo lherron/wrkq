@@ -30,6 +30,17 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
 - **Doctor.** `wrkqadm doctor [--json] [--fix]` checks the file, WAL, foreign keys, integrity, schema, root,
   orphans, duplicate slugs, sequence drift, the attachment dir and the counts.
 - **whoami.** `wrkq whoami --json` shows the locator, the mode, the principal and the scope the caller resolves.
+- **Profile.** `WRKQ_PROFILE=1 <any client verb>` adds a wall-time breakdown on stderr after the verb's own output:
+  one row per wrkqd round trip (`connect`, `send`, `wait`, `read`, `total`, response bytes), then process start,
+  round-trip total and client-side time. Stdout is unchanged. Against a local `--db` path it reports 0 RPC calls.
+- **Offline admin.** These run against the store **file** (`--db <path>`), never over `rpc://`, and are safe on a
+  serving scratch store. `wrkqadm config doctor` prints the effective DB, attachment dir, project root and
+  principal, with the source of each. `wrkqadm db snapshot --out F [--json]` takes an online-backup copy.
+  `wrkqadm state export --out F` writes the canonical task-ledger JSON snapshot (containers, tasks, comments,
+  promises, links; not rooms, handoffs, workflows or events), and `state verify F` checks it round-trips.
+  `wrkqadm patch create --from S0 --to S1 --out P`, `patch summarize --patch P` and
+  `patch validate --base S0 --patch P` diff two snapshots as RFC 6902. `patch apply`/`rebase` and `state import`
+  write the store, so a verification drive doesn't run them.
 
 ## How to get to it
 
@@ -53,10 +64,34 @@ wrkqadm --db "$WV_STATE/wrkq.db" migrate --status | tail -3
 wrkqadm --db "$WV_STATE/wrkq.db" migrate        # refused: MIGRATION_DATABASE_SERVING
 ```
 
+Then the additions (offline admin reads run on the scratch store file):
+
+```bash
+WRKQD_TOKEN=wv-bogus WRKQD_TOKEN_FILE= wrkq server health --addr "127.0.0.1:${WRKQ_DB##*:}"   # auth: unauthorized, exit 0
+WRKQ_PROFILE=1 wrkq projects --json >/dev/null                                           # breakdown on stderr
+D="--db $WV_STATE/wrkq.db"
+wrkqadm $D config doctor
+wrkqadm $D db snapshot --out "$WV_STATE/snap0.db" --json
+wrkqadm $D state export --out "$WV_STATE/s0.json" && wrkqadm $D state verify "$WV_STATE/s0.json"
+# ...after feature 2 has written tasks:
+wrkqadm $D state export --out "$WV_STATE/s1.json"
+wrkqadm $D patch create --from "$WV_STATE/s0.json" --to "$WV_STATE/s1.json" --out "$WV_STATE/p01.json" --json
+wrkqadm $D patch summarize --patch "$WV_STATE/p01.json" && wrkqadm $D patch validate --base "$WV_STATE/s0.json" --patch "$WV_STATE/p01.json"
+```
+
 Never migrate, restart or bootout the canonical daemon in a verification drive.
 
 ## Gotchas
 
+- **The wrong-token health probe needs a one-line token.** `WRKQD_TOKEN_FILE=$WV_STATE/node-tokens` sends the
+  whole two-line file and fails client-side (`invalid header field value for "Authorization"`, exit 1) before the
+  daemon sees it. Use `WRKQD_TOKEN=wv-bogus WRKQD_TOKEN_FILE=` (2026-10-20, T-11374 `01-store-daemon/drive.txt`).
+- **`wrkqadm` file verbs refuse the `wv env` locator.** With `WRKQ_DB=rpc://...` exported, even
+  `wrkqadm state verify F` (a file check) refuses `remote database locator ... is not valid for this local command`.
+  Pass `--db "$WV_STATE/wrkq.db"` to every `wrkqadm` verb (2026-10-20, T-11374).
+- **`wrkqadm config doctor` misreports the principal.** In a seat it says `Principal: (not set) ... ✗ Not
+  configured` although `wrkq whoami` resolves one from the seat scope, and `WRKQ_PRINCIPAL_REF` beats `--as`.
+  Read the principal from `wrkq whoami`. Product task T-11431 (2026-10-20, T-11374 `01-store-daemon/drive.txt`).
 - Doctor's `sequence_drift` checks `event_log` against its own AUTOINCREMENT row in `sqlite_sequence`
   (named `event_log`). Before T-10327 it read the dead `event_seq` row and flagged every store with an event.
 - Doctor's `attach_dir_exists` needs `WRKQ_ATTACH_DIR` (or `attach_dir` in config) on the **caller's** side.
@@ -79,8 +114,10 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 
 On a fresh `wv up`, health is ok with the token and 401 without it, a tokenless client gets the token refusal,
 a dead locator gets the "retrying is safe" refusal, `whoami` names the scratch locator, doctor reports every row
-ok, `migrate --status` lists every migration as applied, and `migrate` refuses
-the serving store. On the canonical daemon, read only: health is ok and `rpc.initialize` names a revision.
+ok, `migrate --status` lists every migration as applied (000070 last at 95b3340), and `migrate` refuses
+the serving store. `WRKQ_PROFILE=1` prints the breakdown, and the snapshot, `state verify` and `patch validate`
+reads succeed on the scratch file. On the canonical daemon, read only: health is ok and `rpc.initialize` names a revision.
 
-Driven 2026-10-05 on wv `t-10349` (T-10349 upkeep) with installed 037fe66: `var/wrkq-artifacts/T-10349/01-store-daemon/drive.txt`,
-`evidence/t-10349/`, live reads in `live/reads.txt` (canonical serves 037fe66).
+Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/01-store-daemon/drive.txt`,
+`evidence/t-11374/`, live reads in `live/reads.txt` (canonical serves 95b3340). Each file's drift drives follow its
+`NOTE drift drives` line.

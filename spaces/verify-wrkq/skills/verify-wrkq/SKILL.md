@@ -34,7 +34,7 @@ You can drive on a scratch daemon or read the live one:
   On any node, read only: `wrkq whoami`, `wrkq server health --addr mini:7171`, an `rpc.initialize` frame through
   `wrkq rpc --stdio` (pass `protocolVersion`, feature 10, and read `.result.server.revision`; without it the frame
   is refused, though `error.data.serverRevision` still names the build), `wrkq projects`, `wrkp types <project>`,
-  `wrkf workflow list --json` (`.templates[]`), `wrkq webhook list --output json` (it has no `--json`), and
+  `wrkf workflow list --json` (`.templates[]`), `wrkq webhook list --json` (one object per line), and
   `wrkc inbox` for your own scope. Never write test data to the
   canonical store, never migrate it, never restart its job (its procedure is AGENTS.md "Justfile is the
   lifecycle", and only Mable or Lance runs it).
@@ -53,7 +53,9 @@ wrkq server health --addr "127.0.0.1:${WRKQ_DB##*:}"   # {"status":"ok"}
 wrkqadm --db "$WV_STATE/wrkq.db" doctor --json | jq -c '[.checks[] | select(.status!="ok")]'
 ```
 
-On a scratch, doctor should report every row ok. Any non-ok row is real. For the live
+On a scratch, doctor should report every row ok. Any non-ok row is real. Give every `wrkqadm` verb
+`--db "$WV_STATE/wrkq.db"`: with `wv env` evaluated, `WRKQ_DB` is an `rpc://` locator, and `wrkqadm` refuses it
+even for a file-only verb like `state verify`. For the live
 daemon, `whoami` must show `rpc://<mini address>:7171` and health must be ok. Doctor's DB checks need the DB
 file, which only mini has, so don't run doctor against the canonical store from another node.
 
@@ -66,6 +68,9 @@ file, which only mini has, so don't run doctor against the canonical store from 
 4. Check the file's "Proven when" against what you recorded.
 5. If the drive disagreed with the file, fix the file in the same change (add a Gotcha with the date and the
    evidence).
+
+In zsh, brace a variable before a colon: `${WP}:task:T-2`, never `$WP:task:T-2`. zsh reads `:t` as its tail
+modifier and silently builds a different scope (2026-10-20, T-11374, feature 4).
 
 `<binary> --help` and `<binary> <verb> --help` give the live surface. `wrkq info`, `wrkc info` and `wrkp info`
 serve the agent guides.
