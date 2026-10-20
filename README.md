@@ -205,10 +205,14 @@ wrkq server health
 wrkqd -node-tokens-file ~/.config/wrkq/node-tokens   # per-node bearer tokens
 ```
 
-When an upgrade carries schema migrations, run `wrkqadm migrate` against the
-daemon's database before restarting it, and upgrade the daemon before its
-clients. Backups (`wrkqadm db snapshot`, `wrkqadm state`), health checks and
-the HTTP route surface are covered in
+When an upgrade carries schema migrations, migrate offline: take a backup,
+stop the daemon (boot out its launchd job and wait for the process to exit),
+install, run `wrkqadm --db <path> migrate`, then start the daemon again.
+`wrkqadm migrate` refuses a serving database; never work around that, since
+migrating under a live daemon corrupted the canonical store on 2026-10-04
+(T-10158). Upgrade the daemon before its clients. Backups (`wrkqadm db
+snapshot`, `wrkqadm state`), health checks and the HTTP route surface are
+covered in
 [docs/wrkq-operations.md](docs/wrkq-operations.md).
 
 ## Configuration
