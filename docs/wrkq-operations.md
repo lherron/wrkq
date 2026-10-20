@@ -17,7 +17,7 @@ live configuration in this environment.
 
 ## Database location
 
-Resolution order (`wrkqadm config doctor` reports the winning source):
+Resolution order:
 
 1. `--db` CLI flag.
 2. `WRKQ_DB` — a local path, or `rpc://host[:port]` (default port `7171`) to
@@ -42,46 +42,55 @@ Resolution order (`wrkqadm config doctor` reports the winning source):
 Admin/daemon path-owning surfaces are local-path-only by design and reject
 `rpc://`: `wrkqadm --db`, `wrkqd --db`, `wrkq server --db-path`.
 
-Check the effective, resolved configuration at any time:
+`wrkq whoami` shows the locator the production CLI actually uses (see the
+live RPC example below). `wrkqadm config doctor` reports the **local**
+configuration surface:
 
 ```bash
 wrkqadm config doctor
 wrkqadm config doctor --json
 ```
 
-Example output (this environment, run from the `wrkq` repo root without a
-local `.wrkq/wrkq.db`):
+Example output (an agent seat in the `wrkq` repo root, with `WRKQ_DB` set to
+the remote daemon and no local `.wrkq/wrkq.db`):
 
 ```text
 Database:
   WRKQ_DB_PATH:
-    Source: config file
+    Source: environment variable WRKQ_DB
     Status: ✗ File does not exist
+
+Attachments:
+  WRKQ_ATTACH_DIR:
+    Source: config file
+    Status: ✗ Directory does not exist
+
 Project Root:
-  WRKQ_PROJECT_ROOT: taskboard
+  WRKQ_PROJECT_ROOT: wrkq
     Source: environment variable WRKQ_PROJECT_ROOT
     Status: ✓ Loaded
+
 Actor:
   Principal: (not set)
     Source: default_principal_ref setting
     Status: ✗ Not configured
 ```
 
-Note `wrkqadm config doctor` reports the **local** configuration surface
-(`WRKQ_DB_PATH`), which is intentionally separate from the production `wrkq`
-CLI's `WRKQ_DB` locator resolution — a shell can have `WRKQ_DB` pointed at a
-remote `rpc://` daemon (so `wrkq whoami` resolves fine) while
-`wrkqadm config doctor` still reports no local DB, because `wrkqadm` never
-follows `rpc://`.
+Read it with three caveats. `wrkqadm` never follows `rpc://`, so a shell
+whose `WRKQ_DB` names a remote daemon (where `wrkq whoami` resolves fine)
+still shows no local DB. The `Source` labels name the highest-precedence input
+that is set, not the one that won: the built-in `.wrkq/wrkq.db` default
+reads `config file`. And `Principal` ignores the seat scope, so a seat that
+attributes writes correctly still reads `(not set)` (T-11431).
 
 ### Live RPC example
 
 This environment routes production `wrkq` calls to a remote daemon rather
-than a local file:
+than a local file, through the platform `~/praesidium/.env.local`:
 
 ```text
-HRC_WRKQ_DB=rpc://100.117.215.92:7171
-HRC_WRKQD_TOKEN_FILE=/Users/lherron/.config/wrkq/node-token
+WRKQ_DB=rpc://mini
+WRKQD_TOKEN_FILE=/Users/lherron/.config/wrkq/node-token
 ```
 
 ```bash
@@ -95,9 +104,10 @@ $ wrkq whoami
 }
 ```
 
-The platform-wide canonical store is deployed at
-`WRKQ_DB_PATH=/Users/lherron/praesidium/var/db/wrkq.db` on its host node;
-other machines reach it as clients via `WRKQ_DB=rpc://<host>:7171`.
+The platform-wide canonical store lives on mini at
+`/Users/lherron/.praesidium-data/wrkq/wrkq.db`, served by `wrkqd` (see
+[Daemon deployment](#daemon-deployment-wrkqd)); other machines reach it as
+clients via `WRKQ_DB=rpc://<host>:7171`.
 
 ## Backup and snapshotting
 
@@ -173,11 +183,10 @@ wrkqadm patch rebase ...
 wrkqadm patch summarize ...
 ```
 
-Note the README's mention of a "git-native, bundle diffs for PRs" workflow is
-aspirational framing; `docs/SPEC.md` §12 records explicitly that "the former
-Git-ops bundle workflow is not part of the production CLI, admin, daemon, or
-workrpc contract" — `state export`/`import`/`verify` are the current
-canonical snapshot operations.
+`docs/SPEC.md` §10 records that "the former Git-ops bundle workflow is not
+part of the production CLI, admin, daemon, or workrpc contract" —
+`state export`/`import`/`verify` are the current canonical snapshot
+operations.
 
 ## Database health
 
@@ -214,8 +223,9 @@ no authentication. Resolution precedence for mutating commands:
    `agent:<id>`. If both flags are given, they must resolve to the same
    agent.
 2. `WRKQ_PRINCIPAL_REF` env var — same accepted forms.
-3. A validated ASP scope: `ASP_SCOPE_REF`, or `ASP_HANDLE`, or
-   `ASP_AGENT_ID` + `ASP_PROJECT` — reduced to `agent:<agentId>`.
+3. A validated runtime scope: `AGENT_SCOPE_REF`, or `ASP_SCOPE_REF`, or
+   `ASP_HANDLE`, or `ASP_AGENT_ID` + `ASP_PROJECT`, in that order — reduced
+   to `agent:<agentId>`.
 4. `default_principal_ref` in `~/.config/wrkq/config.yaml`.
 
 Explicitly **not** attribution sources: bare slugs, actor UUIDs, `A-*` actor
@@ -231,9 +241,6 @@ wrkq whoami                 # resolved principal_ref + scope_ref
 wrkq agent-context           # scope resolution debug view, works without a DB connection
 wrkq agent-context --scope agent:cody:project:wrkq
 ```
-
-`wrkqadm actors ls` / `wrkqadm actors add` manage the legacy actor
-display-cache table — not required for ordinary writes to succeed.
 
 ## Daemon deployment (`wrkqd`)
 
@@ -300,11 +307,18 @@ down or one running an image the installed binary no longer matches.
 actually binds (its `--addr` argument or `WRKQD_ADDR`), not the `127.0.0.1:7171`
 default.
 
-This environment runs `wrkqd` as a launchd service:
-`launchd/com.praesidium.wrkq-server.plist`, invoking `wrkq server serve`
-bound to `127.0.0.1:7171` with token `dev`. The claim-authority node identity
-is derived exclusively from the per-node bearer token presented to `wrkqd` —
-a claiming caller cannot supply or spoof which node it's claiming from.
+The canonical daemon runs on mini as the launchd job
+`com.praesidium.wrkq-server`: `wrkqd --addr 0.0.0.0:7171 --db
+/Users/lherron/.praesidium-data/wrkq/wrkq.db --node-tokens-file
+~/.config/wrkq/node-tokens`. The repo's
+`launchd/com.praesidium.wrkq-server.plist` is a different, dev variant
+(`wrkq server serve` on `127.0.0.1:7171` with token `dev`); installing it over
+mini's job would take the ledger away from every remote node.
+`just launchd-install` therefore refuses to replace an installed plist that
+differs from the repo copy and prints the diff (T-08044); never pass
+`--force` on mini. The claim-authority node identity is derived exclusively
+from the per-node bearer token presented to `wrkqd` — a claiming caller
+cannot supply or spoof which node it's claiming from.
 
 ### HTTP route surface
 
@@ -317,16 +331,17 @@ method catalog — no handoff HTTP routes exist, for example:
 /v1/tasks/{list,get,create,update,archive,restore}
 /v1/comments/{list,create}
 /v1/relations/{list,create,delete}
-/v1/actors/{list,create,update}
 ```
 
 The full JSON-RPC method catalog (`wrkq.task.*`, `wrkq.comment.*`,
 `wrkq.attachment.*`, `wrkq.relation.*`, `wrkq.container.*`, `wrkq.project.*`,
-`wrkq.handoff.*`, `wrkq.webhook.*`, `wrkq.search.listView`, `wrkq.index.*`,
-`wrkq.history.*`, `wrkq.monitor.*`, `wrkq.admin.legacyActor.*`) is reachable
-only via `POST /v1/rpc`, not the narrower REST routes — this is why handoffs,
-search, and monitoring require an RPC-capable client (production `wrkq`
-CLI, `@wrkq/client`, or the MCP server) rather than raw REST calls.
+`wrkq.promise.*`, `wrkq.handoff.*`, `wrkq.room.*`, `wrkq.envelope.*`,
+`wrkq.projectEvent.*`, `wrkq.webhook.*`, `wrkq.search.listView`,
+`wrkq.index.*`, `wrkq.history.*`, `wrkq.monitor.*`, `wrkq.workflow.*`, and
+the `wrkf.*` workflow engine) is reachable only via `POST /v1/rpc`, not the
+narrower REST routes — this is why handoffs, rooms, search, and monitoring
+require an RPC-capable client (production `wrkq` CLI, `@wrkq/client`, or the
+MCP server) rather than raw REST calls.
 
 ## Attachment storage
 
