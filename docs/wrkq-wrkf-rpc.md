@@ -1,15 +1,20 @@
 # wrkq/wrkf unified RPC protocol — machine contract
 
-Status: authoritative  
+Status: maintained wire-contract reference
+
 Protocol version: **2026-06-30**  
 Companion: [wrkf recovery and client guide](docs/wrkf-rpc.md)
-Implementation target: `internal/workrpc`
+Implementation: `internal/workrpc`
+
+Active architecture records and contracts take precedence over this reference;
+see `wrkq.contract.wrkf-rpc`, `wrkq.rpc.remote-transport-locator`, and
+`wrkq.wrkf-rpc.stdout-purity` under `architecture/`.
 
 ---
 
 ## 1. Transport
 
-Transport is **JSON-RPC 2.0** framed as **NDJSON** (newline-delimited JSON):
+The stdio transport is **JSON-RPC 2.0** framed as **NDJSON** (newline-delimited JSON):
 
 ```
 - One compact JSON object per line, terminated by exactly one '\n'
@@ -23,6 +28,13 @@ Transport is **JSON-RPC 2.0** framed as **NDJSON** (newline-delimited JSON):
 - Null id is used for responses to notification-shaped requests and for
   error responses where the id cannot be determined
 ```
+
+Remote locators (`rpc://host[:port]`, default port 7171) use authenticated HTTP
+`POST /v1/rpc` carrying one JSON-RPC request/response object, not an NDJSON
+stream. The stdio entrypoints bridge remote locators to that endpoint; local
+SQLite serving requires a `wrkq_local` build. Portable builds refuse local
+locators before opening a database. Transport selection lives in `pkg/client`
+and `internal/rpccli/transport.go`.
 
 Both entrypoints produce identical stdio behavior:
 
@@ -206,9 +218,10 @@ revision instead; host binaries never lead wrkqd.
 
 ### rpc.shutdown / rpc.exit
 
-`rpc.shutdown` is a graceful signal; the server drains in-flight requests and
-stops accepting new ones. `rpc.exit` is a notification that terminates the
-server immediately.
+`rpc.shutdown` marks the protocol session as shutting down, returns `{}`, and
+refuses subsequent business requests. It does not stop the shared daemon or
+provide an in-flight drain barrier. `rpc.exit` ends a stdio serving loop; it is
+not a daemon lifecycle command. See `internal/workrpc/server.go`.
 
 ---
 
@@ -256,6 +269,9 @@ Every domain error must include:
 | `WRKQ_WRONG_STATE` | -32028 | false | task state is not claimable |
 | `WRKQ_CLAIM_SUPERSEDED` | -32029 | false | supplied claim tuple is stale; data names the current holder |
 | `WRKQ_NODE_IDENTITY_REQUIRED` | -32030 | false | request did not authenticate as one configured node identity |
+| `WRKQ_FORBIDDEN` | -32031 | false | caller crosses a resource ownership boundary |
+| `WRKQ_CURSOR_INVALID` | -32032 | false | ledger incarnation changed; retire the cursor and start a new projection |
+| `WRKQ_ALREADY_PRESENTED` | -32033 | false | operation refused because the envelope has already been presented |
 | `WRKF_NOT_FOUND` | -32004 | false | workflow template/instance/effect/run/evidence not found |
 | `WRKF_VALIDATION` | -32602 | false | malformed wrkf params, invalid template, bad protocol version |
 | `WRKF_STALE_REVISION` | -32009 | true | transition `expectRevision` mismatch |
@@ -268,6 +284,7 @@ Every domain error must include:
 | `WRKF_KIND_ROLE_DENIED` | -32018 | false | supplied role cannot produce evidence kind |
 | `WRKF_LINKAGE_UNRESOLVED` | -32019 | false | declared evidence linkage did not resolve |
 | `WRKF_LINKAGE_STALE` | -32020 | false | latest linkage points at superseded evidence |
+| `WRKF_SUSPENSION_NOT_FOUND` | -32025 | false | no active suspension matches the supplied id (including already resolved) |
 | `WRKF_SUSPENDED` | -32026 | false | instance has an active suspension; `data.suspension` carries that record |
 | `WORKRPC_INTERNAL` | -32603 | false | unclassified internal error |
 
@@ -323,6 +340,13 @@ Structured validation data shape:
 ---
 
 ## 6. Method catalog
+
+The sections below describe selected method families and their contracts; they
+are not an exhaustive registry dump. The serving revision's `rpc.initialize`
+`methods` result is the complete available catalog. `internal/workrpc/registry.go`
+registers handlers; `catalog.go` and `schema.go` define the fingerprinted method
+and DTO catalogs. Rooms/promises, role bindings, suspensions, and action-claim
+operations also appear there and in the typed clients.
 
 ### 6.1 Protocol controls
 
@@ -613,10 +637,13 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > are legacy `inboxTask`-shaped (snake_case); `items` is always a non-null array
 > (empty → `[]`). Cataloged + fingerprinted.
 
-Params/results (camelCase JSON fields throughout):
+Params/results (canonical task fields use camelCase; compatibility views above
+retain their documented legacy keys):
 
 ```ts
 interface WrkqTaskCreateParams {
+  subtaskOwner?: string; // with slug, instead of path/project/parentTask/campaign
+  slug?: string;         // required with subtaskOwner; invalid alone
   path?: string;
   project?: string;
   title: string;
@@ -625,6 +652,7 @@ interface WrkqTaskCreateParams {
   kind?: "task" | "subtask" | "spike" | "bug" | "chore";
   priority?: number;
   state?: WrkqTaskState;
+  riskClass?: string;
   parentTask?: string;
   assigneePrincipalRef?: string | null;
   requesterPrincipalRef?: string | null; // who asked; scope alone derives it (T-09978)
@@ -646,6 +674,9 @@ interface WrkqTaskCreateParams {
 interface WrkqTaskShowParams { task: string }
 
 interface WrkqTaskListParams {
+  subtasks?: boolean;
+  subtaskOwner?: string;
+  ownerState?: string; // requires subtasks; terminal or one state
   path?: string;
   state?: WrkqTaskState | WrkqTaskState[];
   kind?: string | string[];
@@ -656,14 +687,11 @@ interface WrkqTaskListParams {
   includeDeleted?: boolean;
   limit?: number;
   cursor?: string;
+  sort?: "created_at" | "updated_at" | "priority" | "id" | "path";
+  direction?: "asc" | "desc";
+  recursive?: boolean;   // include descendant containers under path
   summary?: boolean;     // omit description/specification bodies; keep has* booleans
 }
-
-When `summary` is true, `wrkq.task.list` returns `description: ""` and
-`specification: ""` on each item to keep list payloads small. The server still
-returns `hasDescription` and `hasSpecification`, computed with
-`TRIM(COALESCE(body,''))`, so whitespace-only bodies report `false`. Omitting
-`summary` preserves full-body list behavior.
 
 interface WrkqTaskUpdateParams {
   task: string;
@@ -676,6 +704,8 @@ interface WrkqTaskUpdateParams {
     state?: WrkqTaskState;
     priority?: number;
     kind?: string;
+    riskClass?: string;
+    campaign?: string; // enrollment selector; empty clears
     parentTask?: string; // task selector; empty string clears parent
     labels?: string[];
     meta?: Record<string, unknown>;
@@ -690,7 +720,7 @@ interface WrkqTaskUpdateParams {
     startAt?: string | null;
     causedBy?: string[];   // replaces the full causal-lineage set; [] clears, absent = no change (absent-vs-empty preserved)
   };
-  expectEtag?: number;   // CAS precondition; see §9.1
+  expectEtag?: number;   // CAS precondition; see §8.1
   idempotencyKey?: string;
   claimScope?: string;      // current task-scoped sessionRef when completing a claimed task
   claimGeneration?: number;
@@ -735,7 +765,7 @@ interface WrkqTaskMoveParams {
   task: string;
   targetPath: string;     // existing container, or parent path + final task slug
   overwriteTask?: boolean; // replace existing destination task when targetPath names one
-  expectEtag?: number;    // CAS precondition; see §9.1
+  expectEtag?: number;    // CAS precondition; see §8.1
 }
 
 interface WrkqTask {
@@ -744,6 +774,13 @@ interface WrkqTask {
   slug: string;
   title: string;
   projectUuid: string;
+  campaignUuid?: string;
+  riskClass?: string;
+  roomLocator?: string;
+  subtaskOwner?: string;
+  subtaskOwnerUuid?: string;
+  openSubtaskCount: number;
+  subtasks?: { id: string; slug: string; title: string; state: string; claimedBy?: string }[];
   path: string;          // canonical current task path
   state: WrkqTaskState;
   priority: number;
@@ -765,6 +802,9 @@ interface WrkqTask {
   archivedAt?: string;
   deletedAt?: string;
   acknowledgedAt?: string; // RFC3339; set by wrkq.task.acknowledge
+  assigneePrincipalRef?: string;
+  requesterPrincipalRef?: string;
+  requesterScopeRef?: string;
   claimedBy?: string;
   claimedScope?: string;
   claimedNode?: string;
@@ -801,6 +841,12 @@ interface WrkqTaskRestoreParams {
   ifMatch?: number;     // conditional etag precondition; mismatch → WRKQ_CONFLICT
 }
 ```
+
+When `summary` is true, `wrkq.task.list` returns `description: ""` and
+`specification: ""` on each item to keep list payloads small. The server still
+returns `hasDescription` and `hasSpecification`, computed with
+`TRIM(COALESCE(body,''))`, so whitespace-only bodies report `false`. Omitting
+`summary` preserves full-body list behavior.
 
 The CLI accepts comma-separated or JSON-array `--labels` input and sends this
 compatibility field as an encoded JSON array string. The server/wire contract
@@ -867,7 +913,7 @@ the mutation contract, not just the event log. restore NEVER prompts, so the
 mirror carries no confirmation flow — it owns only the caller-side scoping of the
 task ref + the `toPath` destination and the legacy output rendering, and it calls
 `wrkq.task.restore` first (no speculative `task.show`) so the server's
-validation-before-resolution precedence holds end to end. Container restore has no
+validation-before-resolution precedence holds end to end. Container restore no
 longer shares this task method; it is handled by the narrow
 `wrkq.container.restore` method below after a genuine task miss.
 
@@ -884,15 +930,15 @@ wrkq.handoff.acknowledge [new mutation method — server-owned etag CAS]
 > **Handoff family** (T-05117, daedalus hrcchat#10211) backs `wrkq handoff
 > create/get/list/search/acknowledge`. Handoffs are agent-scoped session-continuity
 > records. Scope is **caller-owned but NOT project-root**: the mirror resolves
-> `--scope` / agent-runtime env (`ASP_SCOPE_REF` → `ASP_HANDLE` →
+> `--scope` / agent-runtime env (`AGENT_SCOPE_REF` → `ASP_SCOPE_REF` → `ASP_HANDLE` →
 > `ASP_AGENT_ID`+`ASP_PROJECT`) via `scope.Resolve` and **enforces self-scope for
 > create** (`scope.EnforceSelfScope`) BEFORE submitting. The SERVER receives the
 > EXPLICIT effective scope/actor fields (`scopeRef`/`agentId`/`projectId` +
 > `actorAgentId`/`principalRef`) and MUST NOT read `ASP_SCOPE_REF` / `ASP_HANDLE` /
-> `ASP_AGENT_ID` / `ASP_PROJECT`. (Risk, LOW: server-side self-scope is
-> unenforceable without an authenticated transport — caller-side enforcement +
-> explicit params is correct for workrpc; a future `wrkqd` may add server
-> validation WITHOUT changing the DTO.)
+> `ASP_AGENT_ID` / `ASP_PROJECT`. The current daemon authenticates a logical
+> node, not the caller agent, so the caller-side self-scope gate remains
+> necessary; server-side scope/identity coherence validation is not proof of
+> an authenticated caller agent.
 >
 > The `WrkqHandoff` DTO reproduces the legacy `handoffJSON` field ORDER + tags
 > EXACTLY (snake_case, pointer/omitempty parity) so the mirror re-marshals it into
@@ -1050,7 +1096,7 @@ wrkq.attachment.remove
 ```ts
 interface WrkqAttachmentAddParams {
   task: string;
-  path: string;          // local path; protocol is stdio-local only
+  path: string;          // server-local file path; co-located fast path only
   filename?: string;
   mimeType?: string;
   idempotencyKey?: string;
@@ -1077,8 +1123,9 @@ interface WrkqAttachment {
 `wrkq.attachment.add` is the **local fast path** for a co-located real file: the
 mirror sends the host **path string** (the server reads the bytes) and re-projects
 the camelCase `WrkqAttachment` into legacy's snake_case `attach put` map. `attach
-rm` rides `wrkq.attachment.remove` similarly. These are local-only — NOT a
-remote-safe contract.
+rm` uses `wrkq.attachment.remove` by ID and is remote-safe. The path-based
+`add` method requires a co-located file. Against a remote locator, real-file
+`attach put` reads the caller-local file and uses `addBytes`, just like stdin.
 
 ##### Byte transfer (daedalus OPTION 1, T-05103)
 
@@ -1087,7 +1134,7 @@ Attachment CONTENT that must cross the client↔server boundary — **`attach ge
 explicit **protocol data** (base64 + declared size + checksum), NEVER as a
 server-local host path. The server owns storage/size-validation/checksum/metadata/
 cleanup; the CLI owns reading local stdin/files and writing decoded bytes to
-stdout or `--as <path>`. RAW bytes are emitted ONLY by `production wrkq` after RPC-
+stdout or `--output-file <path>`. RAW bytes are emitted ONLY by `production wrkq` after RPC-
 frame decode — the JSON-RPC server stdout stays pure.
 
 Transfers are **chunked**: the frame cap (8 MiB) is below the default attach limit
@@ -1213,6 +1260,8 @@ wrkq.container.move
 wrkq.container.webhookSet
 wrkq.container.archive
 wrkq.container.restore
+wrkq.container.delete
+wrkq.container.deleteRecursive
 ```
 
 > **`wrkq.container.catView`** is a CLI compatibility read model, **not** a
@@ -1816,7 +1865,7 @@ interface WrkqWorkflowAttachParams {
 }
 
 interface WrkqWorkflowAttachResult {
-  task: string;
+  task: WrkqTask;
   instance: WrkfInstance;
   attached: boolean;     // true = newly attached, false = already existed
 }
@@ -2080,7 +2129,7 @@ interface WrkfEvidenceAddParams {
   data?: unknown;
   principal_ref?: string;
   role?: string;
-  runId?: string;        // persisted; see §9.7
+  runId?: string;        // persisted; see §8.7
   idempotencyKey?: string;
 }
 ```
@@ -2251,7 +2300,7 @@ interface WrkfTransitionApplyParams {
   transition: string;
   role?: string;
   principal_ref?: string;
-  expectRevision?: number;   // sole CAS token; see §9.3
+  expectRevision?: number;   // sole CAS token; see §8.3
   idempotencyKey?: string;
   checkIds?: string[];        // persisted runs returned by wrkf.check.run
   dryRun?: boolean;
@@ -2397,9 +2446,12 @@ authority gate.
 
 ## 7. DTO reference
 
-All new RPC DTOs use **camelCase** JSON field names. Internal DB/domain structs
-may retain their existing tags; RPC DTOs map internal fields to a stable public
-shape.
+Canonical wrkq resource DTOs generally use **camelCase** JSON field names.
+Compatibility projections retain legacy snake_case keys; workflow DTOs and
+provenance fields also retain the explicitly cataloged tags (for example
+`principal_ref`). The registered Go DTO types in `internal/workrpc/schema.go`
+and their reflected schema hash define the exact wire shape; do not infer tags
+by applying a casing rule to internal field names.
 
 Named DTOs required (no `Record<string, any>` for stable resources):
 
@@ -2453,14 +2505,16 @@ Rows affected = 0 returns `WRKQ_CONFLICT` with current etag when available.
 
 ### 8.2 wrkq idempotency
 
-Mutating wrkq methods accept `idempotencyKey`:
+These wrkq mutations enforce replay when a non-empty `idempotencyKey` is supplied:
 
 ```
 wrkq.task.create
-wrkq.task.update
+wrkq.task.copy
 wrkq.comment.add
 wrkq.attachment.add
+wrkq.attachment.addBytes
 wrkq.relation.add
+wrkq.container.update
 wrkq.workflow.attach
 ```
 
@@ -2471,8 +2525,12 @@ same namespace + same key + same canonical request hash → original result
 same namespace + same key + different canonical request hash → WRKQ_CONFLICT
 ```
 
-`wrkq.workflow.attach` and `wrkq.task.create` are mandatory; others may be
-deferred if the first implementation is large.
+Workflow-attach replay returns the stored task/instance with `attached: false`.
+
+`wrkq.task.update` currently accepts the DTO field `idempotencyKey` but its
+handler does not implement replay; use `expectEtag` for update concurrency
+control. Do not assume a field accepted by a request DTO guarantees replay.
+See `internal/wrkqapi/task_update.go` and the per-method mutation handlers.
 
 ### 8.3 wrkf transition CAS
 
@@ -2534,8 +2592,8 @@ same (instanceId, key) + same hash → return original committed evidence; no-op
 same (instanceId, key) + different hash → WRKF_IDEMPOTENCY_MISMATCH
 ```
 
-If persistent evidence idempotency is deferred, `wrkf.evidence.add` must reject
-`idempotencyKey` with `WRKF_VALIDATION` rather than silently ignoring it.
+Persistent evidence replay is implemented in `internal/workflow/evidence.go`
+using `workflow_evidence_idempotency` in the evidence transaction.
 
 ### 8.8 Dual-selector mismatch
 
@@ -2550,7 +2608,8 @@ transaction.
 ## 9. Negative tests (registry contract)
 
 The test suite at `internal/workrpc/registry_contract_test.go` asserts the
-following are **method-not-found** in the unified registry:
+following names are **absent** from the unified registry (dispatching an unknown
+method returns method-not-found):
 
 ```
 wrkf.task.attach
@@ -2578,7 +2637,9 @@ wrkf.instance.cancel
 wrkf.event.query
 ```
 
-These tests are RED until `internal/workrpc` is implemented (P1–P3 of T-04424).
+These are implemented registry tests, compiled with `wrkq_local`. The lists
+above summarize the contract; the test and `registry.go` contain the maintained
+required/forbidden sets.
 
 ---
 

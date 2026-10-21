@@ -1,19 +1,19 @@
 # RPC-backed wrkq CLI - Coverage Matrix
 
 Tracking doc for the RPC-backed production `wrkq` CLI. The temporary direct-store
-and mirror oracle binaries have been retired; retained coverage is now expressed
-as production RPC command contract tests. Design and rationale live in
+and mirror oracle binaries have been retired; current coverage is expressed
+as production RPC command contract tests. The detailed parity case counts and
+legacy test names below describe cutover evidence, not a claim that every former
+oracle case remains in the current suite. See Production Contract Tests for
+current executable checks. Design and rationale live in
 `architecture/archive/rpcwrkqcli.md`. This file is the command-by-command coverage matrix and the
 standing record of retained, local-only, and sunset surfaces.
 
 ## Status legend
 
-- `rpc-backed` — implemented through JSON-RPC; parity proven against the oracle.
-- `seam-smoke` — a transport/protocol smoke only; **not** CLI parity. Compared
-  against an RPC resource DTO, not against legacy `wrkq` output.
-- `rpc-gap` — should be RPC-backed, but the RPC method/DTO is missing.
-- `local-only` — should remain local (process/runtime control).
-- `not-started` — mirrored as a stub; no behavior yet.
+- `rpc-backed` — durable operations use JSON-RPC; notes retain cutover parity evidence.
+- `local-only` — caller-side process/runtime control, embedded help, or diagnostics.
+- `sunset` — removed from the production surface.
 
 ## Architecture (as built — primary cutover inventory)
 
@@ -26,7 +26,10 @@ standing record of retained, local-only, and sunset surfaces.
   redirection as `wrkq rpc --stdio`).
 - **Subprocess transport** speaks the identical `conn` protocol to a spawned
   `wrkq rpc --stdio`; `TestTransportEquivalence_InProcVsSubprocess` proves they
-  agree. This is the on-ramp for a future `wrkqd` daemon transport.
+  agree. Remote locators already use `pkg/client.NewRemote` over authenticated
+  HTTP `/v1/rpc` to `wrkqd`, with the same initialize/schema checks.
+  In-process SQLite support requires the `wrkq_local` build tag; portable builds
+  refuse local locators. See invariant `wrkq.rpc.remote-transport-locator`.
 - **Neutral construction** — `internal/workrpc/bootstrap` builds the
   `*wrkfapi.API` + `workrpc.RegistryOptions` for both the stdio entrypoint and
   production rpccli, so they cannot drift. `internal/rpccli/rpc.go` uses it for
@@ -107,7 +110,7 @@ projection (T-05090), so its fingerprint pin is unchanged.
 | `comment cat` | `rpc-backed` | **All render modes parity proven** via server-owned wrkq.comment.catView compat projection (alphabetical-key struct matching legacy map; conditional actor/scope/deletion fields). Modes: `--json` + non-TTY-default-json (indented array), `--ndjson` (compact server DTO bytes == legacy map marshal, single + multi), `--raw` (body-only, `---`-joined, single + multi), and error parity: not-found (`comment not found: <arg>`) + invalid-ref (`invalid comment reference: <arg> (expected friendly ID like C-00001 or UUID)`). Error messages preserve the ORIGINAL arg incl. any `c:` prefix (mirror reconstructs from the WRKQ_NOT_FOUND/WRKQ_VALIDATION domain code, not the stripped ref). CLI-side rendering only; no new RPC method/DTO. TTY header mode (`[id] [ts] slug (role) - Task: id` + body) implemented but not parity-reachable (parity runs non-TTY). |
 | `comment rm` | `rpc-backed` | **Parity proven** via `wrkq.comment.delete` with an EXPLICIT `mode` (`soft` default / `purge` for `--purge`) + `ifMatch` precondition, on the caller-owned-confirmation seam. The mirror owns the legacy `[y/N]` prompt (accepts `y`/`Y` — NOT rm's "yes"; prompts EVEN for soft-delete), abort/`--yes`, the `--if-match` warn-and-skip (`Warning: etag mismatch …, skipping`), unknown-ref warn-and-continue, dry-run (`[DRY RUN] Would <action> …` TTY / `{id,task_id,action,dry_run}` non-TTY), the bad-ref-shape hard error (aborts loop), and the non-TTY JSON-array results. production contract comment-rm (12 cases): soft-yes, purge-yes, prompt-accept-y, prompt-abort-n, prompt-empty-stdin-skip, unknown-warn-continue, invalid-ref-errors, if-match-mismatch-skip, if-match-match, dry-run-json, multi-yes, c-prefix-yes. PTY prompt-ownership: TestCommentRmPromptOwnership (accept-y/Y, abort, purge-prompts-too, --yes-skips). Server: TestCommentDelete_* (soft/purge/invalid→VALIDATION/ifMatch→CONFLICT/non-interactive). The snapshot oracle now captures comment (id,etag,deleted) so mutation parity is durable, not just rendered. Comment refs are not project-scoped (legacy doesn't scope them). |
 | `attach ls` | `rpc-backed` | **Empty-set + POPULATED-row + pagination + transport + TTY table parity proven** via server-owned wrkq.attachment.listView (DB-only cursor-paginated). Populated rows seeded with the legacy binary's `attach put` (source files materialized into the fixture dir before seeding via the additive `parityCase.files` map). Modes: `--json`, NDJSON/non-TTY default, `--porcelain --limit` first-page next_cursor→stderr, and interactive TTY table (`ID`, `Filename`, `Size`, `MIME Type`, `Created`) byte-compared pre-cutover comparison with a real pseudo-terminal (TestAttachLsTTYTableParity). Empty TTY output is byte-proven as no output. DB-only projection; relative_path is dir-independent so the seed `attach put` may write to the default attach dir. |
-| `attach put` | `rpc-backed (full)` | **Real-FILE put parity proven** via the existing wrkq.attachment.add (host-path fast path; the mirror sends the HOST FILE PATH, server reads the bytes). Output re-projected from the camelCase WrkqAttachment DTO to legacy's alphabetical snake_case map {filename,id,mime_type,relative_path,size_bytes,task_id,task_uuid,uuid}; task_id resolved via wrkq.task.show. Cases: basic, --name/--mime override, unknown-task error. WRKQ_ATTACH_DIR set relative per-case so each binary writes into its own cmd.Dir. **STDIN put (`attach put <task> -`) is NOW RPC-backed via wrkq.attachment.addBytes** (T-05103, daedalus OPTION 1): the mirror reads stdin and uploads the bytes as base64 PROTOCOL DATA in 1 MiB chunks (never a host path); the server stages each chunk into a temp file, enforces the size limit incrementally, and on the final chunk atomically renames into the attach dir + inserts metadata/event (temp+atomic-rename cleanup parity with AttachmentAdd). Parity (production contract attach-put-stdin/*): basic text, binary stdin (NUL/newlines) with --mime, --name-required error, duplicate-filename conflict (`attachment with filename "<f>" already exists for task <T-id>`), unknown-task error. Error precedence matches legacy (server resolves task BEFORE the --name check). |
+| `attach put` | `rpc-backed (full)` | **Real-FILE put parity proven** via the existing wrkq.attachment.add for a co-located server (remote files use wrkq.attachment.addBytes; see byte-transfer boundary below); local host-path fast path: the mirror sends the HOST FILE PATH and the server reads the bytes. Output re-projected from the camelCase WrkqAttachment DTO to legacy's alphabetical snake_case map {filename,id,mime_type,relative_path,size_bytes,task_id,task_uuid,uuid}; task_id resolved via wrkq.task.show. Cases: basic, --name/--mime override, unknown-task error. WRKQ_ATTACH_DIR set relative per-case so each binary writes into its own cmd.Dir. **STDIN put (`attach put <task> -`) is NOW RPC-backed via wrkq.attachment.addBytes** (T-05103, daedalus OPTION 1): the mirror reads stdin and uploads the bytes as base64 PROTOCOL DATA in 1 MiB chunks (never a host path); the server stages each chunk into a temp file, enforces the size limit incrementally, and on the final chunk atomically renames into the attach dir + inserts metadata/event (temp+atomic-rename cleanup parity with AttachmentAdd). Parity (production contract attach-put-stdin/*): basic text, binary stdin (NUL/newlines) with --mime, --name-required error, duplicate-filename conflict (`attachment with filename "<f>" already exists for task <T-id>`), unknown-task error. Error precedence matches legacy (server resolves task BEFORE the --name check). |
 | `attach get` | `rpc-backed (full)` | **Byte-transfer get parity proven** via NEW wrkq.attachment.getBytes (T-05103, daedalus OPTION 1). Attachment CONTENT crosses the RPC boundary as base64 PROTOCOL DATA (chunked: server returns up to 1 MiB raw per frame + whole-file size/checksum); the MIRROR decodes each frame and writes RAW bytes to stdout (`-o -`) or a local file (`--output-file`/`-o <path>`, CLI-owned write). The reassembled bytes are checksum/size-verified against the server metadata. **Stdout purity:** raw bytes are emitted ONLY by production wrkq post-decode — the JSON-RPC server stdout stays pure (guarded by TestStdoutPurity_AttachmentGetBytes: every server stdout line is valid JSON, no raw NUL). Parity (production contract attach-get/*): stdout text, stdout binary NUL payload, `--output-file <path>` JSON `{copied,path,...}` result, missing-attachment error (`attachment not found: <ref>`). The output flag is `--output-file`/`-o` (T-10327 renamed it from `--as`, which shadowed the global principal alias). Transport-equivalence across in-proc + subprocess stdio (TestTransportEquivalence_AttachmentBytes). |
 | `attach rm` | `rpc-backed` | **Parity proven** via the existing wrkq.attachment.remove (metadata DELETE + server-side file unlink; NO new method). Multi-arg; `--yes` skips the interactive confirm (the prompt path resolves via wrkq.attachment.show first to print id+filename, then removes — empty-stdin harness uses --yes for determinism). Unknown id → `Warning: attachment not found: <ref>` on stderr + continue (non-fatal), legacy-exact. Non-TTY emits the indented JSON results array {id,uuid,filename,deleted}. Cases: rm --yes, unknown-warns-continues. |
 | `relation add`/`rm` | `rpc-backed` | **Proven parity** via wrkq.relation.add/.remove, composing task.show for each endpoint id+uuid. |
@@ -138,22 +141,26 @@ projection (T-05090), so its fingerprint pin is unchanged.
 | `check-inbox` | `rpc-backed` | **Non-TTY + TTY parity proven** via server-owned `wrkq.task.inboxView` compat list projection (reproduces legacy `inboxTask` rows + the two queries: open tasks under the inbox container path, then ack-pending `completed/cancelled` tasks requested by the configured project). Non-TTY/default: ndjson; `--json`: indented array; `--ndjson`/`--porcelain`: ndjson; empty non-TTY → no rows unless `--json` (`[]`); excludes non-open. Interactive TTY table (`ID`, `Slug`, `Title`, `State`, `Priority`, `Kind`) is byte-proven pre-cutover comparison with a real pseudo-terminal for populated and empty inboxes (TestCheckInboxTTYTableParity). **Project-root is CALLER-scoped**: the mirror passes the scoped inbox path (`ApplyToPath("inbox",false)`) and project id (`Normalize(cfg)`) as RPC params; the view never reads project-root env/flags (production contract check-inbox/project-root-scoped). |
 | `bundle` | `sunset` | Removed from the production cutover surface per Daedalus's approve-with-conditions ruling. The former `bundle create`, admin apply command, daemon routes, workrpc `wrkq.bundle.exportView`, bundle DTO catalog entries, parity tests, and smoke sections are not part of the retained day-to-day CLI/RPC contract. Use state export/import/verify, patches, merge, or future explicit migration tooling for archival state movement. |
 | `webhook` | `rpc-backed` | **Global webhook parity proven** via dedicated server methods `wrkq.webhook.add`, `wrkq.webhook.remove`, and `wrkq.webhook.listView`. The server owns singleton-root resolution, URL validation, idempotent add/remove, `webhook_urls` write, attribution, and `container.updated` event; the mirror owns TTY/non-TTY rendering only and intentionally does not project-root scope. Production contract tests cover empty/populated list, add, add with canonical principal, duplicate no-change, invalid URL, remove, and missing remove no-change. |
-| `agent` | `rpc-backed` | **Local pass-through parity proven**. This command is intentionally not RPC-backed: it mirrors legacy as a thin `hrcchat turn seshat` wrapper, preserving `--new`, `--format`, `--follow`, `--file`, prompt joining, stdin `-` fallback, passthrough args after `--`, streamed stdout/stderr, and child exit-code propagation. TestAgentPassThroughParity uses a fake `hrcchat` executable on PATH so no real agent turn is triggered. |
-| `agent-context` | `rpc-backed` | **Local scope-resolution parity proven** with best-effort RPC-backed identity lookups. The mirror resolves `--scope` / `ASP_SCOPE_REF` / `ASP_HANDLE` / `ASP_AGENT_ID`+`ASP_PROJECT` locally, preserves the legacy JSON/NDJSON/human output shape, exits 2 for unresolved scope without adding a Cobra error in JSON modes, works when the DB file is absent, and uses existing RPC methods (`wrkq.admin.legacyActor.list`, `wrkq.container.show`) only for optional actor/container UUID lookups when the DB is present. Cases include default JSON with lookups, explicit `--scope` override, porcelain compact output, unresolved-scope JSON exit 2, and no-DB parity. |
-| `agent-info` | `rpc-backed` | **Local-only parity proven** in the mirror: non-TTY default and `--json` emit the same embedded quick-reference JSON as legacy (production contract agent-info/*). TTY raw markdown output is covered by installed smoke. |
+| `agent` | `local-only` | **Local pass-through parity proven**. This command is intentionally not RPC-backed: it mirrors legacy as a thin `hrcchat turn seshat` wrapper, preserving `--new`, `--format`, `--follow`, `--file`, prompt joining, stdin `-` fallback, passthrough args after `--`, streamed stdout/stderr, and child exit-code propagation. TestAgentPassThroughParity uses a fake `hrcchat` executable on PATH so no real agent turn is triggered. |
+| `agent-context` | `rpc-backed` | **Local scope-resolution parity proven** with best-effort RPC-backed identity lookups. The mirror resolves `--scope` / `AGENT_SCOPE_REF` / `ASP_SCOPE_REF` / `ASP_HANDLE` / `ASP_AGENT_ID`+`ASP_PROJECT` locally, preserves the legacy JSON/NDJSON/human output shape, exits 2 for unresolved scope without adding a Cobra error in JSON modes, works when the DB file is absent, and uses existing RPC methods (`wrkq.container.show`) only for optional container UUID lookups when the DB is present. Cases include default JSON with lookups, explicit `--scope` override, porcelain compact output, unresolved-scope JSON exit 2, and no-DB parity. |
+| `agent-info` | `local-only` | **Local-only parity proven** in the mirror: non-TTY default and `--json` emit the same embedded quick-reference JSON as legacy (production contract agent-info/*). TTY raw markdown output is covered by installed smoke. |
 | `projects` | `rpc-backed` | **Top-level project listing parity proven** via server-owned `wrkq.project.listView`: server owns root-child query, archived filtering, slug cursor pagination, and the project row projection, now including nullable `root` verbatim (consumer expands `~`). Mirror owns presentation and intentionally ignores project-root for the list while still validating `--project` through the normal bootstrap path. Cases include default non-TTY NDJSON, `--json`, `--ndjson`, table/yaml/tsv, `-1`, `-0`, porcelain limit cursor footer, project-root ignored, and raw unsupported-mode error. `wrkq set <project> --root <path>` uses dedicated `wrkq.project.setRoot`; the caller normalizes absolute-under-HOME to `~/...`, empty clears, and the server rejects task/non-project selectors. |
-| `usage` | `rpc-backed` | **Local-only parity proven** in the mirror, including the `info` alias: non-TTY default and `--json` emit the same embedded usage JSON as legacy (production contract usage/*). TTY raw markdown output is covered by installed smoke. |
-| `version` | `rpc-backed` | **Local-only parity proven** in the mirror: non-TTY default and `--json` emit the same indented machine-interface JSON as legacy, with the same static supported command/format/flag/capability metadata (production contract version/*). TTY human output uses the same line format and is covered by the installed smoke for this slice. |
+| `usage` | `local-only` | **Local-only parity proven** in the mirror, including the `info` alias: non-TTY default and `--json` emit the same embedded usage JSON as legacy (production contract usage/*). TTY raw markdown output is covered by installed smoke. |
+| `version` | `local-only` | **Local-only parity proven** in the mirror: non-TTY default and `--json` emit the same indented machine-interface JSON as legacy, with the same static supported command/format/flag/capability metadata (production contract version/*). TTY human output uses the same line format and is covered by the installed smoke for this slice. |
 | `whoami` | `rpc-backed` | **Local/config attribution parity proven** in the mirror: resolves attribution with the shared attribution package over the bootstrap-opened config/DB, validates `--project` like legacy appctx, and renders the same principal/scope/db-path/legacy-actor-cache JSON for non-TTY default and `--json` (production contract whoami/*). TTY human output is covered by installed smoke. |
-| `server` | `rpc-backed` | **Local daemon-control parity proven**. The mirror owns the same process/status/launchd/socket/HTTP orchestration surface as legacy for `server start|serve|stop|restart|status|health`; `server serve` replaces itself with the sibling/PATH `wrkqd` binary so durable daemon behavior remains outside rpccli. Non-invasive parity rows cover JSON/default status, not-running stop JSON, and conflicting start mode validation; installed smoke starts a real daemon on an isolated temp DB/port/runtime dir, verifies `status`/`health`, and stops it through both installed binaries. |
-| `rpc` | `rpc-backed` | **Local protocol entrypoint parity proven** for `rpc --stdio`: the mirror opens the same bootstrap handle and serves the same `workrpc.ServeStdio` registry as legacy. `TestTransportEquivalence_LegacyVsMirrorRPCStdio` drives both binaries as real JSON-RPC subprocesses and compares a `wrkq.task.show` result; `production contract rpc/missing-stdio` covers the ordinary CLI validation path when `--stdio` is omitted. |
+| `server` | `local-only` | **Local daemon-control parity proven**. The mirror owns the same process/status/launchd/socket/HTTP orchestration surface as legacy for `server start|serve|stop|restart|status|health`; `server serve` replaces itself with the sibling/PATH `wrkqd` binary so durable daemon behavior remains outside rpccli. Non-invasive parity rows cover JSON/default status, not-running stop JSON, and conflicting start mode validation; installed smoke starts a real daemon on an isolated temp DB/port/runtime dir, verifies `status`/`health`, and stops it through both installed binaries. |
+| `rpc` | `rpc-backed` | **Local protocol entrypoint parity proven** for `rpc --stdio`: the mirror opens the same bootstrap handle and serves the same `workrpc.ServeStdio` registry as legacy. `TestSubprocessTransport_StdioTaskShowIsStable` checks production subprocess reads, and `rpc_remote_stdio_test.go` checks the remote bridge. |
 
 ## attach get / stdin-put byte-transfer boundary (RESOLVED — daedalus OPTION 1, T-05103)
 
 `attach put <task> <file>` (real file) and `attach rm` are mirrored through the
 EXISTING `wrkq.attachment.add` / `wrkq.attachment.remove` methods: for a
 co-located real file the mirror sends a host **path string** plus metadata (the
-server reads the bytes). This stays the **local fast path**.
+server reads the bytes). This stays the **local fast path**. For a remote
+locator, real-file put uses
+`wrkq.attachment.addBytes` too: the CLI reads the caller-local file and sends
+chunks rather than asking the daemon to open its path. Attachment removal is
+remote-safe because it operates on an attachment ID.
 
 The two byte-transfer surfaces — **`attach get <id>`** (server → client bytes) and
 **`attach put <task> -`** (client stdin → server bytes) — are now implemented per
@@ -172,7 +179,7 @@ comfortably under the cap).
 - **`wrkq.attachment.getBytes`** `{id, offset, limit}` → `WrkqAttachmentBytes`
   `{uuid,id,taskUuid,filename,mimeType,sizeBytes,checksum,offset,contentBase64,eof}`.
   The mirror loops with an increasing `offset` until `eof`, decoding each frame
-  and writing RAW bytes to stdout (`--as -`) or a local file (`--as <path>`,
+  and writing RAW bytes to stdout (`--output-file -`) or a local file (`--output-file <path>`,
   CLI-owned write). The reassembled bytes are checksum/size-verified against the
   server's whole-file metadata. A missing row → `WRKQ_NOT_FOUND` (`attachment not
   found: <ref>`); a missing file-on-disk → `WRKQ_NOT_FOUND` (kind `attachment
@@ -201,73 +208,24 @@ distinctly-named local capability (`sharedFilesystemPaths`), never the
 correctness/remote path.
 
 **Byte-proven coverage:** `attach get` stdout text, stdout binary (NUL/newlines),
-`--as <path>` JSON result, missing-attachment, checksum/size match; `attach put -`
+`--output-file <path>` JSON result, missing-attachment, checksum/size match; `attach put -`
 basic text, binary stdin + `--mime`, `--name` required, duplicate filename, unknown
 task. Transport-equivalence across in-proc + subprocess stdio. (production contract attach-*,
 TestTransportEquivalence_AttachmentBytes, TestStdoutPurity_AttachmentGetBytes.)
 
-## Open gaps — Tranche B mutations awaiting new RPC surface (T-05100)
+## Implemented mutation boundaries
 
-Two Tranche-B mutation commands cannot be byte-proven on the existing RPC surface
-and are STOP-AND-GAPped (no mirror code landed; faking them would violate
-identity/event invariants):
+`cp` uses `wrkq.task.copy` in `internal/wrkqapi/taskcopy.go`; it is not an open
+RPC gap. The server owns the single-task copy, source etag check, attachment
+metadata cascade, optional same-store file copy, event, and webhook. The CLI
+owns multi-source fan-out, confirmation, dry-run, and rendering. File staging
+and post-commit renames are not a fully transactional filesystem operation.
+See the copy note in `docs/wrkq-wrkf-rpc.md` for the wire result.
 
-### `cp` → proposed `wrkq.task.copy`
-
-**Retired oracle behavior** (the pre-S8 direct-store `cp` implementation): a deep, per-source-task copy into a
-destination container. For each source task it (1) copies the mutable task fields
-into a NEW task in the destination (or upserts an existing same-slug task when
-`--overwrite`); (2) copies attachment **metadata** rows, and with
-`--with-attachments` copies the underlying **files** (skipped entirely with
-`--shallow`); (3) writes a `task.copied` event with a `{source_id, source_uuid,
-attachment_count, with_files}` payload; (4) dispatches a `created` webhook with a
-synthetic `source_uuid` change. Output: `copyResult{source_id, source_uuid,
-dest_id, dest_uuid, dest_path, attachments_copied, with_files}`. Flags: `--dry-run`,
-`-j/--jobs`, `--continue-on-error`, `--with-attachments`/`--shallow`,
-`-r/--recursive` (parsed today but not used by legacy task-copy resolution),
-`--overwrite`, `--yes` (prompt only when >5 sources),
-`--nullglob`, `--if-match`, output modes.
-
-**Why no existing method maps**: composing `wrkq.task.show` + `wrkq.task.create`
-client-side would (a) NOT reproduce the `task.copied` event type or the
-source-uuid webhook change, (b) expose intermediate states + drift the event
-shape, and (c) leave the attachment cascade (metadata + optional file copy) with
-no RPC home. There is no copy method on the surface today.
-
-**Proposed**: `wrkq.task.copy` (server-owned deep copy + cascade + event +
-webhook), DTO `WrkqTaskCopyParams{ source, destination, overwrite, withAttachments,
-shallow, expectEtag, actor }` → `WrkqTaskCopyResult{ sourceId, sourceUuid, destId,
-destUuid, destPath, attachmentsCopied, withFiles }`. The CLI owns the >5-source
-prompt, `--jobs`/`--continue-on-error` fan-out, dry-run, nullglob, and output
-rendering; the server owns one atomic single-task copy + cascade + event + webhook.
-
-**Daedalus question**: *Approve a new server-owned `wrkq.task.copy` method (full
-catalog/DTO/fingerprint checklist) that performs the deep single-task copy
-(fields + attachment-metadata + optional attachment-file copy + `task.copied`
-event + `created` webhook with the synthetic `source_uuid` change), with the CLI
-retaining the multi-source fan-out / prompt / dry-run / output rendering? Or
-should the attachment-file copy be a separate explicit mode/boundary (cf. the
-attach byte-transfer ruling, T-05103)?*
-
-### `rename-container` → `wrkq.container.update` ✅ RESOLVED (T-05112)
-
-**Daedalus APPROVED** (hrcchat#10196): the NEW method `wrkq.container.update` (NOT
-`.rename`), DTO `WrkqContainerUpdateParams{ container, patch{slug?,title?},
-expectEtag, actor, idempotencyKey }` → `WrkqContainer` (the updated record). The
-FIRST patch surface is deliberately **NARROW** — only `slug`/`title`; any other
-key (`kind`/`parentUuid`/`webhookUrls`/`archived`/…) → `WRKQ_VALIDATION`, and
-widening it requires explicit separate review (no overbroad mutation sink).
-
-Implemented identity-preserving via the server-side in-place
-`store.Containers.UpdateFieldsWithAttribution` (same uuid/friendly-id/children/
-history, etag bump, `container.updated` event + attribution); the slug is
-normalized + validated server-side; a slug collision (unique-in-parent) and a
-stale `expectEtag` map to typed `WRKQ_CONFLICT` (not a raw store leak), and
-`v_container_paths` rebuilds so the path + descendant paths reflect the new slug.
-The mirror (`wrkq rename-container`) owns the project-root scoping + `--dry-run` /
-TTY / non-TTY rendering; it normalizes the slug client-side purely to reproduce
-the dry-run display + invalid-slug wording (the server re-validates). The command
-is **non-destructive** (no prompt).
+`rename-container` uses `wrkq.container.update` in
+`internal/wrkqapi/containers.go`, preserving identity with a narrow slug/title
+patch and typed conflicts. Parent moves, webhook configuration, and campaign
+changes have dedicated methods; they do not widen that patch.
 
 ## Production Contract Tests
 
@@ -282,3 +240,13 @@ Focused transport and PTY tests remain in neighboring `internal/rpccli/*_test.go
 files. They exercise production `wrkq` subprocesses or `NewRootCmdFor("wrkq")`
 directly; no test builds a deleted oracle binary or treats a direct-store CLI as
 the source of truth.
+
+Current transport checks include `TestInProcessTransport_Lifecycle`,
+`TestTransportEquivalence_InProcVsSubprocess`,
+`TestRemoteTransportCallsWorkRPCRegistry`, and
+`TestTransportEquivalence_AttachmentBytes`. `attach_remote_put_test.go` checks
+remote caller-file upload. `TestPrimaryCutoverInventoryGate` keeps this matrix's
+command classification and historical evidence markers present; it does not
+rerun retired oracle comparisons. Current behavior additions have focused tests
+such as `named_subtasks_test.go`, `promise_acceptance_test.go`, and the campaign
+acceptance suites alongside the production command suite.
