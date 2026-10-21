@@ -57,11 +57,9 @@ with `wrkq version --json` there and compare `commit` to max3's):
   It runs no wrkqd; its clients point at mini (`HRC_WRKQ_DB=rpc://…:7171`).
 - **thestill** (Lance's laptop): a client-only node with no wrkqd, no HRC and
   just `~/.local/bin/wrkq` plus `~/.config/wrkq/node-token`. Don't build there.
-  Copy max3's installed binary: `scp ~/.local/bin/wrkq thestill:.local/bin/wrkq.new
-  && ssh thestill 'mv ~/.local/bin/wrkq.new ~/.local/bin/wrkq'`. Verify with
-  `ssh thestill 'zsh -lic "wrkq version --json; wrkq tree --project wrkq | head -2"'`
-  (it needs the login shell for PATH). A stale copy fails with
-  `rpc protocol mismatch`.
+  From max3, run `just install-thestill`. It copies max3's installed `wrkq`,
+  keeps the old one as `wrkq.bak`, and proves the new one reaches wrkqd. A stale
+  copy fails with `rpc protocol mismatch`.
 
 `just install` refuses uncommitted tracked changes. Commit first; use
 `just install allow-dirty=1` only for an intentional dirty install. Untracked

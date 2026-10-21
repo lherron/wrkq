@@ -469,6 +469,23 @@ install-system:
   echo "✓ Installed to /usr/local/bin/wrkqd"
   echo "✓ Run 'wrkq --version' to verify"
 
+# Upgrade the wrkq client on thestill (Lance's laptop): a client-only node with
+# no wrkqd and no build toolchain in its ssh PATH. Copies this node's installed
+# ~/.local/bin/wrkq (darwin/arm64), keeps the previous copy as wrkq.bak, and
+# proves the new one talks to the canonical wrkqd. Run `just install` here first
+# if this node is behind.
+install-thestill host="thestill":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  src="$HOME/.local/bin/wrkq"
+  [ -x "$src" ] || { echo "✗ $src missing; run 'just install' first" >&2; exit 1; }
+  echo "Copying $("$src" version --json | grep '"commit"' | tr -d ' ,') to {{host}}..."
+  scp -q "$src" "{{host}}:.local/bin/wrkq.new"
+  ssh "{{host}}" 'cd ~/.local/bin && { [ ! -e wrkq ] || cp -p wrkq wrkq.bak; } && mv wrkq.new wrkq'
+  # The login shell supplies PATH; a plain ssh shell does not see ~/.local/bin.
+  ssh "{{host}}" 'zsh -lic "wrkq version --json | grep \"\\\"commit\\\"\" && wrkq tree --project wrkq >/dev/null"'
+  echo "✓ {{host}} wrkq upgraded and reaches wrkqd"
+
 # Uninstall CLI binaries from ~/.local/bin
 uninstall:
   #!/usr/bin/env bash
