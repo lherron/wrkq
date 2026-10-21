@@ -45,6 +45,24 @@ Restarting before migration can leave the daemon unable to start. Check
 `wrkq server health` afterward; `wrkq server status` reports `binaryStale`
 when the running daemon holds an older installed binary.
 
+Upgrading other nodes from max3 (all reachable by `ssh <host>`; check first
+with `wrkq version --json` there and compare `commit` to max3's):
+
+- **mini** (canonical wrkqd, producer): `ssh mini` is a non-login shell, so
+  export `PATH=$HOME/.local/bin:$HOME/.bun/bin:$HOME/go/bin:/opt/homebrew/bin:$PATH`
+  first, then `cd ~/praesidium/wrkq && git pull --ff-only && just install`.
+  A migration release follows the offline sequence above. Upgrade mini first
+  and the other nodes after it: a new client refuses an old server.
+- **hrcdev**: same PATH export, then `git pull --ff-only && just install no-sync=1`.
+  It runs no wrkqd; its clients point at mini (`HRC_WRKQ_DB=rpc://…:7171`).
+- **thestill** (Lance's laptop): a client-only node with no wrkqd, no HRC and
+  just `~/.local/bin/wrkq` plus `~/.config/wrkq/node-token`. Don't build there.
+  Copy max3's installed binary: `scp ~/.local/bin/wrkq thestill:.local/bin/wrkq.new
+  && ssh thestill 'mv ~/.local/bin/wrkq.new ~/.local/bin/wrkq'`. Verify with
+  `ssh thestill 'zsh -lic "wrkq version --json; wrkq tree --project wrkq | head -2"'`
+  (it needs the login shell for PATH). A stale copy fails with
+  `rpc protocol mismatch`.
+
 `just install` refuses uncommitted tracked changes. Commit first; use
 `just install allow-dirty=1` only for an intentional dirty install. Untracked
 files and the install-rewritten `packages/client/bun.lock` do not trip this check.
