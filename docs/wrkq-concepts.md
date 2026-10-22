@@ -37,15 +37,15 @@ one agent/project pair.
   just-created handoff is searchable without a manual `wrkq index rebuild`,
   as long as indexing succeeds.
 
-Platform usage note: handoffs are the mechanism platform skills such as
-hrcfork and agent-tasker use to pass session continuity between an agent's
-own successive runs — they are a hand-back-to-myself primitive, not an
-inter-agent message.
+Use handoffs for continuity between an agent's own successive runs. Use
+`wrkc` rooms and addressed envelopes for inter-agent requests and replies.
 
 ## Search and the index sidecar
 
-wrkq search is not queried against the canonical database directly. It is
-served from a **derived, rebuildable sidecar SQLite database**:
+Search candidates come from a **derived, rebuildable sidecar SQLite database**;
+canonical rows still supply current state and filtering. The server owns the
+sidecar and embedding configuration. With a remote `rpc://` locator, these
+live on the daemon host, not on the CLI host. The default sidecar path is:
 
 ```text
 <canonical-db>.search.sqlite
@@ -65,9 +65,10 @@ truth for task state.
   provider `llama-cpp`, base URL `http://127.0.0.1:18480`, model
   `Qwen/Qwen3-Embedding-8B-GGUF:Q4_K_M`, dimension `4096`, index batch size
   `8`. Set `WRKQ_SEARCH_DENSE_PROVIDER=none` to force FTS-only indexing and
-  search (no external dependency). If the embedding server is unavailable and
-  a dense provider is configured, wrkq can fall back to FTS-only rather than
-  failing.
+  search (no external dependency). Configure this on the daemon host for remote
+  clients. Dense query failures are recorded and lexical results can still be
+  returned; this does not guarantee that every index operation will succeed
+  when the embedding server is unavailable.
 
 ### Index lifecycle
 
@@ -100,18 +101,26 @@ or around it, and they answer different questions:
 | `wrkq log <ref>` | "What happened to this one task/container over time?" | Paginated history, `--patch` for field-level diffs, `--since`/`--until` date filtering. |
 | `wrkq diff <A> <B>` | "Which fields differ between these two tasks?" | JSON field changes for non-TTY output; human field comparison for a TTY. Single-task working-copy comparison is unimplemented; the accepted `--unified` flag does not affect output. |
 | `wrkq monitor watch --raw` | "Tail the raw event log live." | Whole-log NDJSON tail; `--since` is an event-ID cursor; `--timeout`/`--stall-after` end it with the monitor terminal line. Replaces the retired `wrkq watch`. |
-| `wrkq monitor watch [TASK...]` | "Stream typed, filterable events for specific tasks, built for automation." | NDJSON or compact format, `--event-type`, `--scope`, `--state-only`, `--last N` replay, `--until` condition, `--timeout`/`--stall-after`. Emits exactly one terminal line before exit. |
+| `wrkq monitor watch [TASK...]` | "Stream typed, filterable events for specific tasks, built for automation." | NDJSON or compact format, `--event-type`, `--state-only`, `--last N` replay, `--until` condition, `--timeout`/`--stall-after`. Emits exactly one terminal line before exit. |
 | `wrkq monitor wait [TASK...]` | "Block a script until a condition holds, then exit." | Same condition evaluator and exit-code contract as `monitor watch --until`; no event streaming to stdout — it's a barrier. |
 
 `wrkq monitor` is explicitly designed for agent observation (its own help
 text says "via the Claude Monitor tool") — its `--until state=<s>[,<s>...]`
 and `--until all-terminal` conditions plus the fixed exit-code contract
-(`0`=condition met, `1`=timeout/stall, `2`=selector error, `3`=stream error)
+(`0`=condition met, `1`=condition unmet at timeout/stall, `2`=selector error,
+`3`=stream error)
 make it the right primitive for scripted sequencing, e.g.:
 
 ```bash
 wrkq monitor wait T-00001 --until state=completed --timeout 30m
 ```
+
+Without `--until`, a follow bounded by `--timeout` or `--stall-after` exits
+`0` when that clock ends, with terminal `result: timeout|stall` and
+`unmet: []`. The exit-1 timeout rule applies when a requested condition remains
+unmet. The accepted `--scope` flag currently errors as unimplemented.
+Conditions also include `acked` and `terminal` for envelope observation;
+room selectors support bounded follows without `--until`.
 
 `wrkq monitor watch --raw` is the lower-level, closer-to-the-wire primitive: it
 tails the literal event log with no task-condition semantics, useful for

@@ -29,62 +29,65 @@ Every subcommand accepts:
 
 Non-TTY output defaults to NDJSON for list/search/history streams and JSON for
 singleton/detail/mutation/content responses. `--json`/`--ndjson`/`--human`
-flags on individual commands override the global `--output` default.
+flags on individual commands select their supported output modes. Some commands,
+such as handoff and diff, use their own flags and TTY defaults rather than
+`--output`; consult per-command help before scripting.
 
 ## Command index
 
 ```text
 ack            agent          agent-context  agent-info
-apply          attach         cat            check
-check-inbox    claim          comment        completion
-container      cp             diff           find
-handoff        help           index          log
-ls             mkdir          monitor        mv
-projects       relation       release        rename-container
-restore        rm             rmdir          rpc
-search         server         set            stat
-touch          tree           usage          version
-watch          webhook        whoami
+apply          archive        attach         campaign
+cat            check          check-inbox    claim
+comment        completion     container      cp
+diff           find           handoff        help
+index          log            ls             mkdir
+monitor        mv             projects       promise
+relation       release        rename-container restore
+rm             rmdir          rpc            search
+server         set            stat           timeline
+touch          tree           unarchive      usage
+version        watch          webhook        whoami
 ```
 
 ## Containers and projects
 
 ```bash
 # Create a top-level project container
-wrkq mkdir myproject
+wrkq mkdir /myproject --kind project
 
 # Create a nested container
-wrkq mkdir myproject/backend
+wrkq mkdir /myproject/backend
 
 # List top-level projects
 wrkq projects
 
-# Tree view: containers + draft/open tasks by default
-wrkq tree myproject
-wrkq tree myproject --open        # narrow to open tasks
-wrkq tree myproject -a            # include archived, empty containers
-wrkq tree myproject -L 2          # max depth 2
+# Tree view: containers + draft/open/in_progress/blocked tasks by default
+wrkq tree /myproject
+wrkq tree /myproject --open        # narrow to open tasks
+wrkq tree /myproject -a            # every state, archived/deleted rows, empty containers
+wrkq tree /myproject -L 2          # max depth 2
 
 # Container detail / update
-wrkq container cat myproject
+wrkq container cat /myproject
 wrkq cat P-00001                 # root cat also resolves container IDs/paths
-wrkq container set myproject --webhook-url http://127.0.0.1:18451/api/webhooks/wrkq
+wrkq container set /myproject --webhook-url http://127.0.0.1:18451/api/webhooks/wrkq
 
 # Register a checkout root on a top-level project (paths under $HOME stored as ~/...)
-wrkq set myproject --root ~/praesidium/myproject
+wrkq set /myproject --root ~/praesidium/myproject
 ```
 
 ## Task CRUD
 
 ```bash
 # Create a task (default state: open, default priority: 3)
-wrkq touch myproject/implement-feature \
+wrkq touch /myproject/implement-feature \
   -t "Implement new feature" \
   -d "Description here" \
   --priority 2 --kind bug
 
 # Create an independent child task
-wrkq touch myproject/sub-piece --parent-task T-00001
+wrkq touch /myproject/sub-piece --parent-task T-00001
 
 # Create a named assignment in the owner context
 wrkq touch T-00001.render --subtask -t "Render preview"
@@ -100,7 +103,7 @@ wrkq set T-00001.render --requester-scope ""      # clear the scope only
 wrkq set T-00001.render --requester ""            # clear requester and scope
 
 # Read a task, container, or promise (TTY: human/raw detail; piped: JSON)
-wrkq cat myproject/implement-feature
+wrkq cat /myproject/implement-feature
 wrkq cat T-00001 --output raw       # markdown in pipelines
 wrkq cat T-00001 --exclude-comments
 wrkq cat T-00001 --json --one       # bare object; asserts one selector/result
@@ -129,8 +132,8 @@ wrkq rm T-00001 --purge --yes
 wrkq restore T-00001
 
 # Move / copy across containers
-wrkq mv T-00001 otherproject/new-slug
-wrkq cp T-00001 otherproject/copy-slug
+wrkq mv T-00001 /otherproject/new-slug
+wrkq cp T-00001 /otherproject/copy-slug
 ```
 
 Every task/campaign write surface exposing `--labels` accepts either a plain
@@ -150,22 +153,23 @@ use the same rules. The singular repeatable `--label` read filter is unchanged.
 # find: with no --state, returns the actionable set draft/open/in_progress/blocked
 # (the same default as tree); --state <s> for one state, --state all for history.
 # --ack-pending alone still selects unacked completed/cancelled tasks.
-wrkq find myproject --state open --kind bug
+wrkq find /myproject --state open --kind bug
 wrkq find --claimed-by agent:cody
 wrkq find --caused-by T-00012
 wrkq find --ack-pending             # completed/cancelled, not yet acknowledged
 
 # search: FTS over task+comment text, defaults to state=open
-wrkq search "rate limiting" myproject
+wrkq search "rate limiting" /myproject
 wrkq search "auth flow" --state all --sort updated_at --limit 5
 wrkq search "config" --explain      # include ranking diagnostics
 
 # stat: quick task/container status
 wrkq stat T-00001
 
-# diff: compare two tasks or task versions
+# diff: compare current fields of two tasks
 wrkq diff T-00001 T-00002
-wrkq diff T-00001 --unified 5
+# A single selector errors: working-copy comparison is unimplemented.
+# --unified is accepted for compatibility but does not affect output.
 
 # log: change history for a task or container
 wrkq log T-00001 --oneline
@@ -177,21 +181,22 @@ wrkq log T-00001 --since 2026-07-01 --limit 100
 
 ```bash
 wrkq comment add T-00001 -m "Started implementation"
-wrkq comment cat T-00001
-wrkq comment rm T-00001 <comment-id>
+wrkq comment ls T-00001
+wrkq comment cat <comment-id>
+wrkq comment rm <comment-id>
 
 wrkq attach put T-00001 ./notes.pdf
 wrkq attach ls T-00001
-wrkq attach get T-00001 <attachment-id> -o ./out.pdf
-wrkq attach rm T-00001 <attachment-id>
+wrkq attach get <attachment-id> -o ./out.pdf
+wrkq attach rm <attachment-id>
 ```
 
 ## Relations and lineage
 
 ```bash
-wrkq relation add T-00001 T-00002 --kind blocks
+wrkq relation add T-00001 blocks T-00002
 wrkq relation ls T-00001
-wrkq relation rm T-00001 T-00002 --kind blocks
+wrkq relation rm T-00001 blocks T-00002
 
 # Pre-flight blocker check
 wrkq check blocked T-00001
@@ -224,7 +229,7 @@ as the state mutation; the claim token/generation travel via
 
 ```bash
 # Raw event-log tail (replaces the retired `wrkq watch`)
-wrkq monitor watch --raw                        # all new events, NDJSON
+wrkq monitor watch --raw                        # replay from event 1, then follow, NDJSON
 wrkq monitor watch --raw --since 100            # from event ID 100
 wrkq monitor watch --raw --since 0 --stall-after 1s   # replay, then stop
 
@@ -257,7 +262,8 @@ wrkq index resume
 ## Handoffs
 
 ```bash
-wrkq handoff create --title "Continue T-00001" -m "Left off after step 3..."
+wrkq handoff create --scope cody@wrkq --title "Continue T-00001" \
+  --body "Left off after step 3..."
 wrkq handoff list                       # defaults to status=pending
 wrkq handoff get H-00001
 wrkq handoff acknowledge H-00001
@@ -349,7 +355,6 @@ to agents. See `/docs/wrkq/operations` for the operational flows.
 init         Initialize the wrkq database and configuration
 migrate      Run any pending database migrations
 db snapshot  Create a WAL-safe database snapshot
-actors ls/add
 state export/import/verify
 patch create/validate/apply/rebase/summarize
 merge        Merge a project database into a canonical database (disabled)
