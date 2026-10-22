@@ -320,6 +320,24 @@ differs from the repo copy and prints the diff (T-08044); never pass
 from the per-node bearer token presented to `wrkqd` — a claiming caller
 cannot supply or spoof which node it's claiming from.
 
+### Upgrading other nodes from max3
+
+All nodes are reachable by `ssh <host>`. Check first with `wrkq version --json`
+there and compare `commit` to max3's.
+
+- **mini** (canonical wrkqd, producer): `ssh mini` is a non-login shell, so
+  export `PATH=$HOME/.local/bin:$HOME/.bun/bin:$HOME/go/bin:/opt/homebrew/bin:$PATH`
+  first, then `cd ~/praesidium/wrkq && git pull --ff-only && just install`.
+  A migration release follows the offline sequence above. Upgrade mini first
+  and the other nodes after it: a new client refuses an old server.
+- **hrcdev**: same PATH export, then `git pull --ff-only && just install no-sync=1`.
+  It runs no wrkqd; its clients point at mini (`HRC_WRKQ_DB=rpc://…:7171`).
+- **thestill** (Lance's laptop): a client-only node with no wrkqd, no HRC and
+  just `~/.local/bin/wrkq` plus `~/.config/wrkq/node-token`. Don't build there.
+  From max3, run `just install-thestill`. It copies max3's installed `wrkq`,
+  keeps the old one as `wrkq.bak`, and proves the new one reaches wrkqd. A stale
+  copy fails with `rpc protocol mismatch`.
+
 ### HTTP route surface
 
 `wrkqd` exposes a deliberately narrower REST surface than the full JSON-RPC

@@ -45,21 +45,8 @@ Restarting before migration can leave the daemon unable to start. Check
 `wrkq server health` afterward; `wrkq server status` reports `binaryStale`
 when the running daemon holds an older installed binary.
 
-Upgrading other nodes from max3 (all reachable by `ssh <host>`; check first
-with `wrkq version --json` there and compare `commit` to max3's):
-
-- **mini** (canonical wrkqd, producer): `ssh mini` is a non-login shell, so
-  export `PATH=$HOME/.local/bin:$HOME/.bun/bin:$HOME/go/bin:/opt/homebrew/bin:$PATH`
-  first, then `cd ~/praesidium/wrkq && git pull --ff-only && just install`.
-  A migration release follows the offline sequence above. Upgrade mini first
-  and the other nodes after it: a new client refuses an old server.
-- **hrcdev**: same PATH export, then `git pull --ff-only && just install no-sync=1`.
-  It runs no wrkqd; its clients point at mini (`HRC_WRKQ_DB=rpc://…:7171`).
-- **thestill** (Lance's laptop): a client-only node with no wrkqd, no HRC and
-  just `~/.local/bin/wrkq` plus `~/.config/wrkq/node-token`. Don't build there.
-  From max3, run `just install-thestill`. It copies max3's installed `wrkq`,
-  keeps the old one as `wrkq.bak`, and proves the new one reaches wrkqd. A stale
-  copy fails with `rpc protocol mismatch`.
+Upgrade mini first, then hrcdev and thestill: a new client refuses an old
+server. Per-node steps: [upgrading other nodes](docs/wrkq-operations.md#upgrading-other-nodes-from-max3).
 
 `just install` refuses uncommitted tracked changes. Commit first; use
 `just install allow-dirty=1` only for an intentional dirty install. Untracked
@@ -75,17 +62,8 @@ For no-network or sandboxed environments, use:
 scripts/agent-check.sh
 ```
 
-This assumes vendored Go dependencies and disables toolchain/dependency downloads:
-
-- `GOPROXY=off`
-- `GOSUMDB=off`
-- `GOTOOLCHAIN=local`
-- `GOFLAGS=-mod=vendor -p=1`
-- `CGO_CFLAGS=-O0 -g0`
-
-Expected local Go version: see `go.mod`.
-
-Keep `go.mod`, `vendor/`, and `vendor/modules.txt` in sync:
+It builds from `vendor/` with downloads off (`GOPROXY=off`, `GOSUMDB=off`,
+`GOTOOLCHAIN=local`, `GOFLAGS=-mod=vendor -p=1`). Keep `go.mod`, `vendor/`, and `vendor/modules.txt` in sync:
 
 ```bash
 go mod tidy
