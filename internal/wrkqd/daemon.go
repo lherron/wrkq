@@ -125,7 +125,7 @@ func ServeDaemon(opts DaemonOptions) error {
 		}
 		defer func() { _ = listener.Close() }()
 		httpServer.Handler = withRequestLog(mux, listenerUnix)
-		return serveHTTPWithSignals(httpServer, listener)
+		return serveHTTPWithSignals(httpServer, listener, listenerUnix)
 	}
 
 	addr := opts.Addr
@@ -143,7 +143,7 @@ func ServeDaemon(opts DaemonOptions) error {
 	}
 	defer func() { _ = listener.Close() }()
 	httpServer.Handler = withRequestLog(mux, listenerMain)
-	return serveHTTPWithSignals(httpServer, listener)
+	return serveHTTPWithSignals(httpServer, listener, listenerMain)
 }
 
 func isLoopbackListenAddr(addr string) bool {
@@ -166,7 +166,12 @@ func writePIDFile(path string) error {
 	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
 }
 
-func serveHTTPWithSignals(server *http.Server, listener net.Listener) error {
+func serveHTTPWithSignals(server *http.Server, listener net.Listener, name string) error {
+	writeHTTPLogLine(requestLogLine{
+		Level: "info", Component: "http", Event: "http.listen",
+		Data: map[string]string{"listener": name, "address": listener.Addr().String(), "transport": listener.Addr().Network()},
+		TS:   time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+	})
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- server.Serve(listener)

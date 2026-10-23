@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lherron/wrkq/internal/useragent"
+
 	"github.com/spf13/cobra"
 )
 
@@ -739,6 +741,7 @@ func newServerHealthRequest(opts *serverOptions, timeout time.Duration) (*http.C
 	if err != nil {
 		return nil, nil, err
 	}
+	req.Header.Set("User-Agent", useragent.String())
 	// A node running per-node bearer tokens rejects an absent or wrong token,
 	// so fall back to the same credential the CLI transport resolves.
 	token := opts.token

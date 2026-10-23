@@ -64,6 +64,40 @@ func TestRequestLogE2E(t *testing.T) {
 	stderrPath := filepath.Join(home, "wrkqd.err.log")
 	startE2EDaemon(t, filepath.Join(bin, "wrkqd"), addr, dbPath, catalog, home, stdoutPath, stderrPath)
 
+	// Startup and CLI health use the same attribution contract as RPC calls.
+	listen := waitForLines(t, stdoutPath, func(l e2eLine) bool { return l.Event == "http.listen" }, 1)
+	if len(listen) != 1 {
+		t.Fatalf("want exactly one listen line, got %+v", listen)
+	}
+	assertField(t, listen[0].Data["listener"], "main", "listener")
+	assertField(t, listen[0].Data["address"], addr, "address")
+	runE2ECLI(t, filepath.Join(bin, "wrkq"), addr, home, "server", "health", "--addr", addr, "--token", e2eToken)
+	health := waitForLines(t, stdoutPath, func(l e2eLine) bool {
+		return l.Event == "http.request" && l.Data["route"] == "/v1/health" && l.Data["client"] == "wrkq/e2e"
+	}, 1)
+	if len(health) != 1 {
+		t.Fatalf("want exactly one attributed CLI health line, got %+v", health)
+	}
+	assertField(t, health[0].Data["status"], float64(200), "status")
+
+	// A caller-supplied request id correlates a response with its request line.
+	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/health", nil)
+	req.Header.Set("Authorization", "Bearer "+e2eToken)
+	req.Header.Set("X-Request-ID", "health-correlation-e2e")
+	req.Header.Set("User-Agent", "correlation-probe/1")
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	correlated := waitForLines(t, stdoutPath, func(l e2eLine) bool {
+		return l.Data["client"] == "correlation-probe/1"
+	}, 1)
+	if len(correlated) != 1 {
+		t.Fatalf("want exactly one correlated request line, got %+v", correlated)
+	}
+	assertField(t, correlated[0].Data["requestId"], "health-correlation-e2e", "requestId")
+
 	// 1. One real CLI call: exactly one line for its op, full L3 shape.
 	runE2ECLI(t, filepath.Join(bin, "wrkq"), addr, home, "projects", "--json")
 	ok := waitForLines(t, stdoutPath, func(l e2eLine) bool { return l.Data["op"] == "wrkq.project.listView" }, 1)
@@ -296,8 +330,8 @@ func readLines(t *testing.T, path string, keep func(e2eLine) bool) []e2eLine {
 		if err := json.Unmarshal(sc.Bytes(), &l); err != nil {
 			t.Fatalf("stdout carries a non-JSON line %q: %v", sc.Text(), err)
 		}
-		if l.Event != "http.request" {
-			t.Fatalf("stdout carries a non-request line: %s", sc.Text())
+		if l.Event != "http.request" && l.Event != "http.listen" {
+			t.Fatalf("stdout carries an unexpected event: %s", sc.Text())
 		}
 		if keep(l) {
 			out = append(out, l)

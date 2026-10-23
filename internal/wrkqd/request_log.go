@@ -16,7 +16,8 @@ import (
 	"github.com/lherron/wrkq/internal/workrpc"
 )
 
-// One JSON line per HTTP request on stdout (logging L3; launchd routes it to
+// One JSON line per HTTP request plus an http.listen startup line on stdout
+// (logging L3; launchd routes it to
 // var/logs/wrkq/wrkqd.log, diagnostics stay on stderr in wrkqd.err.log), in the
 // `{level, component, event, data, ts}` shape acp-server's request-log.ts
 // writes. Every line carries `listener`, the matched `route` template and the
@@ -65,11 +66,11 @@ var requestLogOut io.Writer = os.Stdout
 var clientToken = regexp.MustCompile(`^([A-Za-z0-9._~+-]{1,64})/([A-Za-z0-9._~+-]{1,64})`)
 
 type requestLogLine struct {
-	Level     string          `json:"level"`
-	Component string          `json:"component"`
-	Event     string          `json:"event"`
-	Data      requestLogField `json:"data"`
-	TS        string          `json:"ts"`
+	Level     string `json:"level"`
+	Component string `json:"component"`
+	Event     string `json:"event"`
+	Data      any    `json:"data"`
+	TS        string `json:"ts"`
 }
 
 type requestLogField struct {
@@ -78,6 +79,7 @@ type requestLogField struct {
 	Route      string  `json:"route"`
 	Listener   string  `json:"listener"`
 	Client     string  `json:"client"`
+	RequestID  string  `json:"requestId,omitempty"`
 	Status     int     `json:"status"`
 	DurationMs int64   `json:"durationMs"`
 	Remote     *string `json:"remote"`
@@ -150,6 +152,7 @@ func withRequestLog(next http.Handler, listener string) http.Handler {
 			Route:      route,
 			Listener:   listener,
 			Client:     clientFromUserAgent(r.UserAgent()),
+			RequestID:  truncate(r.Header.Get("X-Request-ID")),
 			Status:     rec.status,
 			DurationMs: time.Since(start).Milliseconds(),
 			Remote:     remoteHost(r.RemoteAddr),
@@ -177,7 +180,7 @@ func withRequestLog(next http.Handler, listener string) http.Handler {
 			}
 			field.Suppressed = skipped
 		}
-		writeRequestLogLine(requestLogLine{
+		writeHTTPLogLine(requestLogLine{
 			Level:     level,
 			Component: "http",
 			Event:     "http.request",
@@ -234,7 +237,7 @@ func truncate(message string) string {
 	return message
 }
 
-func writeRequestLogLine(line requestLogLine) {
+func writeHTTPLogLine(line requestLogLine) {
 	b, err := json.Marshal(line)
 	if err != nil {
 		return

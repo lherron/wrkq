@@ -314,7 +314,11 @@ The canonical daemon runs on mini as the launchd job
 request log: one JSON `http.request` line per request (logging L3), with the
 JSON-RPC method as `op`. Successful follow-loop polls, listed in
 `sampledPollOps`, log at most once a minute per caller, with a `suppressed`
-count. Its stderr, `var/logs/wrkq/wrkqd.err.log`, holds the diagnostics. Both
+count. Startup emits an `http.listen` line with the listener name, transport
+and bound address; this also covers the optional `--unix` HTTP socket. Request
+lines carry a supplied `X-Request-ID` as `requestId` (bounded to 500 bytes).
+CLI health and status probes use the same shared `wrkq/<version>` client name
+as RPC calls. Its stderr, `var/logs/wrkq/wrkqd.err.log`, holds the diagnostics. Both
 sit under `var/logs/*/`, which is where the collective's log-rotation job
 looks. The repo's
 `launchd/com.praesidium.wrkq-server.plist` is a different, dev variant
