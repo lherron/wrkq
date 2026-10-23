@@ -28,7 +28,8 @@ import (
 // Follow loops (wrkp log --follow, wrkc monitor, wrkf watch) poll every
 // 100ms, about 10 lines a second per follower. As with acp's quiet polls,
 // a failing poll always logs; a successful one logs at most once per
-// quietPollWindow per client, remote and op, with `suppressed` counting
+// sample window (default one minute, --poll-sample-window) per client,
+// remote and op, with `suppressed` counting
 // the successes skipped since the last line, so the caller stays visible.
 
 const (
@@ -37,11 +38,12 @@ const (
 	unmatchedRoute = "unmatched"
 	// Error bodies are small; this bounds what the log lift buffers.
 	maxLiftedErrorBody = 4096
-	quietPollWindow    = time.Minute
+	// DefaultPollSampleWindow is the --poll-sample-window default.
+	DefaultPollSampleWindow = time.Minute
 )
 
 // sampledPollOps is the L3 sampled set: ops whose successes log at most once
-// per quietPollWindow. rpc.initialize is every CLI process's handshake before
+// per sample window. rpc.initialize is every CLI process's handshake before
 // its real call, which carries the same client; envelope.pendingView is the
 // hook-driven inbox poll.
 var sampledPollOps = map[string]bool{
@@ -102,18 +104,23 @@ func noteRPC(ctx context.Context, method string, rpcErr *workrpc.RPCError) {
 type quietPollKey struct{ client, remote, op string }
 
 type quietPollState struct {
-	mu   sync.Mutex
-	last map[quietPollKey]time.Time
-	skip map[quietPollKey]int
+	mu     sync.Mutex
+	window time.Duration
+	last   map[quietPollKey]time.Time
+	skip   map[quietPollKey]int
 }
 
-var quietPolls = quietPollState{last: map[quietPollKey]time.Time{}, skip: map[quietPollKey]int{}}
+var quietPolls = quietPollState{
+	window: DefaultPollSampleWindow,
+	last:   map[quietPollKey]time.Time{},
+	skip:   map[quietPollKey]int{},
+}
 
 // admit reports whether this successful poll logs, and how many it stands for.
 func (q *quietPollState) admit(key quietPollKey, now time.Time) (bool, int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if last, ok := q.last[key]; ok && now.Sub(last) < quietPollWindow {
+	if last, ok := q.last[key]; ok && now.Sub(last) < q.window {
 		q.skip[key]++
 		return false, 0
 	}

@@ -36,6 +36,9 @@ type DaemonOptions struct {
 	// shared Token.
 	NodeTokens     string
 	NodeTokensFile string
+	// PollSampleWindow overrides how often a successful sampled poll logs
+	// (request_log.go); zero keeps DefaultPollSampleWindow.
+	PollSampleWindow time.Duration
 }
 
 // ServeDaemon starts the wrkqd daemon.
@@ -102,6 +105,9 @@ func ServeDaemon(opts DaemonOptions) error {
 		rpcToken: opts.Token,
 	}
 	server.startSearchIndexer()
+	if opts.PollSampleWindow > 0 {
+		quietPolls.window = opts.PollSampleWindow
+	}
 
 	mux := http.NewServeMux()
 	server.registerRoutes(mux)

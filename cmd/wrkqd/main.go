@@ -42,6 +42,7 @@ func main() {
 	unsafeNoToken := flag.Bool("unsafe-no-token", false, "Allow non-loopback listen without a token (dev only)")
 	nodeTokens := flag.String("node-tokens", os.Getenv("WRKQD_NODE_TOKENS"), "Per-node bearer tokens (nodeId=token,nodeId=token); supersedes --token")
 	nodeTokensFile := flag.String("node-tokens-file", os.Getenv("WRKQD_NODE_TOKENS_FILE"), "File of per-node bearer tokens, one nodeId=token per line")
+	pollSampleWindow := flag.Duration("poll-sample-window", wrkqd.DefaultPollSampleWindow, "How often a successful follow-loop poll writes a request-log line")
 	// CLI standard §1: -h/--help anywhere is inert. The flag package stops at
 	// the first positional and would take "--help" as a value of a string flag,
 	// so `wrkqd foo --help` or `wrkqd -db --help` would start a daemon. Scan
@@ -54,13 +55,14 @@ func main() {
 	flag.Parse()
 
 	opts := wrkqd.DaemonOptions{
-		Addr:           *addr,
-		Unix:           *unixPath,
-		Token:          *token,
-		DBPath:         *dbPath,
-		UnsafeNoToken:  *unsafeNoToken,
-		NodeTokens:     *nodeTokens,
-		NodeTokensFile: *nodeTokensFile,
+		Addr:             *addr,
+		Unix:             *unixPath,
+		Token:            *token,
+		DBPath:           *dbPath,
+		UnsafeNoToken:    *unsafeNoToken,
+		NodeTokens:       *nodeTokens,
+		NodeTokensFile:   *nodeTokensFile,
+		PollSampleWindow: *pollSampleWindow,
 	}
 
 	if err := wrkqd.ServeDaemon(opts); err != nil {
