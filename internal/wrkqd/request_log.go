@@ -38,7 +38,10 @@ const (
 	quietPollWindow    = time.Minute
 )
 
+// rpc.initialize is every CLI process's handshake before its real call, which
+// carries the same client; it is sampled the same way.
 var quietPollMethods = map[string]bool{
+	"rpc.initialize":              true,
 	"wrkq.container.timelineView": true,
 	"wrkq.container.taskCounts":   true,
 	"wrkq.monitor.eventsView":     true,
