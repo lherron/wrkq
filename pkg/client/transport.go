@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lherron/wrkq/internal/useragent"
 	"github.com/lherron/wrkq/internal/workrpc"
 )
 
@@ -447,6 +448,7 @@ func (t *remoteTransport) roundTrip(ctx context.Context, method string, params a
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", useragent.String())
 	if t.token != "" {
 		req.Header.Set("Authorization", "Bearer "+t.token)
 	}

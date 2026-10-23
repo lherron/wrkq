@@ -106,7 +106,6 @@ func ServeDaemon(opts DaemonOptions) error {
 	server.registerRoutes(mux)
 
 	httpServer := &http.Server{
-		Handler:      mux,
 		ReadTimeout:  workrpc.HTTPResponseTimeout,
 		WriteTimeout: workrpc.HTTPResponseTimeout,
 	}
@@ -118,6 +117,7 @@ func ServeDaemon(opts DaemonOptions) error {
 			return fmt.Errorf("failed to listen on unix socket: %w", err)
 		}
 		defer func() { _ = listener.Close() }()
+		httpServer.Handler = withRequestLog(mux, listenerUnix)
 		return serveHTTPWithSignals(httpServer, listener)
 	}
 
@@ -135,6 +135,7 @@ func ServeDaemon(opts DaemonOptions) error {
 		return err
 	}
 	defer func() { _ = listener.Close() }()
+	httpServer.Handler = withRequestLog(mux, listenerMain)
 	return serveHTTPWithSignals(httpServer, listener)
 }
 

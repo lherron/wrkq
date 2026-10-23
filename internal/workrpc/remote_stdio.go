@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/lherron/wrkq/internal/useragent"
 )
 
 type remoteForwardError struct {
@@ -142,6 +144,7 @@ func forwardRemoteFrame(ctx context.Context, client *http.Client, url, token, pr
 		return Response{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", useragent.String())
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

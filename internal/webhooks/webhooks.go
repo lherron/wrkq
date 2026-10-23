@@ -16,6 +16,7 @@ import (
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/useragent"
 	"github.com/lherron/wrkq/internal/webhooksub"
 )
 
@@ -33,14 +34,6 @@ const (
 
 	CampaignPayloadSchema = "wrkq.campaign-transition.v1"
 )
-
-// Version is injected by scripts/ldflags.sh so webhook POSTs name their sender
-// (service-api §3: first-party clients send `<name>/<version>` as User-Agent).
-var Version = "dev"
-
-func userAgent() string {
-	return "wrkq/" + Version
-}
 
 // BlockerInfo represents an incomplete blocking task.
 // This matches the format used in wrkq cat --json output.
@@ -986,7 +979,7 @@ func sendWebhook(client *http.Client, endpoint string, body []byte) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", userAgent())
+	req.Header.Set("User-Agent", useragent.String())
 
 	resp, err := client.Do(req)
 	if err != nil {
