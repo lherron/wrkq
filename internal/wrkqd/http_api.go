@@ -142,7 +142,7 @@ func (s *daemonServer) handleWorkRPC(w http.ResponseWriter, r *http.Request) {
 			ID:      json.RawMessage(`null`),
 			Error:   workrpc.MapError(&workrpc.ParseError{Err: err}),
 		}
-		s.writeJSON(w, http.StatusBadRequest, resp)
+		s.writeRPCResponse(w, r, http.StatusBadRequest, req.Method, resp)
 		return
 	}
 	if len(req.ID) == 0 {
@@ -154,7 +154,7 @@ func (s *daemonServer) handleWorkRPC(w http.ResponseWriter, r *http.Request) {
 				Code:    workrpc.CodeWRKQValidation,
 			}),
 		}
-		s.writeJSON(w, http.StatusBadRequest, resp)
+		s.writeRPCResponse(w, r, http.StatusBadRequest, req.Method, resp)
 		return
 	}
 	// The rpc --stdio proxy forwards its launch principal (--principal-ref /
@@ -170,7 +170,7 @@ func (s *daemonServer) handleWorkRPC(w http.ResponseWriter, r *http.Request) {
 				Code:    workrpc.CodeWRKQValidation,
 			}),
 		}
-		s.writeJSON(w, http.StatusOK, resp)
+		s.writeRPCResponse(w, r, http.StatusOK, req.Method, resp)
 		return
 	}
 	ctx := attribution.WithCallerPrincipal(r.Context(), principalRef)
@@ -178,7 +178,14 @@ func (s *daemonServer) handleWorkRPC(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		resp = workrpc.Response{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{}`)}
 	}
-	s.writeJSON(w, http.StatusOK, resp)
+	s.writeRPCResponse(w, r, http.StatusOK, req.Method, resp)
+}
+
+// writeRPCResponse answers one /v1/rpc frame and tells the request log which
+// method it served and whether the frame failed, which HTTP 200 hides.
+func (s *daemonServer) writeRPCResponse(w http.ResponseWriter, r *http.Request, status int, method string, resp workrpc.Response) {
+	noteRPC(r.Context(), method, resp.Error)
+	s.writeJSON(w, status, resp)
 }
 
 func (s *daemonServer) resolveAttribution(r *http.Request) (attribution.Attribution, error) {

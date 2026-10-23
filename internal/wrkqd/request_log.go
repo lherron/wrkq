@@ -2,20 +2,32 @@ package wrkqd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/lherron/wrkq/internal/workrpc"
 )
 
 // One JSON line per HTTP request into wrkqd.log (logging L3), in the
 // `{level, component, event, data, ts}` shape acp-server's request-log.ts
 // writes. Every line carries `listener`, the matched `route` template and the
 // caller's `client` token. Never logged: bodies, query strings, headers; for a
-// non-2xx JSON response only the error `code` and `message` are lifted.
+// non-2xx JSON response only the error `code` and `message` are lifted. A
+// /v1/rpc line also names its `rpcMethod`, and a frame that failed inside an
+// HTTP 200 logs as a warn with the JSON-RPC error's code and message.
+//
+// Follow loops (wrkp log --follow, wrkc monitor, wrkf watch) poll every
+// 100ms, about 10 lines a second per follower. As with acp's quiet polls,
+// a failing poll always logs; a successful one logs at most once per
+// quietPollWindow per client, remote and method, with `suppressed` counting
+// the successes skipped since the last line, so the caller stays visible.
 
 const (
 	listenerMain   = "main"
@@ -23,7 +35,18 @@ const (
 	unmatchedRoute = "unmatched"
 	// Error bodies are small; this bounds what the log lift buffers.
 	maxLiftedErrorBody = 4096
+	quietPollWindow    = time.Minute
 )
+
+var quietPollMethods = map[string]bool{
+	"wrkq.container.timelineView": true,
+	"wrkq.container.taskCounts":   true,
+	"wrkq.monitor.eventsView":     true,
+	"wrkq.monitor.stateView":      true,
+	"wrkq.history.tailView":       true,
+	"wrkf.watch.events":           true,
+	"wrkf.watch.snapshot":         true,
+}
 
 var clientToken = regexp.MustCompile(`^([A-Za-z0-9._~+-]{1,64})/([A-Za-z0-9._~+-]{1,64})`)
 
@@ -44,8 +67,48 @@ type requestLogField struct {
 	Status     int     `json:"status"`
 	DurationMs int64   `json:"durationMs"`
 	Remote     *string `json:"remote"`
+	RPCMethod  string  `json:"rpcMethod,omitempty"`
+	Suppressed int     `json:"suppressed,omitempty"`
 	Code       any     `json:"code,omitempty"`
 	Message    string  `json:"message,omitempty"`
+}
+
+type rpcLogKey struct{}
+
+// rpcLogNote is filled by the /v1/rpc handler for the request log to read.
+type rpcLogNote struct {
+	method string
+	err    *workrpc.RPCError
+}
+
+func noteRPC(ctx context.Context, method string, rpcErr *workrpc.RPCError) {
+	if note, ok := ctx.Value(rpcLogKey{}).(*rpcLogNote); ok {
+		note.method, note.err = method, rpcErr
+	}
+}
+
+type quietPollKey struct{ client, remote, method string }
+
+type quietPollState struct {
+	mu   sync.Mutex
+	last map[quietPollKey]time.Time
+	skip map[quietPollKey]int
+}
+
+var quietPolls = quietPollState{last: map[quietPollKey]time.Time{}, skip: map[quietPollKey]int{}}
+
+// admit reports whether this successful poll logs, and how many it stands for.
+func (q *quietPollState) admit(key quietPollKey, now time.Time) (bool, int) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if last, ok := q.last[key]; ok && now.Sub(last) < quietPollWindow {
+		q.skip[key]++
+		return false, 0
+	}
+	skipped := q.skip[key]
+	q.last[key] = now
+	delete(q.skip, key)
+	return true, skipped
 }
 
 // withRequestLog wraps the mux. ServeMux records the matched pattern on the
@@ -53,6 +116,8 @@ type requestLogField struct {
 func withRequestLog(next http.Handler, listener string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		note := &rpcLogNote{}
+		r = r.WithContext(context.WithValue(r.Context(), rpcLogKey{}, note))
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
 
@@ -69,14 +134,29 @@ func withRequestLog(next http.Handler, listener string) http.Handler {
 			Status:     rec.status,
 			DurationMs: time.Since(start).Milliseconds(),
 			Remote:     remoteHost(r.RemoteAddr),
+			RPCMethod:  note.method,
 		}
 		level := "info"
-		if rec.status < 200 || rec.status >= 300 {
+		switch {
+		case rec.status < 200 || rec.status >= 300:
 			level = "warn"
 			if rec.status >= 500 {
 				level = "error"
 			}
 			field.Code, field.Message = liftError(rec.body.Bytes())
+		case note.err != nil:
+			level = "warn"
+			field.Code, field.Message = note.err.Code, truncate(note.err.Message)
+		case quietPollMethods[note.method]:
+			remote := ""
+			if field.Remote != nil {
+				remote = *field.Remote
+			}
+			ok, skipped := quietPolls.admit(quietPollKey{field.Client, remote, note.method}, start)
+			if !ok {
+				return
+			}
+			field.Suppressed = skipped
 		}
 		writeRequestLogLine(requestLogLine{
 			Level:     level,
@@ -125,10 +205,14 @@ func liftError(body []byte) (any, string) {
 	if record.Error != nil {
 		code, message = record.Error.Code, record.Error.Message
 	}
+	return code, truncate(message)
+}
+
+func truncate(message string) string {
 	if len(message) > 500 {
-		message = message[:500]
+		return message[:500]
 	}
-	return code, message
+	return message
 }
 
 func writeRequestLogLine(line requestLogLine) {
