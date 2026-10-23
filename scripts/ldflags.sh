@@ -24,5 +24,6 @@ done
 flags+=("-X" "github.com/lherron/wrkq/internal/wrkqd.Version=${VERSION}")
 flags+=("-X" "github.com/lherron/wrkq/internal/wrkqd.GitCommit=${REVISION}")
 flags+=("-X" "github.com/lherron/wrkq/internal/wrkqd.BuildDate=${BUILD_DATE}")
+flags+=("-X" "github.com/lherron/wrkq/internal/webhooks.Version=${VERSION}")
 
 echo "${flags[*]}"
