@@ -310,7 +310,13 @@ default.
 The canonical daemon runs on mini as the launchd job
 `com.praesidium.wrkq-server`: `wrkqd --addr 0.0.0.0:7171 --db
 /Users/lherron/.praesidium-data/wrkq/wrkq.db --node-tokens-file
-~/.config/wrkq/node-tokens`. The repo's
+~/.config/wrkq/node-tokens`. Its stdout, `var/logs/wrkq/wrkqd.log`, is the
+request log: one JSON `http.request` line per request (logging L3), with the
+JSON-RPC method as `op`. Successful follow-loop polls, listed in
+`sampledPollOps`, log at most once a minute per caller, with a `suppressed`
+count. Its stderr, `var/logs/wrkq/wrkqd.err.log`, holds the diagnostics. Both
+sit under `var/logs/*/`, which is where the collective's log-rotation job
+looks. The repo's
 `launchd/com.praesidium.wrkq-server.plist` is a different, dev variant
 (`wrkq server serve` on `127.0.0.1:7171` with token `dev`); installing it over
 mini's job would take the ledger away from every remote node.

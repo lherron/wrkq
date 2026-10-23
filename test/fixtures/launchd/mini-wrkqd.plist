@@ -36,8 +36,8 @@
   <key>ThrottleInterval</key>
   <integer>10</integer>
   <key>StandardOutPath</key>
-  <string>/Users/lherron/praesidium/var/logs/wrkqd.log</string>
+  <string>/Users/lherron/praesidium/var/logs/wrkq/wrkqd.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/lherron/praesidium/var/logs/wrkqd.log</string>
+  <string>/Users/lherron/praesidium/var/logs/wrkq/wrkqd.err.log</string>
 </dict>
 </plist>

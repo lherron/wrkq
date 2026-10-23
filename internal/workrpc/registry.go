@@ -734,7 +734,7 @@ func decodeParams(ctx context.Context, raw json.RawMessage, out any) error {
 	// The first refusal (be9e8ca) took the HRC kicker down fleet-wide; refusal
 	// returned only after every consumer was audited under a warn-only soak.
 	// The attributed log line stays so a caller broken by the refusal is
-	// diagnosable from wrkqd.log in one grep.
+	// diagnosable from wrkqd.err.log in one grep.
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {

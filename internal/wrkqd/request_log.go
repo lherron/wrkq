@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -15,18 +16,19 @@ import (
 	"github.com/lherron/wrkq/internal/workrpc"
 )
 
-// One JSON line per HTTP request into wrkqd.log (logging L3), in the
+// One JSON line per HTTP request on stdout (logging L3; launchd routes it to
+// var/logs/wrkq/wrkqd.log, diagnostics stay on stderr in wrkqd.err.log), in the
 // `{level, component, event, data, ts}` shape acp-server's request-log.ts
 // writes. Every line carries `listener`, the matched `route` template and the
 // caller's `client` token. Never logged: bodies, query strings, headers; for a
 // non-2xx JSON response only the error `code` and `message` are lifted. A
-// /v1/rpc line also names its `rpcMethod`, and a frame that failed inside an
+// /v1/rpc line also names its JSON-RPC method as `op`, and a frame that failed inside an
 // HTTP 200 logs as a warn with the JSON-RPC error's code and message.
 //
 // Follow loops (wrkp log --follow, wrkc monitor, wrkf watch) poll every
 // 100ms, about 10 lines a second per follower. As with acp's quiet polls,
 // a failing poll always logs; a successful one logs at most once per
-// quietPollWindow per client, remote and method, with `suppressed` counting
+// quietPollWindow per client, remote and op, with `suppressed` counting
 // the successes skipped since the last line, so the caller stays visible.
 
 const (
@@ -38,10 +40,13 @@ const (
 	quietPollWindow    = time.Minute
 )
 
-// rpc.initialize is every CLI process's handshake before its real call, which
-// carries the same client; it is sampled the same way.
-var quietPollMethods = map[string]bool{
+// sampledPollOps is the L3 sampled set: ops whose successes log at most once
+// per quietPollWindow. rpc.initialize is every CLI process's handshake before
+// its real call, which carries the same client; envelope.pendingView is the
+// hook-driven inbox poll.
+var sampledPollOps = map[string]bool{
 	"rpc.initialize":              true,
+	"wrkq.envelope.pendingView":   true,
 	"wrkq.container.timelineView": true,
 	"wrkq.container.taskCounts":   true,
 	"wrkq.monitor.eventsView":     true,
@@ -50,6 +55,10 @@ var quietPollMethods = map[string]bool{
 	"wrkf.watch.events":           true,
 	"wrkf.watch.snapshot":         true,
 }
+
+// requestLogOut is the process's real stdout, captured before Run points
+// os.Stdout at stderr to keep stray handler prints out of the request log.
+var requestLogOut io.Writer = os.Stdout
 
 var clientToken = regexp.MustCompile(`^([A-Za-z0-9._~+-]{1,64})/([A-Za-z0-9._~+-]{1,64})`)
 
@@ -70,7 +79,7 @@ type requestLogField struct {
 	Status     int     `json:"status"`
 	DurationMs int64   `json:"durationMs"`
 	Remote     *string `json:"remote"`
-	RPCMethod  string  `json:"rpcMethod,omitempty"`
+	Op         string  `json:"op,omitempty"`
 	Suppressed int     `json:"suppressed,omitempty"`
 	Code       any     `json:"code,omitempty"`
 	Message    string  `json:"message,omitempty"`
@@ -90,7 +99,7 @@ func noteRPC(ctx context.Context, method string, rpcErr *workrpc.RPCError) {
 	}
 }
 
-type quietPollKey struct{ client, remote, method string }
+type quietPollKey struct{ client, remote, op string }
 
 type quietPollState struct {
 	mu   sync.Mutex
@@ -137,7 +146,7 @@ func withRequestLog(next http.Handler, listener string) http.Handler {
 			Status:     rec.status,
 			DurationMs: time.Since(start).Milliseconds(),
 			Remote:     remoteHost(r.RemoteAddr),
-			RPCMethod:  note.method,
+			Op:         note.method,
 		}
 		level := "info"
 		switch {
@@ -150,7 +159,7 @@ func withRequestLog(next http.Handler, listener string) http.Handler {
 		case note.err != nil:
 			level = "warn"
 			field.Code, field.Message = note.err.Code, truncate(note.err.Message)
-		case quietPollMethods[note.method]:
+		case sampledPollOps[note.method]:
 			remote := ""
 			if field.Remote != nil {
 				remote = *field.Remote
@@ -223,9 +232,8 @@ func writeRequestLogLine(line requestLogLine) {
 	if err != nil {
 		return
 	}
-	// One write per line keeps concurrent requests from interleaving in
-	// wrkqd.log, which launchd appends both stdout and stderr to.
-	_, _ = os.Stderr.Write(append(b, '\n'))
+	// One write per line keeps concurrent requests from interleaving.
+	_, _ = requestLogOut.Write(append(b, '\n'))
 }
 
 type statusRecorder struct {
