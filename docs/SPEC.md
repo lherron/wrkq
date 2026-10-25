@@ -515,6 +515,13 @@ commands:
 | Typed task selector | `t:T-02017` |
 | Typed container selector | `c:P-00061` |
 
+A bare task number of 1–4 digits selects the highest existing numeric task ID
+ending in exactly those digits. Leading zeros count: `498` can select `T-11498`,
+while `0498` selects `T-10498` if that is the highest match. Five digits is a
+literal ID (`10498` selects `T-10498`). Missing suffixes retain the padded
+literal not-found error (`4242` → `task not found: T-04242`). Task commands,
+room references, and workflow task selectors share this server-side resolver.
+
 Globs are supported by commands that explicitly document path pattern support.
 Quote globs in shells.
 

@@ -210,24 +210,26 @@ type rowQueryer interface {
 	QueryRow(query string, args ...interface{}) *sql.Row
 }
 
-// ExpandBareTaskID expands a bare sequence number to the highest existing task
-// ID among id.TaskIDCandidates. When none exists it returns the lowest
-// candidate so the caller reports "task not found" for the literal number. It
-// returns (token, false, nil) when token is not a bare number.
+// ExpandBareTaskID resolves a bare 1-4 digit suffix to the numerically highest
+// ordinary task ID. Leading zeros preserve suffix width; five digits is literal.
+// A missing suffix returns the padded literal for the existing not-found error.
 func ExpandBareTaskID(q rowQueryer, token string) (string, bool, error) {
-	candidates, ok := id.TaskIDCandidates(token)
+	literal, ok := id.ExpandTaskID(token)
 	if !ok {
 		return token, false, nil
 	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(candidates)), ",")
-	args := make([]interface{}, len(candidates))
-	for i, c := range candidates {
-		args[i] = c
+	token = strings.TrimSpace(token)
+	if len(token) == 5 {
+		return literal, true, nil
 	}
 	var found string
-	err := q.QueryRow("SELECT id FROM tasks WHERE id IN ("+placeholders+") ORDER BY id DESC LIMIT 1", args...).Scan(&found)
+	// Match only numeric owner IDs: a named subtask may also end in digits.
+	// Numeric ordering remains correct when the sequence outgrows five digits.
+	err := q.QueryRow(`SELECT id FROM tasks
+		WHERE id LIKE ? AND substr(id, 3) NOT GLOB '*[^0-9]*'
+		ORDER BY CAST(substr(id, 3) AS INTEGER) DESC LIMIT 1`, "T-%"+token).Scan(&found)
 	if err == sql.ErrNoRows {
-		return candidates[len(candidates)-1], true, nil
+		return literal, true, nil
 	}
 	if err != nil {
 		return "", false, fmt.Errorf("database error: %w", err)
@@ -250,14 +252,15 @@ func ResolveTask(database *db.DB, selector string) (string, string, error) {
 
 	// Convenience: expand a bare sequence number ("1454") into the highest
 	// existing task ID it may name ("T-11454" over "T-01454").
-	if expanded, ok, err := ExpandBareTaskID(database, token); err != nil {
+	expanded, bare, err := ExpandBareTaskID(database, token)
+	if err != nil {
 		return "", "", err
-	} else if ok {
+	} else if bare {
 		token = expanded
 	}
 
 	// Try as friendly ID
-	if id.IsTask(token) {
+	if bare || id.IsTask(token) {
 		var uuid string
 		err := database.QueryRow("SELECT uuid FROM tasks WHERE id = ?", token).Scan(&uuid)
 		if err == nil {
