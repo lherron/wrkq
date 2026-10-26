@@ -65,6 +65,10 @@ T-10349 `08-workflows/drive.txt`).
 
 ## Gotchas
 
+- Template validation and installation reject unknown effect placeholders (including nested data) and
+  invalid literal `set_task_state` values in transition and suspension effects. Known placeholders remain
+  subject to runtime context/state checks (2026-10-26, T-11953 `08-workflows/drive.txt`).
+
 - **The workflow's closed state doesn't change the task's state.** After the workflow closed `completed`,
   `wrkq cat` still said `state: open` (2026-10-05, T-10298 `08-workflows/drive.txt`). Task state and workflow
   state are separate. Close the task yourself.

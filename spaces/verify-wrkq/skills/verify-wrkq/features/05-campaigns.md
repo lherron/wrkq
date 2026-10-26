@@ -42,6 +42,11 @@ wrkq log P-<camp1 id> --oneline
 
 ## Gotchas
 
+- Hard deletion refuses surviving external enrollments with `WRKQ_VALIDATION`, naming task IDs and paths
+  in the message and `data.members`. Both empty deletion and recursive purge refuse without mutation.
+  Unenroll first; a recursive purge selecting both the campaign and its enrolled tasks succeeds
+  (2026-10-26, T-11953 `05-campaigns/drive.txt`).
+
 - Campaign verbs take `--json` or `--output json` (both force JSON on a TTY; a non-TTY stdout gets JSON anyway).
 - An unknown `wrkq campaign <verb>` is a usage error, `unknown command "enroll" for "wrkq campaign"`, exit 2.
   `enroll` is not a verb. Enrollment is `wrkq set --campaign`.

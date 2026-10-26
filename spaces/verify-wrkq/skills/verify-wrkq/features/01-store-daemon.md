@@ -40,7 +40,8 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
   offline procedure). `migrate --status` and `--dry-run` use read-only connections and work while the daemon
   serves.
 - **Doctor.** `wrkqadm doctor [--json] [--fix]` checks the file, WAL, foreign keys, integrity, schema, root,
-  orphans, duplicate slugs, sequence drift, the attachment dir and the counts.
+  orphans, duplicate slugs, sequence drift, the attachment dir and the counts. `--fix --json` emits only JSON
+  and reports the post-repair checks (2026-10-26, T-11953 `01-store-daemon/drive.txt`).
 - **whoami.** `wrkq whoami --json` shows the locator, the mode, the principal and the scope the caller resolves.
 - **Profile.** `WRKQ_PROFILE=1 <any client verb>` adds a wall-time breakdown on stderr after the verb's own output:
   one row per wrkqd round trip (`connect`, `send`, `wait`, `read`, `total`, response bytes), then process start,
