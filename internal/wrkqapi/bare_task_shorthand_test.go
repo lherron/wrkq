@@ -3,6 +3,7 @@
 package wrkqapi
 
 import (
+	"context"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/selectors"
@@ -42,6 +43,13 @@ func TestBareTaskShorthandPrefersHighestSuffix(t *testing.T) {
 		if err != nil || friendly != want || uuid != byID[want] {
 			t.Errorf("selector %q: got (%s, %s, %v), want %s", selector, uuid, friendly, err, want)
 		}
+		// wrkq log resolves through the same suffix rule (T-11874).
+		if logUUID, kind, err := api.resolveLogResource(context.Background(), selector); err != nil || kind != "task" || logUUID != byID[want] {
+			t.Errorf("log selector %q: got (%s, %s, %v), want %s", selector, logUUID, kind, err, want)
+		}
+	}
+	if _, _, err := api.resolveLogResource(context.Background(), "4242"); err == nil || err.Error() != "task not found: 4242" {
+		t.Errorf("log missing bare number: %v", err)
 	}
 	if _, _, err := selectors.ResolveTask(api.db, "4242"); err == nil || err.Error() != "task not found: T-04242" {
 		t.Fatalf("missing bare number: %v", err)

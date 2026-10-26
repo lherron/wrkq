@@ -56,6 +56,17 @@ func (a *API) HistoryListView(ctx context.Context, p HistoryListViewParams) (*Wr
 // path-resolution branch is a PINNED divergence: legacy advertises paths in help
 // but intentionally errors today.
 func (a *API) resolveLogResource(ctx context.Context, target string) (string, string, error) {
+	// A bare task number takes the shared newest-suffix rule; a miss names the
+	// number as typed, as wrkq cat does.
+	if expanded, bare, err := selectors.ExpandBareTaskID(a.db, target); err != nil {
+		return "", "", err
+	} else if bare {
+		var uuid string
+		if err := a.db.QueryRowContext(ctx, "SELECT uuid FROM tasks WHERE id = ?", expanded).Scan(&uuid); err != nil {
+			return "", "", NewValidationError(fmt.Sprintf("task not found: %s", target), nil)
+		}
+		return uuid, "task", nil
+	}
 	if strings.HasPrefix(target, "PR-") {
 		var uuid string
 		if err := a.db.QueryRowContext(ctx, "SELECT uuid FROM promises WHERE id = ?", target).Scan(&uuid); err != nil {
