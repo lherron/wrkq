@@ -236,11 +236,13 @@ func TestResolveSuspensionMixedEffectsDeliversOnlyBuiltin(t *testing.T) {
 	}
 }
 
+// The close outcome (done) is not a task state; the dynamic payload passes
+// registration but still exercises delivery failure and partial commit reporting.
 func TestResolveSuspensionBuiltinEffectFailureReturnsCommittedPartialResult(t *testing.T) {
 	document := strings.Replace(suspendOutcomeTemplate,
 		`"id": "suspend-outcome-test"`,
 		`"id": "suspend-outcome-invalid-builtin-test"`, 1)
-	document = strings.Replace(document, `"state": "completed"`, `"state": "not-a-task-state"`, 1)
+	document = strings.Replace(document, `"state": "completed"`, `"state": "{outcome}"`, 1)
 	svc, taskUUID, suspended := parkForResolveWithTemplate(t, "suspend-outcome-invalid-builtin-test", document)
 
 	result, err := svc.ResolveSuspension(ResolveSuspensionParams{

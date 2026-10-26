@@ -242,7 +242,7 @@ const verifyLaunchUnresolvedTokenTemplate = `{
             {
               "kind": "verify_launch",
               "role": "tester",
-              "semanticKey": "verify-launch:{taskUuid}:{revision}:{doesNotExist}",
+              "semanticKey": "verify-launch:{taskUuid}:{revision}:{runId}",
               "data": { "sourceImplementActionRunId": "{runId}" }
             }
           ]
@@ -252,6 +252,8 @@ const verifyLaunchUnresolvedTokenTemplate = `{
   ]
 }`
 
+// Unknown tokens now fail registration. A known token with missing runtime
+// context must still fail atomically when the transition renders it.
 func TestTransitionEffectUnresolvedTokenFailsAtomically(t *testing.T) {
 	svc, taskUUID, _ := setupGapClosureFixtureWithTemplate(t, "verify_launch_unresolved_token_test", verifyLaunchUnresolvedTokenTemplate)
 
@@ -261,10 +263,10 @@ func TestTransitionEffectUnresolvedTokenFailsAtomically(t *testing.T) {
 		Role:           "implementer",
 		ExpectRevision: &rev0,
 		IdempotencyKey: "verify-launch-unresolved",
-		RunID:          "run_bad_token",
+		RunID:          "", // Supported token, missing runtime context.
 	})
-	if err == nil || !strings.Contains(err.Error(), "{doesNotExist}") {
-		t.Fatalf("Transition error = %v; want an atomic failure naming the unresolved token {doesNotExist}", err)
+	if err == nil || !strings.Contains(err.Error(), "{runId}") {
+		t.Fatalf("Transition error = %v; want an atomic failure naming the unresolved runtime token {runId}", err)
 	}
 	inst, err := svc.LatestInstance(taskUUID)
 	if err != nil {

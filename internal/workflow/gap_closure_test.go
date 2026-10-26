@@ -96,7 +96,7 @@ const gapInvalidBuiltinEffectTemplate = `{
               "kind": "set_task_state",
               "role": "system",
               "semanticKey": "task-state:{taskUuid}:{revision}:invalid",
-              "data": { "state": "not-a-task-state" }
+              "data": { "state": "{outcome}" }
             }
           ]
         }
@@ -307,6 +307,7 @@ func TestTransitionIdempotentReplayDrainsPendingBuiltinEffect(t *testing.T) {
 	}
 }
 
+// A supported token can still produce an invalid state at delivery (approved).
 func TestTransitionBuiltinEffectFailureIsVisible(t *testing.T) {
 	svc, taskUUID, _ := setupGapClosureFixtureWithTemplate(t, "gap_invalid_builtin_effect_test", gapInvalidBuiltinEffectTemplate)
 
