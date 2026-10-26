@@ -43,6 +43,8 @@ func TestNormalizeCompat(t *testing.T) {
 		{name: "bare slug", value: "clod", want: "agent:clod"},
 		{name: "canonical", value: "agent:clod", want: "agent:clod"},
 		{name: "full scope reduces", value: "agent:clod:project:wrkq", want: "agent:clod"},
+		{name: "task-depth scope reduces", value: "agent:cody:project:wrkq:task:T-05397", want: "agent:cody"},
+		{name: "role-depth scope reduces", value: "agent:cody:project:wrkq:task:T-05397:role:implementer", want: "agent:cody"},
 		{name: "invalid bare rejected", value: "clod/bad", wantErr: true},
 	}
 
@@ -59,152 +61,104 @@ func TestNormalizeCompat(t *testing.T) {
 	}
 }
 
-func TestNormalizeCanonicalReducesFullScopeRef(t *testing.T) {
-	for _, input := range []string{
-		"agent:cody:project:wrkq",
-		"agent:cody:project:wrkq:task:T-05397",
-		"agent:cody:project:wrkq:task:T-05397:role:implementer",
-	} {
-		got, err := NormalizeCanonical(input)
-		if err != nil {
-			t.Fatalf("NormalizeCanonical(%q) failed: %v", input, err)
-		}
-		if got != "agent:cody" {
-			t.Fatalf("NormalizeCanonical(%q) = %q, want agent:cody", input, got)
-		}
-	}
-}
+// TestPrincipalResolvesFromHighestRankedSource is the principal precedence
+// ladder: --principal-ref, --as, the product principal env, the resolved
+// scope, then config default_principal_ref. Each row is one rung winning over
+// every lower rung that is also set; ScopeRef always comes from the resolved
+// scope, whichever rung supplied the principal.
+//
+// rewrite-held (§1): the caller-visible form of this table is
+// `wrkq whoami --json` argv (principal + scope_ref per row, with
+// --as/--principal-ref flags, WRKQ_PRINCIPAL_REF, AGENT_SCOPE_REF and a config
+// default_principal_ref). That command lives in internal/rpccli, which this
+// package cannot import, so the ladder stays here until that surface table
+// exists.
+func TestPrincipalResolvesFromHighestRankedSource(t *testing.T) {
+	projectScope := &scope.ResolvedScope{AgentID: "scope-agent", ProjectID: "wrkq"}
+	taskScope := &scope.ResolvedScope{AgentID: "scope-agent", ProjectID: "wrkq", TaskID: "T-05423"}
+	cfg := &config.Config{DefaultPrincipalRef: "agent:config-principal"}
 
-func TestDeriveFromScope(t *testing.T) {
-	got, err := DeriveFromScope(scope.ResolvedScope{
-		AgentID:   "cody",
-		ProjectID: "wrkq",
-		TaskID:    "primary",
-	})
-	if err != nil {
-		t.Fatalf("DeriveFromScope failed: %v", err)
-	}
-	if got != "agent:cody" {
-		t.Fatalf("DeriveFromScope = %q, want agent:cody", got)
-	}
-}
-
-func TestResolvePrecedence(t *testing.T) {
-	t.Setenv(PrincipalEnv, "agent:env-principal")
-	t.Setenv("WRKQ_ACTOR", "compat-actor")
-	t.Setenv("WRKQ_ACTOR_ID", "A-99999")
-
-	cmd := &cobra.Command{}
-	cmd.Flags().String("principal-ref", "", "principal")
-	cmd.Flags().String("as", "", "principal")
-	if err := cmd.ParseFlags([]string{"--as", "agent:flag-principal"}); err != nil {
-		t.Fatalf("ParseFlags failed: %v", err)
-	}
-
-	attr, err := Resolve(ResolveOptions{
-		Command: cmd,
-		ResolvedScope: &scope.ResolvedScope{
-			AgentID:   "scope-agent",
-			ProjectID: "wrkq",
+	tests := []struct {
+		name          string
+		envNames      []string // nil means Resolve (WRKQ_PRINCIPAL_REF)
+		env           map[string]string
+		flags         []string
+		scope         *scope.ResolvedScope
+		wantPrincipal string
+		wantScopeRef  string
+	}{
+		{
+			name: "--as beats env, scope and config; legacy actor env ignored",
+			env: map[string]string{
+				PrincipalEnv:    "agent:env-principal",
+				"WRKQ_ACTOR":    "compat-actor",
+				"WRKQ_ACTOR_ID": "A-99999",
+			},
+			flags:         []string{"--as", "agent:flag-principal"},
+			scope:         projectScope,
+			wantPrincipal: "agent:flag-principal",
+			wantScopeRef:  "agent:scope-agent:project:wrkq",
 		},
-		Config: &config.Config{DefaultPrincipalRef: "agent:config-principal"},
-	})
-	if err != nil {
-		t.Fatalf("Resolve failed: %v", err)
-	}
-	if attr.PrincipalRef != "agent:flag-principal" {
-		t.Fatalf("PrincipalRef = %q, want agent:flag-principal", attr.PrincipalRef)
-	}
-	if attr.ScopeRef != "agent:scope-agent:project:wrkq" {
-		t.Fatalf("ScopeRef = %q, want full scope", attr.ScopeRef)
-	}
-}
-
-func TestResolvePrincipalEnvOutranksActorEnv(t *testing.T) {
-	t.Setenv(PrincipalEnv, "agent:principal-env")
-	t.Setenv("WRKQ_ACTOR", "actor-env")
-
-	attr, err := Resolve(ResolveOptions{})
-	if err != nil {
-		t.Fatalf("Resolve failed: %v", err)
-	}
-	if attr.PrincipalRef != "agent:principal-env" {
-		t.Fatalf("PrincipalRef = %q, want agent:principal-env", attr.PrincipalRef)
-	}
-}
-
-func TestResolveScopeOutranksConfigDefaultPrincipal(t *testing.T) {
-	attr, err := Resolve(ResolveOptions{
-		ResolvedScope: &scope.ResolvedScope{
-			AgentID:   "scope-agent",
-			ProjectID: "wrkq",
+		{
+			name:          "--principal-ref full scope reduces and beats product env",
+			envNames:      []string{"WRKF_PRINCIPAL_REF"},
+			env:           map[string]string{"WRKF_PRINCIPAL_REF": "agent:env-principal"},
+			flags:         []string{"--principal-ref", "agent:flag-principal:project:wrkq"},
+			scope:         projectScope,
+			wantPrincipal: "agent:flag-principal",
+			wantScopeRef:  "agent:scope-agent:project:wrkq",
 		},
-		Config: &config.Config{DefaultPrincipalRef: "agent:config-principal"},
-	})
-	if err != nil {
-		t.Fatalf("Resolve failed: %v", err)
-	}
-	if attr.PrincipalRef != "agent:scope-agent" {
-		t.Fatalf("PrincipalRef = %q, want agent:scope-agent", attr.PrincipalRef)
-	}
-	if attr.ScopeRef != "agent:scope-agent:project:wrkq" {
-		t.Fatalf("ScopeRef = %q, want full scope", attr.ScopeRef)
-	}
-}
-
-func TestResolveWithPrincipalEnvsProductEnvOutranksScope(t *testing.T) {
-	t.Setenv("WRKF_PRINCIPAL_REF", "agent:env-principal")
-
-	attr, err := ResolveWithPrincipalEnvs(ResolveOptions{
-		ResolvedScope: &scope.ResolvedScope{
-			AgentID:   "scope-agent",
-			ProjectID: "wrkq",
-			TaskID:    "T-05423",
+		{
+			name:          "product env beats scope and config; scope ref keeps task depth",
+			envNames:      []string{"WRKF_PRINCIPAL_REF"},
+			env:           map[string]string{"WRKF_PRINCIPAL_REF": "agent:env-principal", "WRKQ_ACTOR": "actor-env"},
+			scope:         taskScope,
+			wantPrincipal: "agent:env-principal",
+			wantScopeRef:  "agent:scope-agent:project:wrkq:task:T-05423",
 		},
-		Config: &config.Config{DefaultPrincipalRef: "agent:config-principal"},
-	}, "WRKF_PRINCIPAL_REF")
-	if err != nil {
-		t.Fatalf("ResolveWithPrincipalEnvs failed: %v", err)
-	}
-	if attr.PrincipalRef != "agent:env-principal" {
-		t.Fatalf("PrincipalRef = %q, want agent:env-principal", attr.PrincipalRef)
-	}
-	if attr.ScopeRef != "agent:scope-agent:project:wrkq:task:T-05423" {
-		t.Fatalf("ScopeRef = %q, want full scope", attr.ScopeRef)
-	}
-}
-
-func TestResolveWithPrincipalEnvsScopeOutranksConfig(t *testing.T) {
-	attr, err := ResolveWithPrincipalEnvs(ResolveOptions{
-		ResolvedScope: &scope.ResolvedScope{AgentID: "cody", ProjectID: "wrkq"},
-		Config:        &config.Config{DefaultPrincipalRef: "agent:config-principal"},
-	}, "WRKF_PRINCIPAL_REF")
-	if err != nil {
-		t.Fatalf("ResolveWithPrincipalEnvs failed: %v", err)
-	}
-	if attr.PrincipalRef != "agent:cody" {
-		t.Fatalf("PrincipalRef = %q, want agent:cody", attr.PrincipalRef)
-	}
-}
-
-func TestResolveWithPrincipalEnvsFlagsOutrankProductEnv(t *testing.T) {
-	t.Setenv("WRKF_PRINCIPAL_REF", "agent:env-principal")
-	cmd := &cobra.Command{}
-	cmd.Flags().String("principal-ref", "", "principal")
-	cmd.Flags().String("as", "", "principal")
-	if err := cmd.ParseFlags([]string{"--principal-ref", "agent:flag-principal:project:wrkq"}); err != nil {
-		t.Fatalf("ParseFlags failed: %v", err)
+		{
+			name:          "scope agent beats config default",
+			scope:         taskScope,
+			wantPrincipal: "agent:scope-agent",
+			wantScopeRef:  "agent:scope-agent:project:wrkq:task:T-05423",
+		},
+		{
+			name:          "config default when nothing else is set",
+			wantPrincipal: "agent:config-principal",
+			wantScopeRef:  "",
+		},
 	}
 
-	attr, err := ResolveWithPrincipalEnvs(ResolveOptions{
-		Command:       cmd,
-		ResolvedScope: &scope.ResolvedScope{AgentID: "scope-agent", ProjectID: "wrkq"},
-	}, "WRKF_PRINCIPAL_REF")
-	if err != nil {
-		t.Fatalf("ResolveWithPrincipalEnvs failed: %v", err)
-	}
-	if attr.PrincipalRef != "agent:flag-principal" {
-		t.Fatalf("PrincipalRef = %q, want agent:flag-principal", attr.PrincipalRef)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			cmd := &cobra.Command{}
+			cmd.Flags().String("principal-ref", "", "principal")
+			cmd.Flags().String("as", "", "principal")
+			if err := cmd.ParseFlags(tt.flags); err != nil {
+				t.Fatalf("ParseFlags failed: %v", err)
+			}
+			opts := ResolveOptions{Command: cmd, ResolvedScope: tt.scope, Config: cfg}
+
+			var attr Attribution
+			var err error
+			if tt.envNames == nil {
+				attr, err = Resolve(opts)
+			} else {
+				attr, err = ResolveWithPrincipalEnvs(opts, tt.envNames...)
+			}
+			if err != nil {
+				t.Fatalf("resolve failed: %v", err)
+			}
+			if attr.PrincipalRef != tt.wantPrincipal {
+				t.Fatalf("PrincipalRef = %q, want %q", attr.PrincipalRef, tt.wantPrincipal)
+			}
+			if attr.ScopeRef != tt.wantScopeRef {
+				t.Fatalf("ScopeRef = %q, want %q", attr.ScopeRef, tt.wantScopeRef)
+			}
+		})
 	}
 }
 
@@ -218,24 +172,28 @@ func TestResolveNoInputFailsWithPrincipalHint(t *testing.T) {
 	}
 }
 
-func TestResolveIgnoresLegacyActorSources(t *testing.T) {
+func TestLegacyActorEnvAloneLeavesNoPrincipalConfigured(t *testing.T) {
 	t.Setenv("WRKQ_ACTOR", "legacy-actor")
 	t.Setenv("WRKQ_ACTOR_ID", "A-00001")
 
 	_, err := Resolve(ResolveOptions{Config: &config.Config{}})
-	if err == nil {
-		t.Fatal("expected legacy-only actor sources to be ignored")
+	if !IsNoPrincipalConfigured(err) {
+		t.Fatalf("legacy-only actor sources must leave no principal configured, got %v", err)
 	}
 }
 
-func TestResolveRejectsBareAs(t *testing.T) {
+func TestBareAsIsRejectedWithAgentPrefixHint(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("as", "", "principal")
 	if err := cmd.ParseFlags([]string{"--as", "calchas"}); err != nil {
 		t.Fatalf("ParseFlags failed: %v", err)
 	}
-	if _, err := Resolve(ResolveOptions{Command: cmd}); err == nil {
+	_, err := Resolve(ResolveOptions{Command: cmd})
+	if err == nil {
 		t.Fatal("expected bare --as to be rejected")
+	}
+	if got := err.Error(); !containsAll(got, "missing agent: prefix", "use agent:calchas") {
+		t.Fatalf("bare --as error %q does not give the agent: prefix hint", got)
 	}
 }
 

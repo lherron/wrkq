@@ -65,6 +65,12 @@ See [spec](docs/spec.md) for the full specification.
 External links are ignored: https://example.com and mailto:ops@example.com.
 Pure anchors are ignored: [jump](#section).
 
+External markdown link targets are skipped too:
+- [Website](https://example.com)
+- [Secure](https://secure.example.org/path/page)
+- [Mail](mailto:ops@example.com)
+- [HTTP plain](http://legacy.example.com/api)
+
 A backticked path: ` + "`internal/search/search.go`" + `
 `
 	docPath := "AGENTS.md"
@@ -143,29 +149,3 @@ Dead backtick: ` + "`internal/nope/missing.go`" + `
 // ---------------------------------------------------------------------------
 // Test 3: skip-external — http(s), mailto, pure #anchor → zero violations
 // ---------------------------------------------------------------------------
-
-func TestCheck_SkipExternal(t *testing.T) {
-	root := t.TempDir()
-
-	docContent := `# External only
-
-- [Website](https://example.com)
-- [Secure](https://secure.example.org/path/page)
-- [Mail](mailto:ops@example.com)
-- [Anchor only](#section-heading)
-- [HTTP plain](http://legacy.example.com/api)
-`
-	docPath := "docs/external.md"
-	writeFile(t, filepath.Join(root, docPath), docContent)
-
-	violations, err := doclink.Check(root, []string{docPath})
-	if err != nil {
-		t.Fatalf("Check: unexpected error: %v", err)
-	}
-	if len(violations) != 0 {
-		t.Errorf("skip-external: expected 0 violations, got %d:", len(violations))
-		for _, v := range violations {
-			t.Errorf("  %+v", v)
-		}
-	}
-}

@@ -7,78 +7,58 @@ import (
 	"time"
 )
 
-func TestSequentialExecution(t *testing.T) {
-	items := []string{"a", "b", "c", "d", "e"}
-	executed := []string{}
-	var mu sync.Mutex
-
-	op := &Operation{
-		Jobs:            1,
-		ContinueOnError: false,
+// TestEveryItemRunsOnceAtAnyJobCount: Execute runs each item exactly once and
+// counts it as a success whether it runs sequentially (Jobs=1, input order
+// kept), on a worker pool (Jobs=4), or on an auto-sized pool (Jobs=0 means
+// NumCPU workers; zero workers would hang or run nothing).
+func TestEveryItemRunsOnceAtAnyJobCount(t *testing.T) {
+	tests := []struct {
+		name        string
+		jobs        int
+		items       []string
+		wantOrdered bool
+	}{
+		{name: "sequential keeps input order", jobs: 1, items: []string{"a", "b", "c", "d", "e"}, wantOrdered: true},
+		{name: "parallel worker pool", jobs: 4, items: []string{"a", "b", "c", "d", "e", "f", "g", "h"}},
+		{name: "jobs=0 auto-sizes to NumCPU", jobs: 0, items: []string{"a", "b", "c", "d"}},
 	}
 
-	fn := func(item string) error {
-		mu.Lock()
-		executed = append(executed, item)
-		mu.Unlock()
-		return nil
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mu sync.Mutex
+			executed := []string{}
+			fn := func(item string) error {
+				mu.Lock()
+				executed = append(executed, item)
+				mu.Unlock()
+				if tt.jobs != 1 {
+					time.Sleep(10 * time.Millisecond) // overlap the workers
+				}
+				return nil
+			}
 
-	result := op.Execute(items, fn)
+			result := (&Operation{Jobs: tt.jobs}).Execute(tt.items, fn)
 
-	if result.TotalItems != 5 {
-		t.Errorf("Expected 5 total items, got %d", result.TotalItems)
-	}
-	if result.Succeeded != 5 {
-		t.Errorf("Expected 5 successes, got %d", result.Succeeded)
-	}
-	if result.Failed != 0 {
-		t.Errorf("Expected 0 failures, got %d", result.Failed)
-	}
-
-	// Check order is preserved
-	for i, item := range items {
-		if executed[i] != item {
-			t.Errorf("Order not preserved: expected %s at index %d, got %s", item, i, executed[i])
-		}
-	}
-}
-
-func TestParallelExecution(t *testing.T) {
-	items := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
-	executedMap := make(map[string]bool)
-	var mu sync.Mutex
-
-	op := &Operation{
-		Jobs:            4,
-		ContinueOnError: false,
-	}
-
-	fn := func(item string) error {
-		mu.Lock()
-		executedMap[item] = true
-		mu.Unlock()
-		time.Sleep(10 * time.Millisecond) // Simulate work
-		return nil
-	}
-
-	result := op.Execute(items, fn)
-
-	if result.TotalItems != 8 {
-		t.Errorf("Expected 8 total items, got %d", result.TotalItems)
-	}
-	if result.Succeeded != 8 {
-		t.Errorf("Expected 8 successes, got %d", result.Succeeded)
-	}
-	if result.Failed != 0 {
-		t.Errorf("Expected 0 failures, got %d", result.Failed)
-	}
-
-	// Check all items were executed
-	for _, item := range items {
-		if !executedMap[item] {
-			t.Errorf("Item %s was not executed", item)
-		}
+			n := len(tt.items)
+			if result.TotalItems != n || result.Succeeded != n || result.Failed != 0 {
+				t.Fatalf("result = total %d / ok %d / failed %d, want %d / %d / 0", result.TotalItems, result.Succeeded, result.Failed, n, n)
+			}
+			if len(executed) != n {
+				t.Fatalf("executed %d items (%v), want each of %d exactly once", len(executed), executed, n)
+			}
+			seen := map[string]int{}
+			for _, item := range executed {
+				seen[item]++
+			}
+			for i, item := range tt.items {
+				if seen[item] != 1 {
+					t.Errorf("item %s ran %d times, want 1", item, seen[item])
+				}
+				if tt.wantOrdered && executed[i] != item {
+					t.Errorf("order not preserved: index %d = %s, want %s", i, executed[i], item)
+				}
+			}
+		})
 	}
 }
 
@@ -192,44 +172,5 @@ func TestExitCode(t *testing.T) {
 				t.Errorf("Expected exit code %d, got %d", tt.expected, code)
 			}
 		})
-	}
-}
-
-func TestEmptyItems(t *testing.T) {
-	items := []string{}
-
-	op := &Operation{
-		Jobs: 4,
-	}
-
-	fn := func(item string) error {
-		return nil
-	}
-
-	result := op.Execute(items, fn)
-
-	if result.TotalItems != 0 {
-		t.Errorf("Expected 0 total items, got %d", result.TotalItems)
-	}
-	if result.Succeeded != 0 {
-		t.Errorf("Expected 0 successes, got %d", result.Succeeded)
-	}
-}
-
-func TestAutoCPUDetection(t *testing.T) {
-	items := []string{"a", "b", "c", "d"}
-
-	op := &Operation{
-		Jobs: 0, // Should auto-detect
-	}
-
-	fn := func(item string) error {
-		return nil
-	}
-
-	result := op.Execute(items, fn)
-
-	if result.Succeeded != 4 {
-		t.Errorf("Expected 4 successes, got %d", result.Succeeded)
 	}
 }

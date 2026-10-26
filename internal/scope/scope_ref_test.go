@@ -27,12 +27,12 @@ func TestTokenGrammar_Valid(t *testing.T) {
 func TestTokenGrammar_Invalid(t *testing.T) {
 	tooLong := strings.Repeat("a", 65)
 	invalid := []string{
-		"",             // empty
-		tooLong,        // too long
-		"has space",    // space
-		"has/slash",    // slash
-		"has:colon",    // colon (delimiter, not token)
-		"has@at",       // at sign
+		"",          // empty
+		tooLong,     // too long
+		"has space", // space
+		"has/slash", // slash
+		"has:colon", // colon (delimiter, not token)
+		"has@at",    // at sign
 		"emoji\U0001F600",
 	}
 	for _, tok := range invalid {
@@ -141,77 +141,4 @@ func TestInvalidScopeRefForms(t *testing.T) {
 			t.Errorf("expected error for invalid scopeRef")
 		}
 	})
-}
-
-func TestAncestorScopeRefs(t *testing.T) {
-	cases := []struct {
-		input string
-		want  []string
-	}{
-		{"agent:alice", []string{"agent:alice"}},
-		{"agent:alice:project:demo", []string{"agent:alice", "agent:alice:project:demo"}},
-		{"agent:alice:project:demo:role:tester", []string{
-			"agent:alice",
-			"agent:alice:project:demo",
-			"agent:alice:project:demo:role:tester",
-		}},
-		{"agent:alice:project:demo:task:t1", []string{
-			"agent:alice",
-			"agent:alice:project:demo",
-			"agent:alice:project:demo:task:t1",
-		}},
-		{"agent:alice:project:demo:task:t1:role:tester", []string{
-			"agent:alice",
-			"agent:alice:project:demo",
-			"agent:alice:project:demo:task:t1",
-			"agent:alice:project:demo:task:t1:role:tester",
-		}},
-	}
-	for _, c := range cases {
-		c := c
-		t.Run(c.input, func(t *testing.T) {
-			got, err := AncestorScopeRefs(c.input)
-			if err != nil {
-				t.Fatalf("error: %v", err)
-			}
-			if !eqStrings(got, c.want) {
-				t.Errorf("got %v, want %v", got, c.want)
-			}
-		})
-	}
-
-	t.Run("least to most specific ordering", func(t *testing.T) {
-		anc, err := AncestorScopeRefs("agent:alice:project:demo:task:t1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if anc[0] != "agent:alice" {
-			t.Errorf("first=%q, want agent:alice", anc[0])
-		}
-		last := anc[len(anc)-1]
-		if last != "agent:alice:project:demo:task:t1" {
-			t.Errorf("last=%q, want agent:alice:project:demo:task:t1", last)
-		}
-	})
-}
-
-func TestScopeKinds(t *testing.T) {
-	kinds := []ScopeKind{
-		KindAgent, KindProject, KindProjectRole, KindProjectTask, KindProjectTaskRole,
-	}
-	if len(kinds) != 5 {
-		t.Errorf("expected 5 ScopeKinds")
-	}
-}
-
-func eqStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

@@ -17,6 +17,7 @@
 package surfaceguard_test
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -283,34 +284,52 @@ func TestCheck_MalformedArchException_Flagged(t *testing.T) {
 
 // ─── Test 6: negative evidence — docs-only reference does NOT count ───────────
 
-// TestCheck_DocsOnlyReference_NotEvidence verifies that a plain-text or Markdown
-// reference to a method name does NOT satisfy the evidence predicate.
-// CollectEvidence must not include the docs_only.md file output in the evidence set.
-func TestCheck_DocsOnlyReference_NotEvidence(t *testing.T) {
-	// CollectEvidence is NOT designed to accept docs files — it only takes
-	// *_test.go and smoke-*.sh. Verify that passing no evidence files produces
-	// an empty set (docs file is intentionally NOT passed as a test file or smoke file).
-	evidenceSet, err := surfaceguard.CollectEvidence(nil, nil)
+// TestCheck_NonCodeReference_NotEvidence: a method named only in prose — a
+// comment in a *_test.go, a comment line in a smoke script — is not evidence,
+// so the new method is still flagged. Only a Go string literal or a
+// non-comment smoke line counts (the two _Passes tests above).
+//
+// Docs files (docs_only.md) are kept out of evidence one level up:
+// cmd/surface-guard only hands CollectEvidence *_test.go files and
+// test/smoke-*.sh scripts. That selection has no test (cmd/surface-guard is
+// outside this package); see the apply notes.
+func TestCheck_NonCodeReference_NotEvidence(t *testing.T) {
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "comment_only_test.go")
+	if err := os.WriteFile(testFile, []byte(`package fixture
+
+// wrkf.test.uncovered is described here but never called.
+/* wrkf.test.uncovered in a block comment */
+func helper() {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	smokeFile := filepath.Join(dir, "smoke-comment-only.sh")
+	if err := os.WriteFile(smokeFile, []byte(`#!/usr/bin/env bash
+# wrkf.test.uncovered is the endpoint under test
+    # indented: wrkf.test.uncovered
+echo ok
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	evidenceSet, err := surfaceguard.CollectEvidence([]string{testFile}, []string{smokeFile})
 	if err != nil {
-		t.Fatalf("CollectEvidence(nil, nil): %v", err)
+		t.Fatalf("CollectEvidence: %v", err)
 	}
 	if evidenceSet["wrkf.test.uncovered"] {
-		t.Error("docs-only reference must not appear in evidence set")
+		t.Fatal("a comment-only mention must not count as evidence")
 	}
 
-	// Cross-check: with the docs file forcibly included (wrong type), the guard still fires.
-	// We pass no evidence → Check must flag the dummy.
-	baseline := miniBaseline()
 	dummy := dummyRegistration()
-	registrations := append(baselineRegistrations(), dummy)
-
-	result, err := surfaceguard.Check(registrations, baseline, evidenceSet)
+	result, err := surfaceguard.Check(append(baselineRegistrations(), dummy), miniBaseline(), evidenceSet)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	if len(result.Violations) == 0 {
-		t.Error("docs-only reference must not satisfy the guard — expected ≥1 violation")
+	if len(result.Violations) != 1 || result.Violations[0].Method != dummy.Method {
+		t.Fatalf("expected exactly the comment-only method flagged, got %+v", result.Violations)
 	}
+	checkViolationConformance(t, 0, result.Violations[0], dummy.Method)
 }
 
 // ─── Test 7: baseline-update safety ──────────────────────────────────────────
@@ -487,31 +506,3 @@ func TestExtractRegistrations_ParsesMalformedException(t *testing.T) {
 }
 
 // ─── Test: CollectEvidence discriminates literals vs comments ─────────────────
-
-// TestCollectEvidence_LiteralInTestFile_Found verifies that a Go string literal
-// in a *_test.go file is detected and comment text in the same file is not double-counted.
-func TestCollectEvidence_LiteralInTestFile_Found(t *testing.T) {
-	testFixture := filepath.Join("testdata", "evidence", "contract_test.go")
-	evidenceSet, err := surfaceguard.CollectEvidence([]string{testFixture}, nil)
-	if err != nil {
-		t.Fatalf("CollectEvidence: %v", err)
-	}
-	if !evidenceSet["wrkf.test.uncovered"] {
-		t.Error("expected 'wrkf.test.uncovered' to be found as a string literal in contract_test.go")
-	}
-}
-
-// TestCollectEvidence_CommentInSmokeScript_NotEvidence verifies that a comment line
-// in a smoke script does NOT contribute to the evidence set; only non-comment lines count.
-// The smoke fixture has the method in BOTH a comment and a non-comment line.
-// CollectEvidence must find it (from the non-comment line) but a comment-only fixture must not.
-func TestCollectEvidence_SmokeScript_NonCommentLine_Found(t *testing.T) {
-	smokeFixture := filepath.Join("testdata", "evidence", "smoke-rpc-fixture.sh")
-	evidenceSet, err := surfaceguard.CollectEvidence(nil, []string{smokeFixture})
-	if err != nil {
-		t.Fatalf("CollectEvidence: %v", err)
-	}
-	if !evidenceSet["wrkf.test.uncovered"] {
-		t.Error("expected 'wrkf.test.uncovered' to be found in non-comment line of smoke script")
-	}
-}

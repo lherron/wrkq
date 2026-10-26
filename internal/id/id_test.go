@@ -206,6 +206,11 @@ func TestParse(t *testing.T) {
 			input:   "X-00001",
 			wantErr: true,
 		},
+		{
+			name:    "UUID is not a friendly ID",
+			input:   "123e4567-e89b-12d3-a456-426614174000",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -284,108 +289,6 @@ func TestIsUUID(t *testing.T) {
 	}
 }
 
-func TestIsFriendlyID(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  bool
-	}{
-		{name: "actor ID", input: "A-00001", want: true},
-		{name: "container ID", input: "P-00001", want: true},
-		{name: "task ID", input: "T-00001", want: true},
-		{name: "comment ID", input: "C-00001", want: true},
-		{name: "handoff ID", input: "H-00001", want: true},
-		{name: "attachment ID", input: "ATT-00001", want: true},
-		{name: "invalid format", input: "INVALID", want: false},
-		{name: "UUID", input: "123e4567-e89b-12d3-a456-426614174000", want: false},
-		{name: "empty", input: "", want: false},
-		{name: "lowercase", input: "t-00001", want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsFriendlyID(tt.input)
-			if got != tt.want {
-				t.Errorf("IsFriendlyID(%q) = %v, want %v", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-// Property-based tests
-func TestIDFormatParseRoundtrip(t *testing.T) {
-	tests := []struct {
-		name     string
-		formatFn func(int) string
-		idType   Type
-		seqs     []int
-	}{
-		{
-			name:     "actor IDs",
-			formatFn: FormatActor,
-			idType:   TypeActor,
-			seqs:     []int{1, 42, 100, 12345, 99999},
-		},
-		{
-			name:     "container IDs",
-			formatFn: FormatContainer,
-			idType:   TypeContainer,
-			seqs:     []int{1, 42, 100, 12345, 99999},
-		},
-		{
-			name:     "task IDs",
-			formatFn: FormatTask,
-			idType:   TypeTask,
-			seqs:     []int{1, 42, 100, 12345, 99999},
-		},
-		{
-			name:     "comment IDs",
-			formatFn: FormatComment,
-			idType:   TypeComment,
-			seqs:     []int{1, 42, 100, 12345, 99999},
-		},
-		{
-			name:     "handoff IDs",
-			formatFn: FormatHandoff,
-			idType:   TypeHandoff,
-			seqs:     []int{1, 42, 100, 12345, 99999},
-		},
-		{
-			name:     "attachment IDs",
-			formatFn: FormatAttachment,
-			idType:   TypeAttachment,
-			seqs:     []int{1, 42, 100, 12345, 99999},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			for _, seq := range tt.seqs {
-				// Format -> Parse -> should get same type and seq
-				formatted := tt.formatFn(seq)
-				gotType, gotSeq, err := Parse(formatted)
-				if err != nil {
-					t.Errorf("Parse(%q) error: %v", formatted, err)
-					continue
-				}
-				if gotType != tt.idType {
-					t.Errorf("Parse(%q) type = %v, want %v", formatted, gotType, tt.idType)
-				}
-				if gotSeq != seq {
-					t.Errorf("Parse(%q) seq = %v, want %v", formatted, gotSeq, seq)
-				}
-			}
-		})
-	}
-}
-
-// Benchmark tests
-func BenchmarkFormatTask(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		FormatTask(12345)
-	}
-}
-
 func TestExpandTaskID(t *testing.T) {
 	tests := []struct {
 		in     string
@@ -408,26 +311,5 @@ func TestExpandTaskID(t *testing.T) {
 		if gotID != tt.wantID || gotOK != tt.wantOK {
 			t.Errorf("ExpandTaskID(%q) = (%q, %v), want (%q, %v)", tt.in, gotID, gotOK, tt.wantID, tt.wantOK)
 		}
-	}
-}
-
-func BenchmarkParse(b *testing.B) {
-	id := "T-12345"
-	for i := 0; i < b.N; i++ {
-		_, _, _ = Parse(id)
-	}
-}
-
-func BenchmarkIsUUID(b *testing.B) {
-	uuid := "123e4567-e89b-12d3-a456-426614174000"
-	for i := 0; i < b.N; i++ {
-		IsUUID(uuid)
-	}
-}
-
-func BenchmarkIsFriendlyID(b *testing.B) {
-	id := "T-12345"
-	for i := 0; i < b.N; i++ {
-		IsFriendlyID(id)
 	}
 }

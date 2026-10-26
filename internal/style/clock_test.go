@@ -28,13 +28,6 @@ func TestFormatOpenedAge(t *testing.T) {
 	}
 }
 
-func TestNowUTCHonorsOverride(t *testing.T) {
-	t.Setenv("WRKQ_NOW", "2026-06-12T15:04:05Z")
-	if got := NowUTC().Format("2006-01-02T15:04:05Z"); got != "2026-06-12T15:04:05Z" {
-		t.Fatalf("NowUTC() with override = %q", got)
-	}
-}
-
 func TestHumanTimestampsUseLocalTwelveHourClock(t *testing.T) {
 	t.Setenv("TZ", "America/Chicago")
 

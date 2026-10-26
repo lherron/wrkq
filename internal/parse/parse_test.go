@@ -254,39 +254,41 @@ Description content here`,
 	}
 }
 
-func TestParse(t *testing.T) {
+// TestParseReadsBodyInTheDetectedOrRequestedFormat: Parse reads the body in the
+// requested format, or the auto-detected one when none is given. The format
+// actually used is observable in the result: a JSON object read as JSON sets
+// Title, while text read as markdown becomes the Description.
+//
+// rewrite-held (§1): the surface is `wrkq apply -` argv (stdin body per row),
+// which lives in internal/rpccli and has no test today.
+func TestParseReadsBodyInTheDetectedOrRequestedFormat(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      string
-		format     string
-		wantErr    bool
-		wantFormat Format
+		name            string
+		input           string
+		format          string
+		wantErr         bool
+		wantTitle       string // "" means Title must be nil
+		wantDescription string // "" means Description must be nil
 	}{
 		{
-			name:       "auto-detect JSON",
-			input:      `{"title": "test"}`,
-			format:     "",
-			wantErr:    false,
-			wantFormat: FormatJSON,
+			name:      "auto-detect JSON",
+			input:     `{"title": "test"}`,
+			wantTitle: "test",
 		},
 		{
-			name:       "auto-detect markdown",
-			input:      "Plain text description",
-			format:     "",
-			wantErr:    false,
-			wantFormat: FormatMarkdown,
+			name:            "auto-detect markdown",
+			input:           "Plain text description",
+			wantDescription: "Plain text description",
 		},
 		{
-			name:       "explicit JSON format",
-			input:      `{"title": "test"}`,
-			format:     "json",
-			wantErr:    false,
-			wantFormat: FormatJSON,
+			name:      "explicit JSON format",
+			input:     `{"title": "test"}`,
+			format:    "json",
+			wantTitle: "test",
 		},
 		{
 			name:    "invalid auto-detected JSON",
 			input:   `{bad json}`,
-			format:  "",
 			wantErr: true,
 		},
 		{
@@ -299,10 +301,26 @@ func TestParse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Parse([]byte(tt.input), tt.format)
+			got, err := Parse([]byte(tt.input), tt.format)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if gotTitle := deref(got.Title); gotTitle != tt.wantTitle || (tt.wantTitle == "") != (got.Title == nil) {
+				t.Errorf("Title = %q (nil=%v), want %q", gotTitle, got.Title == nil, tt.wantTitle)
+			}
+			if gotDesc := deref(got.Description); gotDesc != tt.wantDescription || (tt.wantDescription == "") != (got.Description == nil) {
+				t.Errorf("Description = %q (nil=%v), want %q", gotDesc, got.Description == nil, tt.wantDescription)
 			}
 		})
 	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

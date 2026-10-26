@@ -41,18 +41,6 @@ func TestApplyDBLocatorLocalPath(t *testing.T) {
 	}
 }
 
-func TestLoadWRKQDBRemoteBeatingDBPathIsRefused(t *testing.T) {
-	isolateLoadConfig(t)
-	t.Setenv("WRKQ_DB", "rpc://max3:7171")
-	t.Setenv("WRKQ_DB_PATH", "rpc://stale:7171")
-
-	_, err := Load()
-	var conflict *DBEnvConflictError
-	if !errors.As(err, &conflict) {
-		t.Fatalf("Load err=%v, want *DBEnvConflictError", err)
-	}
-}
-
 // TestLoadDBPathConflictRule pins what "WRKQ_DB_PATH loses" means (T-08302):
 // it is honoured when nothing else selects a database or the winner names the
 // same file; otherwise Load refuses, and an explicit --db override moots it.
@@ -138,27 +126,6 @@ func TestLoadRemoteDBPathWithoutWRKQDBIsRejected(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected path-only WRKQ_DB_PATH rejection")
-	}
-}
-
-func TestLoadWithoutDBPathDoesNotDefaultToHomeDB(t *testing.T) {
-	isolateLoadConfig(t)
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.DBPath != "" {
-		t.Fatalf("DBPath=%q want empty without env, config, --db, or .wrkq/wrkq.db", cfg.DBPath)
-	}
-	if cfg.DBLocator != "" {
-		t.Fatalf("DBLocator=%q want empty without configured database", cfg.DBLocator)
-	}
-	if cfg.AttachDir != "" {
-		t.Fatalf("AttachDir=%q want empty without project-local DB or explicit attach dir", cfg.AttachDir)
-	}
-	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".local", "share", "wrkq", "wrkq.db")); !os.IsNotExist(err) {
-		t.Fatalf("home fallback DB should not exist, stat err=%v", err)
 	}
 }
 

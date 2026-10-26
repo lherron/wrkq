@@ -6,140 +6,68 @@ import (
 	"testing"
 )
 
-func TestFindEnvLocal_InCurrentDir(t *testing.T) {
-	// Create temp directory structure
-	tmpDir := t.TempDir()
-	envPath := filepath.Join(tmpDir, ".env.local")
-	if err := os.WriteFile(envPath, []byte("TEST=value"), 0644); err != nil {
-		t.Fatal(err)
+// TestNearestAncestorEnvLocalSuppliesTheDatabase: Load walks from the working
+// directory up to $HOME and takes WRKQ_DB_PATH from the nearest .env.local it
+// finds; with none on the walk (and no platform root) no database is
+// configured.
+//
+// rewrite-held (§1): the built-binary form is a `wrkq` argv row run from each
+// cwd; that harness lives in internal/rpccli, so this table drives Load, the
+// API the CLI calls, and asserts the database it ends up with.
+func TestNearestAncestorEnvLocalSuppliesTheDatabase(t *testing.T) {
+	tests := []struct {
+		name    string
+		envAt   []string // dirs under $HOME holding a .env.local
+		cwd     string
+		wantDir string // dir whose .env.local wins; "" means none configured
+	}{
+		{name: "in the working directory", envAt: []string{"work/proj"}, cwd: "work/proj", wantDir: "work/proj"},
+		{name: "two levels up", envAt: []string{"work"}, cwd: "work/proj/sub", wantDir: "work"},
+		{name: "closest of two ancestors wins", envAt: []string{"work", "work/proj"}, cwd: "work/proj/sub", wantDir: "work/proj"},
+		{name: "none anywhere", cwd: "work/proj", wantDir: ""},
 	}
 
-	// Change to temp dir
-	oldCwd, _ := os.Getwd()
-	defer func() { _ = os.Chdir(oldCwd) }()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			// godotenv never overrides a variable that is set, even to "",
+			// so the locator vars must be unset, not emptied.
+			for _, key := range []string{"WRKQ_DB", "WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE"} {
+				unsetEnv(t, key)
+			}
+			t.Setenv("HOME", home)
+			t.Setenv("PRAESIDIUM_HOME", "")
+			cwd := filepath.Join(home, tt.cwd)
+			if err := os.MkdirAll(cwd, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, dir := range tt.envAt {
+				line := "WRKQ_DB_PATH=" + filepath.Join(home, dir, "marker.db") + "\n"
+				if err := os.WriteFile(filepath.Join(home, dir, ".env.local"), []byte(line), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			oldCwd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chdir(cwd); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chdir(oldCwd) })
 
-	result := findEnvLocal()
-	if result == "" {
-		t.Error("expected to find .env.local in current directory")
-	}
-}
-
-func TestFindEnvLocal_InParentDir(t *testing.T) {
-	// Create temp directory structure: parent/.env.local, parent/child/
-	tmpDir := t.TempDir()
-	childDir := filepath.Join(tmpDir, "child")
-	if err := os.Mkdir(childDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	envPath := filepath.Join(tmpDir, ".env.local")
-	if err := os.WriteFile(envPath, []byte("TEST=parent"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Change to child dir
-	oldCwd, _ := os.Getwd()
-	defer func() { _ = os.Chdir(oldCwd) }()
-	if err := os.Chdir(childDir); err != nil {
-		t.Fatal(err)
-	}
-
-	result := findEnvLocal()
-	if result == "" {
-		t.Error("expected to find .env.local in parent directory")
-	}
-	// Resolve symlinks for comparison (macOS /var -> /private/var)
-	expectedResolved, _ := filepath.EvalSymlinks(envPath)
-	resultResolved, _ := filepath.EvalSymlinks(result)
-	if resultResolved != expectedResolved {
-		t.Errorf("expected %s, got %s", expectedResolved, resultResolved)
-	}
-}
-
-func TestFindEnvLocal_InGrandparentDir(t *testing.T) {
-	// Create: grandparent/.env.local, grandparent/parent/child/
-	tmpDir := t.TempDir()
-	parentDir := filepath.Join(tmpDir, "parent")
-	childDir := filepath.Join(parentDir, "child")
-	if err := os.MkdirAll(childDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	envPath := filepath.Join(tmpDir, ".env.local")
-	if err := os.WriteFile(envPath, []byte("TEST=grandparent"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Change to grandchild dir
-	oldCwd, _ := os.Getwd()
-	defer func() { _ = os.Chdir(oldCwd) }()
-	if err := os.Chdir(childDir); err != nil {
-		t.Fatal(err)
-	}
-
-	result := findEnvLocal()
-	if result == "" {
-		t.Error("expected to find .env.local in grandparent directory")
-	}
-	// Resolve symlinks for comparison (macOS /var -> /private/var)
-	expectedResolved, _ := filepath.EvalSymlinks(envPath)
-	resultResolved, _ := filepath.EvalSymlinks(result)
-	if resultResolved != expectedResolved {
-		t.Errorf("expected %s, got %s", expectedResolved, resultResolved)
-	}
-}
-
-func TestFindEnvLocal_ClosestWins(t *testing.T) {
-	// Create: grandparent/.env.local, grandparent/parent/.env.local, grandparent/parent/child/
-	tmpDir := t.TempDir()
-	parentDir := filepath.Join(tmpDir, "parent")
-	childDir := filepath.Join(parentDir, "child")
-	if err := os.MkdirAll(childDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create .env.local in both grandparent and parent
-	if err := os.WriteFile(filepath.Join(tmpDir, ".env.local"), []byte("TEST=grandparent"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	parentEnvPath := filepath.Join(parentDir, ".env.local")
-	if err := os.WriteFile(parentEnvPath, []byte("TEST=parent"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Change to child dir
-	oldCwd, _ := os.Getwd()
-	defer func() { _ = os.Chdir(oldCwd) }()
-	if err := os.Chdir(childDir); err != nil {
-		t.Fatal(err)
-	}
-
-	result := findEnvLocal()
-	// Resolve symlinks for comparison (macOS /var -> /private/var)
-	expectedResolved, _ := filepath.EvalSymlinks(parentEnvPath)
-	resultResolved, _ := filepath.EvalSymlinks(result)
-	if resultResolved != expectedResolved {
-		t.Errorf("expected closest .env.local (%s), got %s", expectedResolved, resultResolved)
-	}
-}
-
-func TestFindEnvLocal_NotFound(t *testing.T) {
-	// Create temp directory with no .env.local
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-	t.Setenv("PRAESIDIUM_HOME", filepath.Join(tmpDir, "missing-platform"))
-
-	// Change to temp dir
-	oldCwd, _ := os.Getwd()
-	defer func() { _ = os.Chdir(oldCwd) }()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
-
-	result := findEnvLocal()
-	if result != "" {
-		t.Errorf("expected empty string when no .env.local found, got %s", result)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			want := ""
+			if tt.wantDir != "" {
+				want = filepath.Join(home, tt.wantDir, "marker.db")
+			}
+			if cfg.DBPath != want || cfg.DBLocator != want {
+				t.Fatalf("DBPath = %q, DBLocator = %q, want both %q", cfg.DBPath, cfg.DBLocator, want)
+			}
+		})
 	}
 }
 

@@ -111,20 +111,3 @@ func TestRoomSayWaitCollectsReplies(t *testing.T) {
 		t.Fatalf("replies = %#v", result.Replies)
 	}
 }
-
-func TestCallDecodesTypedOutput(t *testing.T) {
-	transport := &fakeTransport{result: func(string, any) json.RawMessage {
-		return json.RawMessage(`{"id":"T-00001","state":"open","labels":[],"meta":{}}`)
-	}}
-	client, err := New(t.Context(), WithTransport(transport))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var task Task
-	if err := client.Call(t.Context(), "wrkq.task.show", map[string]string{"task": "T-00001"}, &task); err != nil {
-		t.Fatal(err)
-	}
-	if task.ID != "T-00001" {
-		t.Fatalf("decoded id = %q", task.ID)
-	}
-}

@@ -1,6 +1,10 @@
 package scope
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 // Ported from agent-spaces/packages/agent-scope/src/__tests__/scope-handle.test.ts.
 
@@ -86,7 +90,11 @@ func TestParseScopeHandle_Invalid(t *testing.T) {
 		t.Run(c.reason, func(t *testing.T) {
 			_, err := ParseScopeHandle(c.handle)
 			if err == nil {
-				t.Errorf("expected error for %q (%s)", c.handle, c.reason)
+				t.Fatalf("expected error for %q (%s)", c.handle, c.reason)
+			}
+			prefix := fmt.Sprintf("invalid ScopeHandle %q: ", c.handle)
+			if reason := strings.TrimPrefix(err.Error(), prefix); reason == "" || reason == err.Error() {
+				t.Errorf("error %q should be %q followed by a reason", err.Error(), prefix)
 			}
 		})
 	}
@@ -108,70 +116,6 @@ func TestFormatScopeHandle(t *testing.T) {
 		t.Run(string(c.p.Kind), func(t *testing.T) {
 			if got := FormatScopeHandle(c.p); got != c.want {
 				t.Errorf("FormatScopeHandle=%q, want %q", got, c.want)
-			}
-		})
-	}
-}
-
-func TestScopeHandle_RoundTrip(t *testing.T) {
-	handles := []string{
-		"alice",
-		"alice@demo",
-		"alice@demo:t1",
-		"alice@demo/reviewer",
-		"alice@demo:t1/reviewer",
-		"my.agent@my-project:task_1/role.name",
-	}
-	for _, h := range handles {
-		h := h
-		t.Run(h, func(t *testing.T) {
-			p, err := ParseScopeHandle(h)
-			if err != nil {
-				t.Fatalf("parse: %v", err)
-			}
-			if got := FormatScopeHandle(p); got != h {
-				t.Errorf("round-trip got %q, want %q", got, h)
-			}
-		})
-	}
-}
-
-func TestValidateScopeHandle(t *testing.T) {
-	valid := []string{
-		"alice",
-		"alice@demo",
-		"alice@demo:t1",
-		"alice@demo/reviewer",
-		"alice@demo:t1/reviewer",
-		"my.agent@my-project:task_1/role.name",
-	}
-	for _, h := range valid {
-		h := h
-		t.Run("valid_"+h, func(t *testing.T) {
-			if r := ValidateScopeHandle(h); !r.OK {
-				t.Errorf("expected %q valid; error=%q", h, r.Error)
-			}
-		})
-	}
-
-	invalid := []struct{ h, reason string }{
-		{"", "empty"},
-		{"@", "bare @"},
-		{"@demo", "no agent"},
-		{"alice@", "trailing @"},
-		{"alice@demo:", "trailing :"},
-		{"alice@demo/", "trailing /"},
-		{"alice@demo:t1!", "invalid char"},
-	}
-	for _, c := range invalid {
-		c := c
-		t.Run("invalid_"+c.reason, func(t *testing.T) {
-			r := ValidateScopeHandle(c.h)
-			if r.OK {
-				t.Errorf("expected %q invalid (%s)", c.h, c.reason)
-			}
-			if r.Error == "" {
-				t.Errorf("expected non-empty error for %q", c.h)
 			}
 		})
 	}

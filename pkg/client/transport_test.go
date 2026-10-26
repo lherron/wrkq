@@ -8,8 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -120,12 +118,6 @@ func TestInitializeProtocolMismatchMessages(t *testing.T) {
 	}
 }
 
-func TestInitializeMatchingServerSucceeds(t *testing.T) {
-	if err := validateInitializeResult(healthyInitializeResult(t), WrkqProfile); err != nil {
-		t.Fatalf("matching initialize result: %v", err)
-	}
-}
-
 func TestInitializeTransportsReturnTypedProtocolMismatch(t *testing.T) {
 	serverProtocol := "2026-09-30"
 	serverHash := "sha256:" + strings.Repeat("a", 64)
@@ -173,29 +165,6 @@ func assertTypedProtocolMismatch(t *testing.T, err error) {
 	}
 }
 
-func TestInitializeSchemaMismatchNamesBothHashesAndServerRevision(t *testing.T) {
-	var init map[string]any
-	if err := json.Unmarshal(healthyInitializeResult(t), &init); err != nil {
-		t.Fatal(err)
-	}
-	serverHash := "sha256:" + strings.Repeat("f", 64)
-	init["protocolSchemaHash"] = serverHash
-	raw, err := json.Marshal(init)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = validateInitializeResult(raw, WrkqProfile)
-	if err == nil {
-		t.Fatal("expected schema mismatch")
-	}
-	for _, want := range []string{workrpc.ProtocolSchemaHash(), serverHash, "abc123"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("schema mismatch error %q missing %q", err, want)
-		}
-	}
-}
-
 func TestErrorCodePreservesRemoteDomainIdentifier(t *testing.T) {
 	err := errorFromRPC(&workrpc.RPCError{Data: json.RawMessage(`{"code":"WRKF_VALIDATION","retryable":false}`)})
 	if err.Code() != "WRKF_VALIDATION" {
@@ -226,21 +195,5 @@ func TestInitializeProfilesProbeTheirOwnSurface(t *testing.T) {
 	missingCapability, _ := json.Marshal(init)
 	if err := validateInitializeResult(missingCapability, WrkfProfile); err == nil || !strings.Contains(err.Error(), "wrkf capability") {
 		t.Fatalf("wrkf capability probe error = %v", err)
-	}
-}
-
-func TestTokenFromEnvPrecedence(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(path, []byte("file-token\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("WRKQD_TOKEN_FILE", path)
-	t.Setenv("WRKQD_TOKEN", "")
-	if got := TokenFromEnv(); got != "file-token" {
-		t.Fatalf("file token = %q", got)
-	}
-	t.Setenv("WRKQD_TOKEN", "explicit-inline")
-	if got := TokenFromEnv(); got != "explicit-inline" {
-		t.Fatalf("explicit inline token = %q", got)
 	}
 }

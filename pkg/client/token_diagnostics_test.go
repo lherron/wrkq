@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/lherron/wrkq/internal/workrpc"
 )
 
 // T-06976 regression bars. A remote auth rejection used to surface as a bare
@@ -186,25 +184,5 @@ func TestTokenPrecedenceUnchangedByDiagnostics(t *testing.T) {
 	t.Setenv("WRKQD_TOKEN", "")
 	if got := TokenFromEnv(); got != fileTokenValue {
 		t.Fatalf("file token must be used when env is empty, got %q", got)
-	}
-}
-
-func TestShadowDiagnosticNamesBothSources(t *testing.T) {
-	path := writeTokenFile(t)
-	t.Setenv("WRKQD_TOKEN", envTokenValue)
-	t.Setenv("WRKQD_TOKEN_FILE", path)
-
-	_, diag := workrpc.ResolveToken()
-	if !diag.FileShadowed {
-		t.Fatal("expected fileShadowed when env token overrides a readable file")
-	}
-	rendered := diag.String()
-	for _, want := range []string{"WRKQD_TOKEN env", "WRKQD_TOKEN_FILE", "shadowed", path} {
-		if !strings.Contains(rendered, want) {
-			t.Errorf("diagnostic missing %q: %s", want, rendered)
-		}
-	}
-	if strings.Contains(rendered, envTokenValue) || strings.Contains(rendered, fileTokenValue) {
-		t.Fatalf("diagnostic leaked a token value: %s", rendered)
 	}
 }

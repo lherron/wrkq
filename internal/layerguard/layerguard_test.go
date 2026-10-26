@@ -32,38 +32,49 @@ func checkViolationMessage(t *testing.T, msg string) {
 	}
 }
 
-// TestCheckPackages_DirectEdge_DomainCobra verifies that a direct import from a governed
-// domain package to a forbidden target (cobra) produces exactly one violation with a
-// single-hop chain carrying file:line annotation.
-func TestCheckPackages_DirectEdge_DomainCobra(t *testing.T) {
-	// Fixture: domain imports cobra directly
-	packages := []layerguard.PackageEntry{
-		{ImportPath: "fixture/domain", Dir: "testdata/domain-direct/domain"},
+// TestCheckPackages_DirectForbiddenImportIsOneHopViolationWithFileLine: a
+// governed source that imports a forbidden target directly yields exactly one
+// violation whose chain is a single hop carrying file:line, whether the target
+// is an external module (cobra) or an in-module package (workflow -> cli).
+func TestCheckPackages_DirectForbiddenImportIsOneHopViolationWithFileLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		packages []layerguard.PackageEntry
+		rule     layerguard.Rule
+	}{
+		{
+			name:     "domain imports external cobra",
+			packages: []layerguard.PackageEntry{{ImportPath: "fixture/domain", Dir: "testdata/domain-direct/domain"}},
+			rule:     layerguard.Rule{ID: "domain-no-cobra", Sources: []string{"fixture/domain"}, Forbidden: []string{"github.com/spf13/cobra"}},
+		},
+		{
+			name: "workflow imports in-module cli",
+			packages: []layerguard.PackageEntry{
+				{ImportPath: "fixture/workflow", Dir: "testdata/workflow-cli/workflow"},
+				{ImportPath: "fixture/cli", Dir: "testdata/workflow-cli/cli"},
+			},
+			rule: layerguard.Rule{ID: "workflow-no-cli", Sources: []string{"fixture/workflow"}, Forbidden: []string{"fixture/cli"}},
+		},
 	}
-	cfg := layerguard.Config{
-		Rules: []layerguard.Rule{{
-			ID:        "domain-no-cobra",
-			Sources:   []string{"fixture/domain"},
-			Forbidden: []string{"github.com/spf13/cobra"},
-		}},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := layerguard.CheckPackages(tt.packages, layerguard.Config{Rules: []layerguard.Rule{tt.rule}})
+			if err != nil {
+				t.Fatalf("CheckPackages: %v", err)
+			}
+			if len(result.Violations) != 1 {
+				t.Fatalf("expected 1 violation, got %d: %+v", len(result.Violations), result.Violations)
+			}
+			v := result.Violations[0]
+			if len(v.Chain) != 1 {
+				t.Fatalf("expected chain length 1 (direct edge), got %d: %v", len(v.Chain), v.Chain)
+			}
+			if hop := v.Chain[0]; hop.File == "" || hop.Line <= 0 {
+				t.Errorf("hop must carry file:line; got File=%q Line=%d", hop.File, hop.Line)
+			}
+			checkViolationMessage(t, v.Message)
+		})
 	}
-	result, err := layerguard.CheckPackages(packages, cfg)
-	if err != nil {
-		t.Fatalf("CheckPackages: %v", err)
-	}
-	if len(result.Violations) != 1 {
-		t.Fatalf("expected 1 violation, got %d: %+v", len(result.Violations), result.Violations)
-	}
-	v := result.Violations[0]
-	// Chain must have exactly 1 hop (direct edge)
-	if len(v.Chain) != 1 {
-		t.Errorf("expected chain length 1 (direct edge), got %d: %v", len(v.Chain), v.Chain)
-	}
-	hop := v.Chain[0]
-	if hop.File == "" || hop.Line <= 0 {
-		t.Errorf("hop must carry file:line; got File=%q Line=%d", hop.File, hop.Line)
-	}
-	checkViolationMessage(t, v.Message)
 }
 
 // TestCheckPackages_TransitiveEdge_DomainIntermediateCobra verifies that a transitive
@@ -95,39 +106,6 @@ func TestCheckPackages_TransitiveEdge_DomainIntermediateCobra(t *testing.T) {
 		t.Errorf("expected chain length 2 (transitive chain), got %d: %v", len(v.Chain), v.Chain)
 	}
 	// Every hop must carry file:line
-	for i, hop := range v.Chain {
-		if hop.File == "" || hop.Line <= 0 {
-			t.Errorf("chain[%d] must carry file:line; got File=%q Line=%d", i, hop.File, hop.Line)
-		}
-	}
-	checkViolationMessage(t, v.Message)
-}
-
-// TestCheckPackages_TransitiveEdge_WorkflowToCli verifies that workflow→cli boundary
-// violations are detected, including transitive chains.
-func TestCheckPackages_TransitiveEdge_WorkflowToCli(t *testing.T) {
-	packages := []layerguard.PackageEntry{
-		{ImportPath: "fixture/workflow", Dir: "testdata/workflow-cli/workflow"},
-		{ImportPath: "fixture/cli", Dir: "testdata/workflow-cli/cli"},
-	}
-	cfg := layerguard.Config{
-		Rules: []layerguard.Rule{{
-			ID:        "workflow-no-cli",
-			Sources:   []string{"fixture/workflow"},
-			Forbidden: []string{"fixture/cli"},
-		}},
-	}
-	result, err := layerguard.CheckPackages(packages, cfg)
-	if err != nil {
-		t.Fatalf("CheckPackages: %v", err)
-	}
-	if len(result.Violations) != 1 {
-		t.Fatalf("expected 1 violation, got %d: %+v", len(result.Violations), result.Violations)
-	}
-	v := result.Violations[0]
-	if len(v.Chain) < 1 {
-		t.Errorf("expected chain with at least 1 hop, got %d", len(v.Chain))
-	}
 	for i, hop := range v.Chain {
 		if hop.File == "" || hop.Line <= 0 {
 			t.Errorf("chain[%d] must carry file:line; got File=%q Line=%d", i, hop.File, hop.Line)
@@ -211,50 +189,33 @@ func TestCheckPackages_ArchException_ValidPasses(t *testing.T) {
 	}
 }
 
-// TestCheckPackages_ArchException_MalformedTicketFails verifies that a malformed
-// ARCH-EXCEPTION (missing ticket number) does not authorize the violation.
+// TestCheckPackages_ArchException_MalformedTicketFails: a malformed
+// ARCH-EXCEPTION (missing ticket number, or empty reason) does not authorize
+// the violation.
 func TestCheckPackages_ArchException_MalformedTicketFails(t *testing.T) {
-	packages := []layerguard.PackageEntry{
-		{ImportPath: "fixture/source", Dir: "testdata/exceptions/malformed-ticket"},
+	for _, tt := range []struct{ name, dir string }{
+		{name: "missing ticket", dir: "testdata/exceptions/malformed-ticket"},
+		{name: "empty reason", dir: "testdata/exceptions/malformed-reason"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			packages := []layerguard.PackageEntry{{ImportPath: "fixture/source", Dir: tt.dir}}
+			cfg := layerguard.Config{
+				Rules: []layerguard.Rule{{
+					ID:        "source-no-cobra",
+					Sources:   []string{"fixture/source"},
+					Forbidden: []string{"github.com/spf13/cobra"},
+				}},
+			}
+			result, err := layerguard.CheckPackages(packages, cfg)
+			if err != nil {
+				t.Fatalf("CheckPackages: %v", err)
+			}
+			if len(result.Violations) != 1 {
+				t.Fatalf("malformed ARCH-EXCEPTION must still be a violation, got %d violations", len(result.Violations))
+			}
+			checkViolationMessage(t, result.Violations[0].Message)
+		})
 	}
-	cfg := layerguard.Config{
-		Rules: []layerguard.Rule{{
-			ID:        "source-no-cobra",
-			Sources:   []string{"fixture/source"},
-			Forbidden: []string{"github.com/spf13/cobra"},
-		}},
-	}
-	result, err := layerguard.CheckPackages(packages, cfg)
-	if err != nil {
-		t.Fatalf("CheckPackages: %v", err)
-	}
-	if len(result.Violations) != 1 {
-		t.Fatalf("malformed ARCH-EXCEPTION must still be a violation, got %d violations", len(result.Violations))
-	}
-	checkViolationMessage(t, result.Violations[0].Message)
-}
-
-// TestCheckPackages_ArchException_EmptyReasonFails verifies that a malformed
-// ARCH-EXCEPTION (empty reason) does not authorize the violation.
-func TestCheckPackages_ArchException_EmptyReasonFails(t *testing.T) {
-	packages := []layerguard.PackageEntry{
-		{ImportPath: "fixture/source", Dir: "testdata/exceptions/malformed-reason"},
-	}
-	cfg := layerguard.Config{
-		Rules: []layerguard.Rule{{
-			ID:        "source-no-cobra",
-			Sources:   []string{"fixture/source"},
-			Forbidden: []string{"github.com/spf13/cobra"},
-		}},
-	}
-	result, err := layerguard.CheckPackages(packages, cfg)
-	if err != nil {
-		t.Fatalf("CheckPackages: %v", err)
-	}
-	if len(result.Violations) != 1 {
-		t.Fatalf("empty-reason ARCH-EXCEPTION must still be a violation, got %d violations", len(result.Violations))
-	}
-	checkViolationMessage(t, result.Violations[0].Message)
 }
 
 // TestCheckPackages_ArchException_DownstreamOnlyFails verifies that an ARCH-EXCEPTION

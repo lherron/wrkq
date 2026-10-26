@@ -76,21 +76,6 @@ func mustRun(t *testing.T, root string) Result {
 	return res
 }
 
-func TestValidRecordsPass(t *testing.T) {
-	root := writeTree(t, map[string]string{
-		"architecture/records/invariants/demo.yaml": validInvariant,
-		"internal/demo/demo_test.go":                demoTestFile,
-	})
-	regen(t, root)
-	res := mustRun(t, root)
-	if len(res.Findings) != 0 {
-		t.Fatalf("expected clean, got findings:\n%s", findingsText(res))
-	}
-	if res.Active != 1 {
-		t.Fatalf("expected 1 active record, got %d", res.Active)
-	}
-}
-
 func TestDuplicateIDFails(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"architecture/records/invariants/a.yaml": validInvariant,
@@ -224,5 +209,8 @@ func TestWriteThenCheckIsClean(t *testing.T) {
 	res := mustRun(t, root)
 	if len(res.Findings) != 0 {
 		t.Fatalf("write→check should be clean, got:\n%s", findingsText(res))
+	}
+	if res.Active != 1 {
+		t.Fatalf("expected 1 active record, got %d", res.Active)
 	}
 }

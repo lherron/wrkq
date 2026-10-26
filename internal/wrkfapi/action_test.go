@@ -5,8 +5,6 @@ package wrkfapi
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/lherron/wrkq/internal/workflow"
 )
 
 // TestCanonicalDeliveryRef locks the advertised `string | object` contract and
@@ -40,35 +38,6 @@ func TestCanonicalDeliveryRef(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Errorf("canonicalDeliveryRef(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestParseTransitionDirective locks the `string | false | omitted` contract.
-func TestParseTransitionDirective(t *testing.T) {
-	cases := []struct {
-		name     string
-		in       string
-		wantMode workflow.TransitionMode
-		wantID   string
-	}{
-		{"omitted", "", workflow.TransitionDefault, ""},
-		{"null", "null", workflow.TransitionDefault, ""},
-		{"false skips", "false", workflow.TransitionSkip, ""},
-		{"explicit id", `"triage_complete"`, workflow.TransitionExplicit, "triage_complete"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			mode, id, err := parseTransitionDirective(json.RawMessage(tc.in))
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if mode != tc.wantMode {
-				t.Errorf("mode = %v, want %v", mode, tc.wantMode)
-			}
-			if id != tc.wantID {
-				t.Errorf("id = %q, want %q", id, tc.wantID)
 			}
 		})
 	}

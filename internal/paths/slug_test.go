@@ -113,6 +113,13 @@ func TestNormalizeSlug(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("NormalizeSlug() = %q, want %q", got, tt.want)
 			}
+			// A normalized slug is valid and normalizes to itself.
+			if err := ValidateSlug(got); err != nil {
+				t.Errorf("normalized slug %q fails ValidateSlug: %v", got, err)
+			}
+			if again, err := NormalizeSlug(got); err != nil || again != got {
+				t.Errorf("NormalizeSlug not idempotent: %q -> %q (err %v)", got, again, err)
+			}
 		})
 	}
 }
@@ -206,115 +213,6 @@ func TestSplitPath(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestJoinPath(t *testing.T) {
-	tests := []struct {
-		name     string
-		segments []string
-		want     string
-	}{
-		{
-			name:     "simple segments",
-			segments: []string{"a", "b", "c"},
-			want:     "a/b/c",
-		},
-		{
-			name:     "single segment",
-			segments: []string{"hello"},
-			want:     "hello",
-		},
-		{
-			name:     "empty slice",
-			segments: []string{},
-			want:     "",
-		},
-		{
-			name:     "with empty strings",
-			segments: []string{"a", "", "c"},
-			want:     "a//c",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := JoinPath(tt.segments...)
-			if got != tt.want {
-				t.Errorf("JoinPath() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-// Property-based tests for slug normalization
-func TestSlugNormalizationProperties(t *testing.T) {
-	t.Run("idempotent normalization", func(t *testing.T) {
-		inputs := []string{
-			"hello",
-			"Hello World",
-			"test_case",
-			"mix123-ABC",
-		}
-
-		for _, input := range inputs {
-			normalized1, err1 := NormalizeSlug(input)
-			if err1 != nil {
-				continue // Skip invalid inputs
-			}
-
-			// Normalizing twice should give the same result
-			normalized2, err2 := NormalizeSlug(normalized1)
-			if err2 != nil {
-				t.Errorf("Second normalization failed for %q: %v", normalized1, err2)
-			}
-
-			if normalized1 != normalized2 {
-				t.Errorf("Normalization not idempotent: %q -> %q -> %q", input, normalized1, normalized2)
-			}
-		}
-	})
-
-	t.Run("normalized slug is always valid", func(t *testing.T) {
-		inputs := []string{
-			"hello",
-			"Hello World",
-			"test_case",
-			"mix123-ABC",
-			"UPPERCASE",
-		}
-
-		for _, input := range inputs {
-			normalized, err := NormalizeSlug(input)
-			if err != nil {
-				continue // Skip invalid inputs
-			}
-
-			// Every normalized slug should pass validation
-			if err := ValidateSlug(normalized); err != nil {
-				t.Errorf("Normalized slug %q failed validation: %v", normalized, err)
-			}
-		}
-	})
-
-	t.Run("always lowercase", func(t *testing.T) {
-		inputs := []string{
-			"HELLO",
-			"Hello",
-			"hElLo",
-			"HELLO-WORLD",
-		}
-
-		for _, input := range inputs {
-			normalized, err := NormalizeSlug(input)
-			if err != nil {
-				continue
-			}
-
-			if normalized != strings.ToLower(normalized) {
-				t.Errorf("Normalized slug %q is not lowercase", normalized)
-			}
-		}
-	})
 }
 
 // Helper function

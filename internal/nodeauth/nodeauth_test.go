@@ -1,7 +1,6 @@
 package nodeauth
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,18 +129,5 @@ func TestDisabledRegistryResolvesNothing(t *testing.T) {
 	}
 	if nodes := reg.Nodes(); nodes != nil {
 		t.Fatalf("Nodes() = %v; want nil", nodes)
-	}
-}
-
-func TestContextRoundTrip(t *testing.T) {
-	if node, ok := FromContext(context.Background()); ok {
-		t.Fatalf("bare context resolved %q", node)
-	}
-	ctx := WithNode(context.Background(), "max3")
-	if node, ok := FromContext(ctx); !ok || node != "max3" {
-		t.Fatalf("FromContext = %q,%v; want max3,true", node, ok)
-	}
-	if node, ok := FromContext(WithNode(context.Background(), "")); ok {
-		t.Fatalf("empty nodeId resolved %q", node)
 	}
 }

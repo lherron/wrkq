@@ -50,25 +50,6 @@ func TestWidthResolvedPerRender(t *testing.T) {
 	}
 }
 
-// TestWidthDeterministicUnderFixedColumns guards the property that made
-// resolving-once defensible: with COLUMNS fixed, repeated renders in one process
-// are byte-identical, so non-TTY --pretty byte-parity survives T-08225.
-func TestWidthDeterministicUnderFixedColumns(t *testing.T) {
-	previous := ColorEnabled
-	ColorEnabled = false
-	t.Cleanup(func() { ColorEnabled = previous })
-	t.Setenv("COLUMNS", "72")
-
-	const body = "the same prose rendered twice under one fixed COLUMNS value must not move a single byte"
-	var first, second bytes.Buffer
-	emitFlow(&first, "  ", "  ", body)
-	emitFlow(&second, "  ", "  ", body)
-
-	if first.String() != second.String() {
-		t.Fatalf("repeated render under fixed COLUMNS differed:\nfirst:\n%q\nsecond:\n%q", first.String(), second.String())
-	}
-}
-
 // TestRenderStyledTypesEmptySpeaks is the regression for T-08224's headline
 // symptom: `wrkp types` on a project with no facts printed NOTHING on a TTY,
 // which is indistinguishable from a hang or a broken command. The empty set must

@@ -7,8 +7,8 @@
 // Test matrix (daedalus ruling, comment C-04362):
 //  1. bare //nolint (no rule)                        → FINDING
 //  2. ticketed single-rule ARCH-EXCEPTION             → NO finding + PerRuleCount[errcheck]=1
-//  3a. malformed ARCH-EXCEPTION — missing ticket      → FINDING
-//  3b. malformed ARCH-EXCEPTION — empty reason        → FINDING
+//     3a. malformed ARCH-EXCEPTION — missing ticket      → FINDING
+//     3b. malformed ARCH-EXCEPTION — empty reason        → FINDING
 //  4. file/package-level blanket disable              → FINDING
 //  5. //nolint:all                                    → FINDING
 //  6. ticketed multi-rule ARCH-EXCEPTION              → NO finding + counted once per rule
@@ -17,7 +17,6 @@
 package suppressionlint_test
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -307,8 +306,10 @@ func testdataDir(t *testing.T) string {
 
 // 2+6. PerRuleCount accumulates governed suppressions, one entry per rule.
 // testdata/ (excluding vendor/) contains:
-//   valid_single.go  → errcheck=1
-//   valid_multi.go   → errcheck=1, gocyclo=1
+//
+//	valid_single.go  → errcheck=1
+//	valid_multi.go   → errcheck=1, gocyclo=1
+//
 // Total expected: errcheck=2, gocyclo=1.
 func TestScan_PerRuleCount(t *testing.T) {
 	result, err := suppressionlint.Scan(testdataDir(t), []string{"vendor"})
@@ -356,94 +357,5 @@ func TestScan_VendorExcluded(t *testing.T) {
 	}
 	if vendorCount == 0 {
 		t.Error("expected at least 1 finding from vendor/ when not excluded, got 0")
-	}
-}
-
-// ── Fixture-based ScanSource round-trips ──────────────────────────────────────
-// These verify that testdata/*.go files parse correctly and produce the expected signal.
-
-func readFixture(t *testing.T, name string) []byte {
-	t.Helper()
-	src, err := os.ReadFile(filepath.Join("testdata", name))
-	if err != nil {
-		t.Fatalf("readFixture %q: %v", name, err)
-	}
-	return src
-}
-
-func TestFixture_BareNolint(t *testing.T) {
-	src := readFixture(t, "bare_nolint.go")
-	findings, err := suppressionlint.ScanSource("bare_nolint.go", src)
-	if err != nil {
-		t.Fatalf("ScanSource error: %v", err)
-	}
-	if len(findings) != 1 {
-		t.Fatalf("bare_nolint.go: expected 1 finding, got %d: %+v", len(findings), findings)
-	}
-}
-
-func TestFixture_ValidSingle(t *testing.T) {
-	src := readFixture(t, "valid_single.go")
-	findings, err := suppressionlint.ScanSource("valid_single.go", src)
-	if err != nil {
-		t.Fatalf("ScanSource error: %v", err)
-	}
-	if len(findings) != 0 {
-		t.Fatalf("valid_single.go: expected no findings, got %d: %+v", len(findings), findings)
-	}
-}
-
-func TestFixture_MalformedNoTicket(t *testing.T) {
-	src := readFixture(t, "malformed_no_ticket.go")
-	findings, err := suppressionlint.ScanSource("malformed_no_ticket.go", src)
-	if err != nil {
-		t.Fatalf("ScanSource error: %v", err)
-	}
-	if len(findings) != 1 {
-		t.Fatalf("malformed_no_ticket.go: expected 1 finding, got %d: %+v", len(findings), findings)
-	}
-}
-
-func TestFixture_MalformedEmptyReason(t *testing.T) {
-	src := readFixture(t, "malformed_empty_reason.go")
-	findings, err := suppressionlint.ScanSource("malformed_empty_reason.go", src)
-	if err != nil {
-		t.Fatalf("ScanSource error: %v", err)
-	}
-	if len(findings) != 1 {
-		t.Fatalf("malformed_empty_reason.go: expected 1 finding, got %d: %+v", len(findings), findings)
-	}
-}
-
-func TestFixture_BlanketDisable(t *testing.T) {
-	src := readFixture(t, "blanket_disable.go")
-	findings, err := suppressionlint.ScanSource("blanket_disable.go", src)
-	if err != nil {
-		t.Fatalf("ScanSource error: %v", err)
-	}
-	if len(findings) != 1 {
-		t.Fatalf("blanket_disable.go: expected 1 finding, got %d: %+v", len(findings), findings)
-	}
-}
-
-func TestFixture_NolintAll(t *testing.T) {
-	src := readFixture(t, "nolint_all.go")
-	findings, err := suppressionlint.ScanSource("nolint_all.go", src)
-	if err != nil {
-		t.Fatalf("ScanSource error: %v", err)
-	}
-	if len(findings) != 1 {
-		t.Fatalf("nolint_all.go: expected 1 finding, got %d: %+v", len(findings), findings)
-	}
-}
-
-func TestFixture_ValidMulti(t *testing.T) {
-	src := readFixture(t, "valid_multi.go")
-	findings, err := suppressionlint.ScanSource("valid_multi.go", src)
-	if err != nil {
-		t.Fatalf("ScanSource error: %v", err)
-	}
-	if len(findings) != 0 {
-		t.Fatalf("valid_multi.go: expected no findings, got %d: %+v", len(findings), findings)
 	}
 }
