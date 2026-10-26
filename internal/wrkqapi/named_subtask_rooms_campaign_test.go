@@ -4,8 +4,10 @@ package wrkqapi
 
 import (
 	"context"
-	"github.com/lherron/wrkq/internal/store"
+	"strings"
 	"testing"
+
+	"github.com/lherron/wrkq/internal/store"
 )
 
 // Insert directly so routing and campaign tests do not depend on creation RPC.
@@ -123,8 +125,12 @@ func TestNamedSubtaskCampaignCountsActivityContextAndAdmission(t *testing.T) {
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.Tasks.UpdateFields(monitorSystemActor, uuid, map[string]any{"campaign_uuid": f.campaignUUID}, 0); err == nil {
-		t.Fatal("subtask campaign enrollment accepted")
+	// Refused by the subtask rule itself (the schema trigger "subtask cannot have
+	// parent or campaign", backed by the store's "subtask cannot enroll in a
+	// campaign"), not by some unrelated failure.
+	if _, err := f.s.Tasks.UpdateFields(monitorSystemActor, uuid, map[string]any{"campaign_uuid": f.campaignUUID}, 0); err == nil ||
+		!strings.Contains(err.Error(), "subtask cannot") {
+		t.Fatalf("subtask campaign enrollment error = %v, want the subtask enrollment refusal", err)
 	}
 }
 

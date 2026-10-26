@@ -16,8 +16,8 @@ import (
 
 // TestDeferWithRetryIsPromiseBackedAndRepends proves §6's defer contract: the
 // retry time is carried by a real wrkq promise, and when it comes due the
-// envelope returns to PENDING so the kicker's next sweep re-drives it. Deferred
-// is paused, never terminal.
+// envelope returns to PENDING so the kicker's next sweep re-drives it, after
+// which a later reply acks it. Deferred is paused, never terminal.
 func TestDeferWithRetryIsPromiseBackedAndRepends(t *testing.T) {
 	f := newRoomFixture(t)
 	ctx := context.Background()
@@ -84,28 +84,10 @@ func TestDeferWithRetryIsPromiseBackedAndRepends(t *testing.T) {
 	if reloaded.State != "resolved" {
 		t.Fatalf("retry promise state = %s, want resolved", reloaded.State)
 	}
-}
 
-// TestDeferredEnvelopeStillAckableByALaterReply proves the other half of "paused,
-// never terminal": deferred → acked by a later reply is legal.
-func TestDeferredEnvelopeStillAckableByALaterReply(t *testing.T) {
-	f := newRoomFixture(t)
-	ctx := context.Background()
-	codySeat := "cody@proj:" + f.loneTaskID
-
-	ask := f.say(t, RoomSayParams{
-		Ref: f.loneTaskID, Body: "eventually", To: []string{"cody"}, PrincipalRef: "agent:clod",
-	})
+	// Deferred is paused, never terminal: once re-pended, the kicker presents it
+	// again and a later reply acks it.
 	f.present(t, ask.Envelopes[0].ID)
-	if _, err := f.api.EnvelopeDefer(ctx, EnvelopeDeferParams{
-		Envelope: ask.Envelopes[0].ID, Reason: "later", PrincipalRef: "agent:cody", ScopeRef: codySeat,
-	}); err != nil {
-		t.Fatalf("defer: %v", err)
-	}
-	// Re-present (the kicker's sweep would) and reply.
-	if _, err := f.s.DB().Exec("UPDATE envelopes SET state = 'presented' WHERE id = ?", ask.Envelopes[0].ID); err != nil {
-		t.Fatalf("re-present: %v", err)
-	}
 	reply := f.say(t, RoomSayParams{
 		Ref: f.loneTaskID, Body: "here you go", To: []string{"clod"},
 		PrincipalRef: "agent:cody", ScopeRef: codySeat,
@@ -113,6 +95,7 @@ func TestDeferredEnvelopeStillAckableByALaterReply(t *testing.T) {
 	if len(reply.Acked) != 1 || reply.Acked[0] != ask.Envelopes[0].ID {
 		t.Fatalf("a previously deferred envelope was not acked by the later reply: %v", reply.Acked)
 	}
+	f.assertEnvelopeStates(t, map[string]string{ask.Envelopes[0].ID: "acked"})
 }
 
 // TestExplicitDischargeAcksADeferredEnvelopeAndResolvesItsRetry proves the

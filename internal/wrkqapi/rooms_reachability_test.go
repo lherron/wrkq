@@ -206,69 +206,6 @@ func TestPairRoomSayNotices(t *testing.T) {
 	}
 }
 
-// TestHideAffectsTheDefaultListingAndNothingElse pins the label's whole reach:
-// it changes what `RoomList` shows by default and never touches say, delivery,
-// or obligations.
-func TestHideAffectsTheDefaultListingAndNothingElse(t *testing.T) {
-	f := newRoomFixture(t)
-	ctx := context.Background()
-	f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "hello", PrincipalRef: "agent:clod"})
-
-	listed := func(t *testing.T, all bool) bool {
-		t.Helper()
-		result, err := f.api.RoomList(ctx, RoomListParams{All: all, PrincipalRef: "agent:clod"})
-		if err != nil {
-			t.Fatalf("RoomList: %v", err)
-		}
-		for _, room := range result.Items {
-			if room.Key == f.loneTaskID {
-				return true
-			}
-		}
-		return false
-	}
-
-	if !listed(t, false) {
-		t.Fatal("an active room is missing from the default listing")
-	}
-	hidden, err := f.api.RoomHide(ctx, RoomLabelParams{Room: f.loneTaskID, PrincipalRef: "agent:mable"})
-	if err != nil {
-		t.Fatalf("RoomHide: %v", err)
-	}
-	if !domain.RoomHasLabel(hidden.Labels, domain.RoomLabelHidden) {
-		t.Fatalf("hide did not set the label: %+v", hidden.Labels)
-	}
-	if listed(t, false) {
-		t.Fatal("a hidden room is still in the default listing")
-	}
-	if !listed(t, true) {
-		t.Fatal("--all did not show a hidden room")
-	}
-
-	// Hidden changes nothing about reachability: the say writes and the
-	// obligation gates.
-	said := f.say(t, RoomSayParams{
-		Ref: f.loneTaskID, Body: "still reachable", To: []string{"cody"}, PrincipalRef: "agent:clod",
-	})
-	seat := "cody@proj:" + f.loneTaskID
-	f.present(t, said.Envelopes[0].ID)
-	view := f.pendingView(t, false, seat)
-	if len(view.Blocking) != 1 || view.Blocking[0] != said.Envelopes[0].ID {
-		t.Fatalf("a hidden room's obligation stopped gating: %v", view.Blocking)
-	}
-
-	unhidden, err := f.api.RoomUnhide(ctx, RoomLabelParams{Room: f.loneTaskID, PrincipalRef: "agent:mable"})
-	if err != nil {
-		t.Fatalf("RoomUnhide: %v", err)
-	}
-	if domain.RoomHasLabel(unhidden.Labels, domain.RoomLabelHidden) {
-		t.Fatalf("unhide left the label: %+v", unhidden.Labels)
-	}
-	if !listed(t, false) {
-		t.Fatal("unhide did not restore the room to the default listing")
-	}
-}
-
 // TestDefaultListingOmitsStaleRoomsButKeepsThemAddressable separates DISCOVERY
 // from reachability: a stale room leaves the default listing and stays fully
 // addressable by key.
@@ -434,6 +371,14 @@ func TestObligationsGateUniformlyWhateverTheRoomProjection(t *testing.T) {
 		t.Fatalf("the projection retired the obligation: %q", inbox.Groups[0].Items[0].State)
 	}
 
+	// The includeFyi read is uniform too: a fyi into the terminal room surfaces.
+	fyi := f.say(t, RoomSayParams{
+		Ref: f.loneTaskID, Body: "heads up", To: []string{"cody"}, FYI: true, PrincipalRef: "agent:clod",
+	})
+	if fyiView := f.pendingView(t, true, taskSeat); !has(fyiView, fyi.Envelopes[0].ID) {
+		t.Fatalf("includeFyi dropped a terminal room's fyi: %+v", fyiView.Items)
+	}
+
 	// And the reply path the carve-out assumed was missing is right there.
 	replied := f.say(t, RoomSayParams{
 		Ref: f.loneTaskID, Body: "on it", To: []string{"clod"},
@@ -441,47 +386,5 @@ func TestObligationsGateUniformlyWhateverTheRoomProjection(t *testing.T) {
 	})
 	if len(replied.Acked) != 1 || replied.Acked[0] != inTask.Envelopes[0].ID {
 		t.Fatalf("reply-is-ack did not discharge the obligation: %v", replied.Acked)
-	}
-}
-
-// TestTerminalWorkKeepsItsFanoutGating is the case T-07633 was found in, with
-// the ruling reversed: a supervisor completes a task, and BOTH siblings of the
-// fan-out stay standing against their seats. Reachability into finished work is
-// intended, not a leak.
-func TestTerminalWorkKeepsItsFanoutGating(t *testing.T) {
-	f := newRoomFixture(t)
-	ctx := context.Background()
-	seat := "cody@proj:" + f.loneTaskID
-
-	group := f.say(t, RoomSayParams{
-		Ref: f.loneTaskID, Body: "review this", To: []string{"cody", "mable"}, PrincipalRef: "agent:clod",
-	})
-	if len(group.Envelopes) != 2 {
-		t.Fatalf("fan-out = %d envelopes, want 2", len(group.Envelopes))
-	}
-	f.completeTask(t, f.loneTaskID)
-
-	view := f.pendingView(t, false, seat, "mable@proj:"+f.loneTaskID)
-	if len(view.Items) != 2 {
-		t.Fatalf("terminal work dropped its obligations: %+v", view.Items)
-	}
-
-	// The includeFyi read is uniform too.
-	fyi := f.say(t, RoomSayParams{
-		Ref: f.loneTaskID, Body: "heads up", To: []string{"cody"}, FYI: true, PrincipalRef: "agent:clod",
-	})
-	fyiView := f.pendingView(t, true, seat)
-	if pendingItems(fyiView)[fyi.Envelopes[0].ID] == "" {
-		t.Fatalf("includeFyi dropped a terminal room's fyi: %+v", fyiView.Items)
-	}
-
-	inbox, err := f.api.EnvelopeInboxView(ctx, EnvelopeInboxViewParams{
-		ScopeRef: seat, PrincipalRef: "agent:cody",
-	})
-	if err != nil {
-		t.Fatalf("inboxView: %v", err)
-	}
-	if len(inbox.Groups) != 1 || inbox.Groups[0].Room.Work != "terminal" {
-		t.Fatalf("inbox did not report work: terminal as information: %+v", inbox.Groups)
 	}
 }

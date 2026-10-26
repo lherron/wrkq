@@ -4,6 +4,7 @@ package wrkqapi
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -206,11 +207,15 @@ func TestTaskReleasePreservesGenerationAndFiltersExposeHoldership(t *testing.T) 
 	if shown.ClaimedBy != "" || shown.ClaimGeneration != claim.ClaimGeneration || shown.State != "in_progress" {
 		t.Fatalf("released task = %+v", shown)
 	}
-	if _, err := api.db.Exec("UPDATE tasks SET claim_generation = claim_generation - 1 WHERE id = ?", task.ID); err == nil {
-		t.Fatal("claim generation regression should be rejected by durable schema")
+	// The durable schema itself refuses both corruptions, each by its named
+	// trigger (migration 000048), not by some unrelated SQL failure.
+	if _, err := api.db.Exec("UPDATE tasks SET claim_generation = claim_generation - 1 WHERE id = ?", task.ID); err == nil ||
+		!strings.Contains(err.Error(), "task claim generation cannot regress") {
+		t.Fatalf("claim generation regression error = %v, want the no-regression trigger", err)
 	}
-	if _, err := api.db.Exec("UPDATE tasks SET claimed_by_principal_ref = 'agent:cody' WHERE id = ?", task.ID); err == nil {
-		t.Fatal("partial claim tuple should be rejected by durable schema")
+	if _, err := api.db.Exec("UPDATE tasks SET claimed_by_principal_ref = 'agent:cody' WHERE id = ?", task.ID); err == nil ||
+		!strings.Contains(err.Error(), "task claim tuple must be wholly present or absent") {
+		t.Fatalf("partial claim tuple error = %v, want the claim-tuple trigger", err)
 	}
 	reclaimed, err := api.TaskClaim(nodeContext("max3"), TaskClaimParams{
 		Task: task.ID, PrincipalRef: "agent:clod", Scope: "agent:clod:project:wrkq:task:" + task.ID,

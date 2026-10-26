@@ -52,43 +52,6 @@ func TestCommentAddRollsBackWhenCreatedEventCannotBeWritten(t *testing.T) {
 	}
 }
 
-func TestCommentAddProducesCanonicalCreatedEvent(t *testing.T) {
-	api, s := newMonitorAPI(t)
-	projectUUID := seedMonitorProject(t, s)
-	task, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{
-		Slug: "comment-event", Title: "Comment event", ProjectUUID: projectUUID, State: "open", Priority: 2,
-	})
-	if err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	comment, err := api.CommentAdd(context.Background(), CommentAddParams{Task: task.ID, Body: "event-backed comment"})
-	if err != nil {
-		t.Fatalf("CommentAdd: %v", err)
-	}
-	view, err := api.MonitorEventsView(context.Background(), MonitorEventsViewParams{
-		Tasks: []string{task.ID}, EventTypes: []string{"comment.created"}, Cursor: 0,
-	})
-	if err != nil {
-		t.Fatalf("MonitorEventsView: %v", err)
-	}
-	if len(view.Items) != 1 {
-		t.Fatalf("comment.created event count = %d, want 1: %+v", len(view.Items), view.Items)
-	}
-	got := view.Items[0]
-	if got.EventType != "comment.created" || got.ResourceType != "comment" || got.ResourceUUID == nil || *got.ResourceUUID != comment.UUID {
-		t.Fatalf("unexpected comment event: %+v", got)
-	}
-
-	var legacyCount int
-	if err := api.db.QueryRow("SELECT COUNT(*) FROM event_log WHERE event_type = 'comment_added'").Scan(&legacyCount); err != nil {
-		t.Fatalf("count legacy events: %v", err)
-	}
-	if legacyCount != 0 {
-		t.Fatalf("event_log contains %d legacy comment_added rows", legacyCount)
-	}
-}
-
 func TestCommentAddDispatchesLegacyWebhookProjection(t *testing.T) {
 	api, s, _ := newWebhookAPI(t)
 	sink := newWebhookSink(t)

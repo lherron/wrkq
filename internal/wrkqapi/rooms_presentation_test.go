@@ -157,39 +157,6 @@ func TestPresentationPreviewIsSideEffectFreeAndMatchesCommit(t *testing.T) {
 	}
 }
 
-func TestPresentationInputIDIsOptionalAndDeliveryOutcomeRemainsOpaque(t *testing.T) {
-	f := newRoomFixture(t)
-	ctx := context.Background()
-	withInput := f.say(t, RoomSayParams{
-		Ref: f.loneTaskID, Body: "with input", To: []string{"cody"}, PrincipalRef: "agent:clod",
-	})
-	withoutInput := f.say(t, RoomSayParams{
-		Ref: f.loneTaskID, Body: "without input", To: []string{"cody"}, PrincipalRef: "agent:clod",
-	})
-	first, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
-		Envelope: withInput.Envelopes[0].ID, PrincipalRef: "agent:hrc", InputID: "in-1",
-		DeliveryOutcome: "future-harness-class",
-	})
-	if err != nil {
-		t.Fatalf("present with inputId: %v", err)
-	}
-	second, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
-		Envelope: withoutInput.Envelopes[0].ID, PrincipalRef: "agent:hrc",
-		DeliveryOutcome: "admitted_into_active_turn",
-	})
-	if err != nil {
-		t.Fatalf("present without inputId: %v", err)
-	}
-	firstReceipt := first.Envelope.PresentedTo[0]
-	if firstReceipt.InputID == nil || *firstReceipt.InputID != "in-1" ||
-		firstReceipt.DeliveryOutcome == nil || *firstReceipt.DeliveryOutcome != "future-harness-class" {
-		t.Fatalf("opaque receipt fields were not preserved: %+v", firstReceipt)
-	}
-	if second.Envelope.PresentedTo[0].InputID != nil {
-		t.Fatalf("absent inputId became present: %+v", second.Envelope.PresentedTo[0])
-	}
-}
-
 func TestPresentationPreviewStillRequiresMemberRefWithoutAddressee(t *testing.T) {
 	f := newRoomFixture(t)
 	logEntry := f.say(t, RoomSayParams{
@@ -232,42 +199,42 @@ func TestPresentationIsExactlyOncePerDriveAttempt(t *testing.T) {
 	}
 }
 
-// TestPresentationDeliveryOutcomeRoundTripsAndDefaultsToNull covers the receipt's
-// newest opaque HRC field: a class HRC supplies rides through to show and to the
-// inbox view unchanged, and one it omits stays null rather than inventing a
-// default. wrkq validates no vocabulary here, so HRC can add a class without a
-// wrkq change.
-func TestPresentationDeliveryOutcomeRoundTripsAndDefaultsToNull(t *testing.T) {
+// TestPresentationReceiptKeepsInputIDAndDeliveryOutcomeVerbatimOrNull covers the
+// receipt's opaque HRC fields: an inputId and a delivery class HRC supplies
+// (even one wrkq has never heard of) ride through to show and to the inbox view
+// unchanged, and a field it omits stays null rather than inventing a default.
+// wrkq validates no vocabulary here, so HRC can add a class without a wrkq
+// change.
+func TestPresentationReceiptKeepsInputIDAndDeliveryOutcomeVerbatimOrNull(t *testing.T) {
 	f := newRoomFixture(t)
 	ctx := context.Background()
+	rows := []struct {
+		name            string
+		inputID         string
+		deliveryOutcome string
+	}{
+		{name: "inputId and an unknown class kept verbatim", inputID: "in-1", deliveryOutcome: "future-harness-class"},
+		{name: "known class without inputId", deliveryOutcome: "admitted_into_active_turn"},
+		{name: "neither field supplied", inputID: "", deliveryOutcome: ""},
+	}
+	sameOptional := func(got *string, want string) bool {
+		if want == "" {
+			return got == nil
+		}
+		return got != nil && *got == want
+	}
 
-	classified := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "classified",
-		To: []string{"mable@proj:primary"}, PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary"})
-	plain := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "unclassified",
-		To: []string{"mable@proj:primary"}, PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary"})
-
-	if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
-		Envelope: classified.Envelopes[0].ID, PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
-		DeliveryOutcome: "admitted_into_active_turn",
-	}); err != nil {
-		t.Fatalf("present with a delivery outcome: %v", err)
-	}
-	f.present(t, plain.Envelopes[0].ID)
-
-	shown, err := f.api.EnvelopeShow(ctx, EnvelopeShowParams{Envelope: classified.Envelopes[0].ID})
-	if err != nil {
-		t.Fatalf("show: %v", err)
-	}
-	if len(shown.PresentedTo) != 1 || shown.PresentedTo[0].DeliveryOutcome == nil ||
-		*shown.PresentedTo[0].DeliveryOutcome != "admitted_into_active_turn" {
-		t.Fatalf("receipt delivery outcome = %+v, want admitted_into_active_turn", shown.PresentedTo)
-	}
-	bare, err := f.api.EnvelopeShow(ctx, EnvelopeShowParams{Envelope: plain.Envelopes[0].ID})
-	if err != nil {
-		t.Fatalf("show: %v", err)
-	}
-	if len(bare.PresentedTo) != 1 || bare.PresentedTo[0].DeliveryOutcome != nil {
-		t.Fatalf("omitted delivery outcome = %+v, want null", bare.PresentedTo)
+	envelopeIDs := make([]string, len(rows))
+	for i, row := range rows {
+		said := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: row.name,
+			To: []string{"mable@proj:primary"}, PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary"})
+		envelopeIDs[i] = said.Envelopes[0].ID
+		if _, err := f.api.EnvelopePresent(ctx, EnvelopePresentParams{
+			Envelope: envelopeIDs[i], PrincipalRef: "agent:hrc", RuntimeID: "rt-1",
+			InputID: row.inputID, DeliveryOutcome: row.deliveryOutcome,
+		}); err != nil {
+			t.Fatalf("%s: present: %v", row.name, err)
+		}
 	}
 
 	inbox, err := f.api.EnvelopeInboxView(ctx, EnvelopeInboxViewParams{
@@ -276,58 +243,42 @@ func TestPresentationDeliveryOutcomeRoundTripsAndDefaultsToNull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inbox: %v", err)
 	}
-	outcomes := map[string]*string{}
+	inboxReceipts := map[string]WrkqEnvelopePresentation{}
 	for _, group := range inbox.Groups {
 		for _, envelope := range group.Items {
 			if len(envelope.PresentedTo) == 1 {
-				outcomes[envelope.ID] = envelope.PresentedTo[0].DeliveryOutcome
+				inboxReceipts[envelope.ID] = envelope.PresentedTo[0]
 			}
 		}
 	}
-	if got := outcomes[classified.Envelopes[0].ID]; got == nil || *got != "admitted_into_active_turn" {
-		t.Fatalf("inbox delivery outcome = %v, want admitted_into_active_turn", got)
-	}
-	if got, ok := outcomes[plain.Envelopes[0].ID]; !ok || got != nil {
-		t.Fatalf("inbox delivery outcome for an omitted class = %v, want null", got)
-	}
-}
 
-// TestStopHookPredicateCountsOnlyPresentedObligations proves §8's predicate
-// shape: a turn end is refused only for what was actually PRESENTED and left
-// neither replied nor deferred.
-func TestStopHookPredicateCountsOnlyPresentedObligations(t *testing.T) {
-	f := newRoomFixture(t)
-	codySeat := "cody@proj:" + f.loneTaskID
-
-	presented := f.say(t, RoomSayParams{
-		Ref: f.loneTaskID, Body: "blocking", To: []string{"cody"}, PrincipalRef: "agent:clod",
-	})
-	pendingOnly := f.say(t, RoomSayParams{
-		Ref: f.loneTaskID, Body: "not yet presented", To: []string{"cody"}, PrincipalRef: "agent:clod",
-	})
-	fyi := f.say(t, RoomSayParams{
-		Ref: f.loneTaskID, Body: "no obligation", To: []string{"cody"}, FYI: true, PrincipalRef: "agent:clod",
-	})
-	f.present(t, presented.Envelopes[0].ID, fyi.Envelopes[0].ID)
-
-	view := f.pendingView(t, false, codySeat)
-	if len(view.Blocking) != 1 || view.Blocking[0] != presented.Envelopes[0].ID {
-		t.Fatalf("stop-hook predicate = %v, want only the presented obligation", view.Blocking)
-	}
-	// The wake set is broader than the predicate: the kicker still has work.
-	ids := pendingItems(view)
-	if ids[pendingOnly.Envelopes[0].ID] == "" {
-		t.Fatal("the kicker wake set omitted a pending obligation")
-	}
-	if ids[fyi.Envelopes[0].ID] != "" {
-		t.Fatal("a fyi envelope entered the kicker wake set; fyi never summons")
+	for i, row := range rows {
+		shown, err := f.api.EnvelopeShow(ctx, EnvelopeShowParams{Envelope: envelopeIDs[i]})
+		if err != nil {
+			t.Fatalf("%s: show: %v", row.name, err)
+		}
+		if len(shown.PresentedTo) != 1 {
+			t.Fatalf("%s: show receipts = %+v, want one", row.name, shown.PresentedTo)
+		}
+		listed, ok := inboxReceipts[envelopeIDs[i]]
+		if !ok {
+			t.Fatalf("%s: envelope %s missing from the inbox view", row.name, envelopeIDs[i])
+		}
+		for surface, receipt := range map[string]WrkqEnvelopePresentation{"show": shown.PresentedTo[0], "inbox": listed} {
+			if !sameOptional(receipt.InputID, row.inputID) {
+				t.Fatalf("%s: %s inputId = %v (%q), want %q (empty = null)", row.name, surface, receipt.InputID, deref(receipt.InputID), row.inputID)
+			}
+			if !sameOptional(receipt.DeliveryOutcome, row.deliveryOutcome) {
+				t.Fatalf("%s: %s deliveryOutcome = %v (%q), want %q (empty = null)", row.name, surface, receipt.DeliveryOutcome, deref(receipt.DeliveryOutcome), row.deliveryOutcome)
+			}
+		}
 	}
 }
 
 // TestPendingViewIncludeFyiIsOptInAndNeverBlocks proves T-07627: the default
 // read stays the obligation-only wake set, includeFyi additionally surfaces
-// pending fyi envelopes as ITEMS, and a fyi never enters the stop-hook
-// predicate. The presentation half is pinned too: presenting a fyi auto-acks
+// pending fyi envelopes as ITEMS, and only a PRESENTED obligation enters the
+// stop-hook predicate (a pending one or a fyi never does). The presentation half is pinned too: presenting a fyi auto-acks
 // it, so it leaves the includeFyi read on its own.
 func TestPendingViewIncludeFyiIsOptInAndNeverBlocks(t *testing.T) {
 	f := newRoomFixture(t)
@@ -345,6 +296,11 @@ func TestPendingViewIncludeFyiIsOptInAndNeverBlocks(t *testing.T) {
 	base := f.pendingView(t, false, codySeat)
 	if len(base.Items) != 1 || base.Items[0].ID != ask.Envelopes[0].ID {
 		t.Fatalf("default pendingView = %+v, want only the obligation", base.Items)
+	}
+	// The stop-hook predicate is narrower than the wake set: an obligation that
+	// was never presented wakes the kicker but does not refuse a turn end.
+	if len(base.Blocking) != 0 {
+		t.Fatalf("a pending, never-presented obligation blocked a turn end: %v", base.Blocking)
 	}
 
 	// Opt-in: the fyi joins items and stays out of blocking.

@@ -85,12 +85,25 @@ func TestProjectEventsA2ShapeAndBounds(t *testing.T) {
 	api, s := newMonitorAPI(t)
 	project := createProjectEventContainer(t, s, "a2", "project", nil)
 	base := ProjectEventPostParams{Project: project.UUID, Type: "session.born", Summary: "fact"}
-	for _, raw := range []json.RawMessage{nil, json.RawMessage(`{}`), json.RawMessage(`{"Bad-Key":"x"}`), json.RawMessage(`{"alpha":{"nested":"x"}}`), json.RawMessage(`{"alpha":1}`)} {
+	for _, refused := range []struct {
+		raw    json.RawMessage
+		reason string
+	}{
+		{nil, "required"},
+		{json.RawMessage(`{}`), "required"},
+		{json.RawMessage(`["x"]`), "invalid_value"},
+		{json.RawMessage(`{"Bad-Key":"x"}`), "invalid_key"},
+		{json.RawMessage(`{"alpha":{"nested":"x"}}`), "invalid_value"},
+		{json.RawMessage(`{"alpha":1}`), "invalid_value"},
+		{json.RawMessage(`{"alpha":"` + strings.Repeat("x", 1025) + `"}`), "value_too_long"},
+	} {
 		p := base
-		p.Attributes = raw
-		if _, err := api.ProjectEventPost(context.Background(), p); err == nil {
-			t.Fatalf("attributes %s unexpectedly accepted", raw)
+		p.Attributes = refused.raw
+		_, err := api.ProjectEventPost(context.Background(), p)
+		if err == nil {
+			t.Fatalf("attributes %.40s unexpectedly accepted", refused.raw)
 		}
+		requireValidationReason(t, err, "attributes", refused.reason)
 	}
 	keys := make([]string, 33)
 	for i := range keys {
@@ -103,9 +116,11 @@ func TestProjectEventsA2ShapeAndBounds(t *testing.T) {
 	p := base
 	raw, _ := json.Marshal(tooMany)
 	p.Attributes = raw
-	if _, err := api.ProjectEventPost(context.Background(), p); err == nil {
+	_, err := api.ProjectEventPost(context.Background(), p)
+	if err == nil {
 		t.Fatal("33 keys unexpectedly accepted")
 	}
+	requireValidationReason(t, err, "attributes", "too_many_keys")
 	accepted := map[string]string{}
 	for i := 0; i < 32; i++ {
 		accepted[fmt.Sprintf("k%d", i)] = strings.Repeat("x", 1024)

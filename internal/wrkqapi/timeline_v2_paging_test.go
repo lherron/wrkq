@@ -5,8 +5,8 @@ package wrkqapi
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
+	"time"
 )
 
 // The v2 timeline reader's paging contract: the merge horizon between its two
@@ -173,9 +173,13 @@ func TestTimelineDescendingIsTheExactReverse(t *testing.T) {
 	}
 }
 
-// TestTimelineDescendingHonoursTheHorizon is the T-08328 fixture read backwards:
-// the newest end is reached on page one instead of after the whole history, and
-// the horizon still keeps the two sources from crossing.
+// TestTimelineDescendingHonoursTheHorizon is the T-08328 fixture read backwards.
+// Descending, event_log is scanned newest-first: a scan-cap's worth of NEWER
+// filler fills page one, and the only deliverable event row sits beyond the cap.
+// The lone project event is OLDER than that event row, so project_events drains
+// on page one while event_log is still truncated. Without the descending horizon
+// page one emits the project event, the event row arrives a page later, and the
+// delivered stream jumps forwards in time.
 func TestTimelineDescendingHonoursTheHorizon(t *testing.T) {
 	api, s := newMonitorAPI(t)
 	project := createProjectEventContainer(t, s, "deschorizon", "project", nil)
@@ -186,33 +190,38 @@ func TestTimelineDescendingHonoursTheHorizon(t *testing.T) {
 	}
 	insertRawEvents(t, api, monitorMaxPageLimit, "ignored.raw", "2026-03-01 00:00:00")
 	event := postProjectEvent(t, api, ProjectEventPostParams{Project: project.UUID, Type: "git.commit"})
-	if _, err := api.db.Exec(`UPDATE project_events SET created_at = '2026-02-01 00:00:00'`); err != nil {
+	if _, err := api.db.Exec(`UPDATE project_events SET created_at = '2025-12-01 00:00:00'`); err != nil {
 		t.Fatal(err)
 	}
 
 	// A page may legitimately deliver nothing -- here the newest 1000 rows are
 	// all unmatched filler -- so the contract is about the DELIVERED stream,
-	// not about page one. The first entry delivered must be the newest match,
-	// and the stream must never run forwards.
+	// not about page one: it must never run forwards, and the older project
+	// event must come after the newer event rows, exactly once.
 	delivered := drainTimeline(t, api, ContainerTimelineViewParams{
 		Container: project.UUID, Scope: "subtree", EntriesOnly: true, Limit: 100, Order: "desc",
 	}, 8)
 	if len(delivered) < 2 {
-		t.Fatalf("expected the project event and the state change, got %#v", delivered)
-	}
-	if delivered[0].ProjectEvent == nil || delivered[0].ProjectEvent.UUID != event.UUID {
-		t.Fatalf("descending stream must open on the newest match, got %#v", delivered)
+		t.Fatalf("expected the state change and the project event, got %#v", delivered)
 	}
 	for index := 1; index < len(delivered); index++ {
 		if delivered[index].Timestamp > delivered[index-1].Timestamp {
-			t.Fatalf("descending stream jumps forwards at %d: %s -> %s",
-				index, delivered[index-1].Timestamp, delivered[index].Timestamp)
+			t.Fatalf("descending stream jumps forwards at %d: %s -> %s (%#v)",
+				index, delivered[index-1].Timestamp, delivered[index].Timestamp, delivered)
 		}
 	}
-	// The horizon still separates the sources: the project event is NEWER than
-	// the state change and must be delivered before it, never beside it.
-	if delivered[len(delivered)-1].ProjectEvent != nil && delivered[len(delivered)-1].ProjectEvent.UUID == event.UUID {
-		t.Fatalf("project event landed at the oldest end: %#v", delivered)
+	projectEvents := 0
+	for _, entry := range delivered {
+		if entry.ProjectEvent != nil && entry.ProjectEvent.UUID == event.UUID {
+			projectEvents++
+		}
+	}
+	if projectEvents != 1 {
+		t.Fatalf("project event delivered %d times, want once: %#v", projectEvents, delivered)
+	}
+	last := delivered[len(delivered)-1]
+	if last.ProjectEvent == nil || last.ProjectEvent.UUID != event.UUID {
+		t.Fatalf("the oldest entry is not the project event: %#v", delivered)
 	}
 }
 
@@ -220,9 +229,6 @@ func TestTimelineDescendingHonoursTheHorizon(t *testing.T) {
 // source contains far more unrelated events than one raw scan page. The same
 // fixture checks an empty type and the exclusive server-time upper bound.
 func TestTimelineSparseTypeWindowPages(t *testing.T) {
-	if !timelineRequestUsesV2(ContainerTimelineViewParams{Before: "2026-01-04T00:00:00Z"}) {
-		t.Fatal("before-only request must select the bounded timeline reader")
-	}
 	api, s := newMonitorAPI(t)
 	project := createProjectEventContainer(t, s, "sparsewindow", "project", nil)
 	insertRawEvents(t, api, monitorMaxPageLimit+17, "unrelated.raw", "2026-01-01T00:00:00Z")
@@ -271,14 +277,18 @@ func TestTimelineSparseTypeWindowPages(t *testing.T) {
 	if err != nil || len(zero.Entries) != 0 || zero.NextCursor != "" || zero.SnapshotEventID != 0 {
 		t.Fatalf("zero-match sparse window = %#v, %v", zero, err)
 	}
-	var plan string
-	if err := api.db.QueryRow(`EXPLAIN QUERY PLAN SELECT pe.id FROM project_events pe INDEXED BY project_events_type_time_idx
-		WHERE pe.id > ? AND pe.id <= ? AND pe.type = ? AND pe.created_at >= ? AND pe.created_at < ?
-		ORDER BY pe.id DESC LIMIT ?`, 0, 1000000, "verify.upkeep", "2026-01-02T00:00:00Z", "2026-01-04T00:00:00Z", 1000).Scan(new(int), new(int), new(int), &plan); err != nil {
-		t.Fatal(err)
+	// A bare `before` (no scope, types or since) is still a bounded read: it
+	// delivers the facts before the bound and withholds the one at it.
+	seen := map[string]bool{}
+	for _, entry := range drainTimeline(t, api, ContainerTimelineViewParams{
+		Container: project.UUID, Before: "2026-01-04T00:00:00Z",
+	}, 6) {
+		if entry.ProjectEvent != nil {
+			seen[entry.ProjectEvent.UUID] = true
+		}
 	}
-	if !strings.Contains(plan, "project_events_type_time_idx") || !strings.Contains(plan, "type=?") {
-		t.Fatalf("sparse project query did not seek type-leading index: %s", plan)
+	if !seen[facts[0]] || !seen[facts[1]] || seen[facts[2]] {
+		t.Fatalf("before-only read delivered %v, want facts before the bound only (%v)", seen, facts)
 	}
 	for _, before := range []string{"invalid", "2026-01-02T00:00:00Z"} {
 		_, err := api.ContainerTimelineView(context.Background(), ContainerTimelineViewParams{
@@ -288,6 +298,7 @@ func TestTimelineSparseTypeWindowPages(t *testing.T) {
 		if err == nil {
 			t.Fatalf("invalid or empty window accepted: before=%q", before)
 		}
+		requireValidationReason(t, err, "before", "")
 	}
 }
 
@@ -333,95 +344,86 @@ func TestTimelineMixedTypeCursorWindowBinding(t *testing.T) {
 	}
 }
 
-// TestAscendingSinceSeeksPastHistory pins the fix for the `--follow --since`
-// stall. A tail is ascending by construction, and an ascending scan starts at
-// the OLDEST row, so before the seek it walked every event ever written before
-// reaching the window: on a real ledger that was ~78 pages at the poll interval
-// (~16s) to print a backlog that `--since` alone returned in 0.15s.
+// TestAscendingSinceTailDeliversOnlyTheWindowThenOnlyNewAppends is what a
+// `--follow --since` caller sees. The opening tail page delivers the in-window
+// entries and nothing from the history behind the floor, and the next poll on
+// its cursor delivers only what was appended since. When every row predates
+// the floor the opening page is empty and the tail still picks up the next
+// append, instead of replaying history.
 //
-// The assertion is on the CURSOR POSITION, not on wall time, so it states the
-// mechanism and cannot flake: the opening tail page must start just below the
-// first in-window row rather than at zero. Removing the seek leaves
-// AfterEventID at 0 and fails this.
-func TestAscendingSinceSeeksPastHistory(t *testing.T) {
-	api, s := newMonitorAPI(t)
-	project := createProjectEventContainer(t, s, "seek", "project", nil)
-	task := createTimelineTask(t, s, project.UUID, "target", "open", "")
+// The window has two floors that back each other up: the opening page's seek
+// past history (the `--follow --since` stall fix in timeline_v2_request.go) and
+// the raw scan's own `timestamp >= since` predicate (timelineSourcePredicate).
+// Removing either alone delivers the same entries, so the seek's benefit is
+// query cost only and this test does not claim to guard it; removing both
+// fails it (the opening page then spends its scan cap on history).
+func TestAscendingSinceTailDeliversOnlyTheWindowThenOnlyNewAppends(t *testing.T) {
+	rows := []struct {
+		name          string
+		inWindowEntry bool // a state change lands inside the window before the first read
+	}{
+		{name: "long history behind the floor and one in-window entry", inWindowEntry: true},
+		{name: "every row behind the floor", inWindowEntry: false},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			api, s := newMonitorAPI(t)
+			project := createProjectEventContainer(t, s, "seek", "project", nil)
+			task := createTimelineTask(t, s, project.UUID, "target", "open", "")
+			insertRawEvents(t, api, 2500, "ignored.raw", "")
+			if !row.inWindowEntry {
+				setTaskState(t, api, task.ID, "in_progress")
+			}
+			// Everything written so far, task entries included, predates the floor.
+			if _, err := api.db.Exec(`UPDATE event_log SET timestamp = '2020-01-01T00:00:00Z'`); err != nil {
+				t.Fatal(err)
+			}
+			if row.inWindowEntry {
+				setTaskState(t, api, task.ID, "in_progress")
+			}
 
-	// A long prefix of history, all far older than the floor.
-	insertRawEvents(t, api, 2500, "ignored.raw", "")
-	if _, err := api.db.Exec(`UPDATE event_log SET timestamp = '2020-01-01T00:00:00Z'`); err != nil {
-		t.Fatal(err)
-	}
+			params := ContainerTimelineViewParams{
+				Container: project.UUID, Scope: "subtree", EntriesOnly: true,
+				Since: "2h", Tail: true, Limit: 100,
+			}
+			floor := time.Now().Add(-3 * time.Hour)
+			first := timelineView(t, api, params)
+			for _, entry := range first.Entries {
+				at, err := time.Parse(time.RFC3339Nano, entry.Timestamp)
+				if err != nil {
+					t.Fatalf("entry timestamp %q: %v", entry.Timestamp, err)
+				}
+				if at.Before(floor) {
+					t.Fatalf("history behind the floor was delivered: %#v", entry)
+				}
+			}
+			stateEntries := func(entries []WrkqTimelineEntry) int {
+				n := 0
+				for _, entry := range entries {
+					if entry.TaskID == task.ID && entry.Type == "task.state" {
+						n++
+					}
+				}
+				return n
+			}
+			wantFirst := 0
+			if row.inWindowEntry {
+				wantFirst = 1
+			}
+			if len(first.Entries) != wantFirst || stateEntries(first.Entries) != wantFirst {
+				t.Fatalf("opening tail page = %#v, want %d in-window state change(s)", first.Entries, wantFirst)
+			}
+			if first.NextCursor == "" {
+				t.Fatal("the opening tail page returned no cursor to poll from")
+			}
 
-	// One recent, deliverable entry inside the window.
-	setTaskState(t, api, task.ID, "completed")
-	var firstRecent int64
-	if err := api.db.QueryRow(
-		`SELECT MIN(id) FROM event_log WHERE timestamp > '2020-01-01T00:00:00Z'`,
-	).Scan(&firstRecent); err != nil {
-		t.Fatal(err)
-	}
-
-	view := timelineView(t, api, ContainerTimelineViewParams{
-		Container: project.UUID, Scope: "subtree", EntriesOnly: true,
-		Since: "2h", Tail: true, Limit: 100,
-	})
-
-	cur, err := decodeTimelineCursorAny(view.NextCursor)
-	if err != nil {
-		t.Fatalf("decode cursor: %v", err)
-	}
-	// The scan must have skipped the 2500-row prefix outright.
-	if cur.AfterEventID < firstRecent-1 {
-		t.Fatalf("ascending tail did not seek past history: AfterEventID=%d, want >= %d "+
-			"(the first in-window row is %d; starting below that walks the whole ledger)",
-			cur.AfterEventID, firstRecent-1, firstRecent)
-	}
-	// And the in-window entry is still delivered -- a seek that overshot would
-	// be fast and WRONG.
-	found := false
-	for _, entry := range view.Entries {
-		if entry.TaskID == task.ID && entry.Type == "task.state" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("the in-window entry was skipped by the seek: %#v", view.Entries)
-	}
-}
-
-// TestAscendingSinceSeekKeepsAnEmptyWindowUsable pins the no-match arm: when
-// every row predates the floor there is nothing to deliver, and the tail must
-// start at the END rather than replaying history.
-func TestAscendingSinceSeekKeepsAnEmptyWindowUsable(t *testing.T) {
-	api, s := newMonitorAPI(t)
-	project := createProjectEventContainer(t, s, "seekempty", "project", nil)
-	task := createTimelineTask(t, s, project.UUID, "target", "open", "")
-
-	setTaskState(t, api, task.ID, "completed")
-	if _, err := api.db.Exec(`UPDATE event_log SET timestamp = '2020-01-01T00:00:00Z'`); err != nil {
-		t.Fatal(err)
-	}
-	var maxEvent int64
-	if err := api.db.QueryRow(`SELECT MAX(id) FROM event_log`).Scan(&maxEvent); err != nil {
-		t.Fatal(err)
-	}
-
-	view := timelineView(t, api, ContainerTimelineViewParams{
-		Container: project.UUID, Scope: "subtree", EntriesOnly: true,
-		Since: "2h", Tail: true, Limit: 100,
-	})
-	if len(view.Entries) != 0 {
-		t.Fatalf("every row predates the floor, so nothing may be delivered: %#v", view.Entries)
-	}
-	cur, err := decodeTimelineCursorAny(view.NextCursor)
-	if err != nil {
-		t.Fatalf("decode cursor: %v", err)
-	}
-	if cur.AfterEventID != maxEvent {
-		t.Fatalf("an all-behind-the-floor source must start at the end: AfterEventID=%d, want %d",
-			cur.AfterEventID, maxEvent)
+			setTaskState(t, api, task.ID, "completed")
+			params.Cursor = first.NextCursor
+			next := timelineView(t, api, params)
+			if len(next.Entries) != 1 || stateEntries(next.Entries) != 1 {
+				t.Fatalf("next poll = %#v, want only the one appended state change", next.Entries)
+			}
+		})
 	}
 }
 

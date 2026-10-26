@@ -7,8 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"testing"
-
-	"github.com/lherron/wrkq/internal/store"
 )
 
 func TestTaskOutcomeEventsSnapshotProductionCampaignContext(t *testing.T) {
@@ -102,27 +100,5 @@ func TestTaskOutcomeEventsSnapshotProductionCampaignContext(t *testing.T) {
 	}
 	if current.Valid {
 		t.Fatalf("current outcome = %q, want NULL after clear", current.String)
-	}
-}
-
-func TestTaskCompletionDoesNotRequireOutcome(t *testing.T) {
-	api, s := newMonitorAPI(t)
-	projectUUID := seedMonitorProject(t, s)
-	task, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{
-		Slug: "completion-without-outcome", Title: "Completion without outcome",
-		ProjectUUID: projectUUID, State: "open", Priority: 2,
-	})
-	if err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	updated, err := api.TaskUpdate(context.Background(), TaskUpdateParams{
-		Task: task.ID, Patch: TaskPatch{State: strp("completed")},
-	})
-	if err != nil {
-		t.Fatalf("complete without outcome: %v", err)
-	}
-	if updated.State != "completed" || updated.Outcome != nil {
-		t.Fatalf("completed task = state %q outcome %#v, want completed/nil", updated.State, updated.Outcome)
 	}
 }

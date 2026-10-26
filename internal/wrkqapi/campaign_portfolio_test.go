@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/domain"
@@ -171,14 +172,21 @@ func TestCampaignDraftCancellationAndTerminalAdmissionSeal(t *testing.T) {
 		t.Fatalf("terminal enrollment error = %v, want WRKQ_VALIDATION", err)
 	}
 
+	if !strings.Contains(err.Error(), "draft or active campaign") {
+		t.Fatalf("terminal enrollment error = %v, want the draft-or-active enrollment refusal", err)
+	}
+
+	// Resident admission (create in, move in) is refused by the same seal, not
+	// by some unrelated failure.
+	const residentSeal = "terminal campaign cannot accept new resident members"
 	if _, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{
 		Slug: "terminal-resident", Title: "terminal-resident", ProjectUUID: campaign.UUID,
 		State: domain.StateOpen, Priority: 2,
-	}); err == nil {
-		t.Fatal("created resident task in terminal campaign")
+	}); err == nil || !strings.Contains(err.Error(), residentSeal) {
+		t.Fatalf("resident create in terminal campaign error = %v, want %q", err, residentSeal)
 	}
-	if _, err := s.Tasks.Move(monitorSystemActor, newMember.UUID, campaign.UUID, 0); err == nil {
-		t.Fatal("moved task into terminal campaign")
+	if _, err := s.Tasks.Move(monitorSystemActor, newMember.UUID, campaign.UUID, 0); err == nil || !strings.Contains(err.Error(), residentSeal) {
+		t.Fatalf("move into terminal campaign error = %v, want %q", err, residentSeal)
 	}
 	if _, err := api.TaskCopy(context.Background(), TaskCopyParams{
 		Source: newMember.ID, Destination: campaign.UUID,

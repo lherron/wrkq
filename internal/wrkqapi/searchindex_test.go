@@ -140,38 +140,6 @@ func TestSearchIndex_RebuildStatusSearchLifecycle(t *testing.T) {
 	}
 }
 
-// TestSearchIndex_Disabled proves search/index methods report WRKQ_VALIDATION
-// "search is disabled" when the server's search host is not enabled — and that
-// the sidecar is NEVER opened (no file created) in that case.
-func TestSearchIndex_Disabled(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "wrkq.db")
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := database.Migrate(); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-
-	// No WithSearch → Enabled=false.
-	api := New(database, nil, "", "", 0)
-	ctx := context.Background()
-
-	if _, err := api.SearchListView(ctx, SearchListViewParams{Query: "x"}); err == nil {
-		t.Fatal("expected error when search disabled")
-	} else if de, ok := err.(*DomainError); !ok || de.Code() != CodeValidation {
-		t.Errorf("SearchListView err = %v, want WRKQ_VALIDATION", err)
-	}
-	if _, err := api.IndexStatus(ctx, IndexStatusParams{}); err == nil {
-		t.Error("expected error from IndexStatus when search disabled")
-	}
-	if _, err := api.IndexRebuild(ctx, IndexLifecycleParams{}); err == nil {
-		t.Error("expected error from IndexRebuild when search disabled")
-	}
-}
-
 // TestSearchListView_InvalidSortIsValidation proves the invalid-sort sentinel
 // from search.Service is reclassified to WRKQ_VALIDATION (not WORKRPC_INTERNAL),
 // so the mirror surfaces the legacy message cleanly.

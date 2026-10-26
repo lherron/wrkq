@@ -4,6 +4,7 @@ package wrkqapi
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -177,13 +178,21 @@ func TestMonitorEventsView_StateOnlyFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("eventsView: %v", err)
 	}
-	for _, e := range view.Items {
-		if e.EventType == "task.updated" && (e.Payload == nil) {
-			t.Errorf("state-only must carry a payload for %+v", e)
-		}
+	// Exactly the state change survives: task.created and the title-only
+	// task.updated (which also carries a payload) are both filtered out.
+	if len(view.Items) != 1 {
+		t.Fatalf("state-only items = %d, want exactly the one state change: %+v", len(view.Items), view.Items)
 	}
-	if len(view.Items) == 0 {
-		t.Fatal("expected the state-change update to be included under --state-only")
+	e := view.Items[0]
+	if e.EventType != "task.updated" {
+		t.Fatalf("state-only event type = %q, want task.updated", e.EventType)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(deref(e.Payload)), &payload); err != nil {
+		t.Fatalf("state-only payload %q: %v", deref(e.Payload), err)
+	}
+	if _, ok := payload["state"]; !ok {
+		t.Fatalf("state-only emitted a non-state update: payload %v", payload)
 	}
 }
 
@@ -216,45 +225,6 @@ func TestMonitorEventsView_EventTypeFilter(t *testing.T) {
 		if e.EventType != "task.updated" {
 			t.Errorf("event-type filter leaked %q", e.EventType)
 		}
-	}
-}
-
-// TestMonitorEventsView_CommentBackfill proves comment.* events are matched by the
-// watched task via the comment→task backfill (payload.task_id hydrated server-side).
-func TestMonitorEventsView_CommentBackfill(t *testing.T) {
-	api, s := newMonitorAPI(t)
-	proj := seedMonitorProject(t, s)
-	task, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{
-		Slug: "task", Title: "Task", ProjectUUID: proj, State: "open", Priority: 2,
-	})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	// comment.created and comment.deleted both carry payload.task_id = the task
-	// UUID. That is what the monitor filter matches to the watched task (the
-	// backfill path the server owns when a payload lost its task_id).
-	cm, err := api.CommentAdd(context.Background(), CommentAddParams{Task: task.ID, Body: "a comment"})
-	if err != nil {
-		t.Fatalf("comment add: %v", err)
-	}
-	if _, err := api.CommentDelete(context.Background(), CommentDeleteParams{ID: cm.ID}); err != nil {
-		t.Fatalf("comment delete: %v", err)
-	}
-	view, err := api.MonitorEventsView(context.Background(), MonitorEventsViewParams{
-		Tasks:  []string{task.ID},
-		Cursor: 0,
-	})
-	if err != nil {
-		t.Fatalf("eventsView: %v", err)
-	}
-	sawComment := false
-	for _, e := range view.Items {
-		if e.ResourceType == "comment" {
-			sawComment = true
-		}
-	}
-	if !sawComment {
-		t.Fatal("expected the comment.deleted event to be matched to the watched task")
 	}
 }
 

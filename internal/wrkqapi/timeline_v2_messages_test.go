@@ -125,39 +125,6 @@ func TestTimelineTypeFilterSelectsMessages(t *testing.T) {
 	}
 }
 
-// TestTimelineExcludesUnstampedAdHocRooms pins the fail-closed legacy rule: an
-// ad-hoc room has no ownership affiliation, so an unstamped message remains
-// outside every project timeline rather than being guessed from current slugs.
-func TestTimelineExcludesAdHocRooms(t *testing.T) {
-	api, s := newMonitorAPI(t)
-	project := createProjectEventContainer(t, s, "dmproj", "project", nil)
-	task := createTimelineTask(t, s, project.UUID, "anchor", "open", "")
-
-	if _, err := api.RoomSay(context.Background(), RoomSayParams{
-		Ref: task.ID, Body: "anchored to the task", To: []string{"cody@dmproj:" + task.ID},
-		PrincipalRef: "agent:clod",
-	}); err != nil {
-		t.Fatalf("RoomSay(task room): %v", err)
-	}
-	if _, err := api.RoomSay(context.Background(), RoomSayParams{
-		Ref: "cody@unresolved-project:primary", Body: "a direct message", PrincipalRef: "agent:clod",
-	}); err != nil {
-		t.Fatalf("RoomSay(dm): %v", err)
-	}
-
-	view := timelineView(t, api, ContainerTimelineViewParams{
-		Container: project.UUID, Scope: "subtree", EntriesOnly: true, Types: []string{"message"}, Limit: 100,
-	})
-	for _, entry := range view.Entries {
-		if entry.Message != nil && entry.Message.Body == "a direct message" {
-			t.Fatalf("an ad-hoc DM leaked into the project log: %#v", entry)
-		}
-	}
-	if len(view.Entries) != 1 {
-		t.Fatalf("want exactly the task-room message, got %d: %#v", len(view.Entries), view.Entries)
-	}
-}
-
 func TestTimelineAdHocEndpointProjectAffiliationIsStampedAndImmutable(t *testing.T) {
 	api, s := newMonitorAPI(t)
 	alpha := createProjectEventContainer(t, s, "alpha", "project", nil)

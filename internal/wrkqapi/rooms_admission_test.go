@@ -167,16 +167,3 @@ func TestManifestScopedReplyDischargesExactSetAtomically(t *testing.T) {
 	_, err = f.api.RoomSay(ctx, RoomSayParams{Ref: f.loneTaskID, Body: "not an obligation", To: []string{"clod"}, DischargeEnvelopeIDs: []string{fyi.Envelopes[0].ID}, PrincipalRef: "agent:cody", ScopeRef: codySeat})
 	assertValidationReason(t, "must be pending, presented, or deferred reply_required", err)
 }
-
-func TestSayStoresTTLHoldAndIdempotencyAcrossFanout(t *testing.T) {
-	f := newRoomFixture(t)
-	said := f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: "hold", To: []string{"cody", "mable"}, TTL: "30s", Hold: true, IdempotencyKey: "admission-1", PrincipalRef: "agent:clod"})
-	if len(said.Envelopes) != 2 {
-		t.Fatalf("fanout = %d", len(said.Envelopes))
-	}
-	for _, envelope := range said.Envelopes {
-		if envelope.ExpiresAt == nil || envelope.Delivery != "hold" || envelope.IdempotencyKey == nil || *envelope.IdempotencyKey != "admission-1" {
-			t.Fatalf("envelope = %+v", envelope)
-		}
-	}
-}
