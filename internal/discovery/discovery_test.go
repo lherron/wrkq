@@ -36,7 +36,7 @@ func repoRoot(t *testing.T) string {
 
 // TestFindEntryPoints_State asserts that FindEntryPoints(root, "state") returns
 // hits covering production RPC/admin state commands AND the domain symbol sites
-// ParseState/ValidateState, each with a non-empty File, Line > 0, and non-empty Role.
+// ParseState, each with a non-empty File, Line > 0, and non-empty Role.
 func TestFindEntryPoints_State(t *testing.T) {
 	root := repoRoot(t)
 	hits, err := discovery.FindEntryPoints(root, "state")
@@ -69,7 +69,6 @@ func TestFindEntryPoints_State(t *testing.T) {
 		{"internal/rpccli/restore.go", "restore command"},
 		{"internal/admincli/stateadm.go", "administrative state command"},
 		{"internal/domain/state.go", "ParseState domain symbol"},
-		{"internal/domain/validation.go", "ValidateState domain symbol"},
 	}
 
 	for _, req := range required {
@@ -88,7 +87,7 @@ func TestFindEntryPoints_State(t *testing.T) {
 
 // TestExplainArea_Domain asserts that ExplainArea(root, "internal/domain") returns
 // a non-empty Role, at least one dependent package (e.g. internal/wrkqd imports domain),
-// and key exported symbols present (ParseState, ValidateState, State).
+// and key exported symbols present (ParseState, State).
 func TestExplainArea_Domain(t *testing.T) {
 	root := repoRoot(t)
 	area, err := discovery.ExplainArea(root, "internal/domain")
@@ -118,7 +117,7 @@ func TestExplainArea_Domain(t *testing.T) {
 	}
 
 	// Key exported symbols must be present.
-	requiredSymbols := []string{"ParseState", "ValidateState", "State"}
+	requiredSymbols := []string{"ParseState", "State"}
 	for _, sym := range requiredSymbols {
 		found := false
 		for _, s := range area.Exports {

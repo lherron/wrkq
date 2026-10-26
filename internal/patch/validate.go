@@ -182,35 +182,3 @@ func checkContainerCycles(snap *snapshot.Snapshot) []string {
 
 	return errors
 }
-
-// ValidatePatchOps checks that all operations in a patch are valid RFC 6902.
-func ValidatePatchOps(p Patch) []string {
-	var errors []string
-
-	for i, op := range p {
-		// Check op type
-		switch op.Op {
-		case "add", "replace", "test":
-			if op.Value == nil {
-				errors = append(errors, fmt.Sprintf("operation %d (%s): missing value", i, op.Op))
-			}
-		case "remove":
-			// remove doesn't need value
-		case "move", "copy":
-			if op.From == "" {
-				errors = append(errors, fmt.Sprintf("operation %d (%s): missing from", i, op.Op))
-			}
-		default:
-			errors = append(errors, fmt.Sprintf("operation %d: unknown op '%s'", i, op.Op))
-		}
-
-		// Check path format
-		if op.Path == "" {
-			errors = append(errors, fmt.Sprintf("operation %d (%s): empty path", i, op.Op))
-		} else if op.Path[0] != '/' {
-			errors = append(errors, fmt.Sprintf("operation %d (%s): path must start with /", i, op.Op))
-		}
-	}
-
-	return errors
-}

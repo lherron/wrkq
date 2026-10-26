@@ -301,32 +301,6 @@ type Event struct {
 	Payload      *string   `json:"payload,omitempty" db:"payload"` // JSON
 }
 
-// GetLabels parses the labels JSON into a string slice
-func (t *Task) GetLabels() ([]string, error) {
-	if t.Labels == nil || *t.Labels == "" {
-		return []string{}, nil
-	}
-	var labels []string
-	if err := json.Unmarshal([]byte(*t.Labels), &labels); err != nil {
-		return nil, err
-	}
-	return labels, nil
-}
-
-// SetLabels sets the labels from a string slice
-func (t *Task) SetLabels(labels []string) error {
-	if labels == nil {
-		labels = []string{}
-	}
-	data, err := json.Marshal(labels)
-	if err != nil {
-		return err
-	}
-	s := string(data)
-	t.Labels = &s
-	return nil
-}
-
 // GetMeta parses the meta JSON into a map
 func (c *Comment) GetMeta() (map[string]interface{}, error) {
 	if c.Meta == nil || *c.Meta == "" {

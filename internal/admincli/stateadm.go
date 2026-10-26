@@ -42,7 +42,7 @@ log and project events for reading; import does not replay them).
 
 Canonicalization ensures byte-for-byte identical output for the same
 database state (sorted keys, no insignificant whitespace, sorted arrays).`,
-	RunE: appctx.WithApp(appctx.DefaultOptions(), runStateExport),
+	RunE: appctx.WithApp(runStateExport),
 }
 
 var (
@@ -129,7 +129,7 @@ envelopes, workflow instances, attachments, task causes, project events.
 also given. Never run --force against a live ledger.
 
 Use --dry-run to validate the snapshot without writing to the database.`,
-	RunE: appctx.WithApp(appctx.DefaultOptions(), runStateImport),
+	RunE: appctx.WithApp(runStateImport),
 }
 
 var (
@@ -198,17 +198,16 @@ var stateVerifyCmd = &cobra.Command{
 If the snapshot is not byte-identical after canonicalization, verification
 fails with exit code 4.`,
 	Args: cobra.ExactArgs(1),
-	RunE: appctx.WithApp(appctx.DefaultOptions(), runStateVerify),
+	RunE: appctx.WithApp(runStateVerify),
 }
 
 var stateVerifyJSON bool
 
 func runStateVerify(app *appctx.App, cmd *cobra.Command, args []string) error {
 	inputPath := args[0]
-	database := app.DB
 
 	// Verify snapshot
-	result, err := snapshot.Verify(database.DB, inputPath)
+	result, err := snapshot.Verify(inputPath)
 	if err != nil {
 		return exitError(1, err)
 	}

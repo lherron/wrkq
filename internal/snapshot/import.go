@@ -770,7 +770,7 @@ func nullableSnapshotString(value string) interface{} {
 }
 
 // Verify checks that a snapshot file is canonical (round-trip deterministic).
-func Verify(db *sql.DB, inputPath string) (*VerifyResult, error) {
+func Verify(inputPath string) (*VerifyResult, error) {
 	// Load original snapshot
 	origData, err := os.ReadFile(inputPath)
 	if err != nil {

@@ -1,16 +1,14 @@
 // Package appctx provides a shared bootstrap helper for CLI commands.
-// It centralizes config loading, database opening, and actor resolution
+// It centralizes config loading and database opening
 // to reduce boilerplate across commands.
 package appctx
 
 import (
 	"fmt"
 
-	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/projectroot"
-	"github.com/lherron/wrkq/internal/scope"
 	"github.com/spf13/cobra"
 )
 
@@ -19,26 +17,8 @@ type App struct {
 	// Config is the loaded configuration
 	Config *config.Config
 
-	// DB is the opened database connection (nil if NeedsDB is false)
+	// DB is the opened database connection
 	DB *db.DB
-
-	// PrincipalRef is the canonical externally issued principal reference used
-	// for new write attribution. It is non-empty when NeedsActor/WithActor is used.
-	PrincipalRef string
-
-	// ScopeRef is the full praesidium scopeRef of the invoking agent, resolved
-	// best-effort from the environment (ASP_SCOPE_REF / ASP_HANDLE / ...).
-	// Empty when no scope is resolvable (e.g. a human at a plain shell).
-	// Used to attribute task creation to the originating agent scope.
-	ScopeRef string
-}
-
-// Attribution returns the canonical write attribution resolved during bootstrap.
-func (a *App) Attribution() attribution.Attribution {
-	return attribution.Attribution{
-		PrincipalRef: a.PrincipalRef,
-		ScopeRef:     a.ScopeRef,
-	}
 }
 
 // Close releases resources held by the App.
@@ -50,42 +30,15 @@ func (a *App) Close() {
 	}
 }
 
-// Options configures the bootstrap behavior.
-type Options struct {
-	// NeedsDB indicates whether to open the database.
-	// Defaults to true.
-	NeedsDB bool
-
-	// NeedsActor indicates whether to resolve the current actor.
-	// Requires NeedsDB to also be true.
-	NeedsActor bool
-}
-
-// DefaultOptions returns default options (DB required, no actor).
-func DefaultOptions() Options {
-	return Options{
-		NeedsDB:    true,
-		NeedsActor: false,
-	}
-}
-
-// WithActor returns options that require both DB and actor.
-func WithActor() Options {
-	return Options{
-		NeedsDB:    true,
-		NeedsActor: true,
-	}
-}
-
 // RunFunc is the signature for command run functions.
 type RunFunc func(app *App, cmd *cobra.Command, args []string) error
 
 // WithApp wraps a command's run function with shared bootstrap logic.
-// It loads config, opens the database, and optionally resolves the actor.
+// It loads config and opens the database.
 // The database is closed automatically when the wrapped function returns.
-func WithApp(opts Options, fn RunFunc) func(cmd *cobra.Command, args []string) error {
+func WithApp(fn RunFunc) func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		app, err := Bootstrap(cmd, opts)
+		app, err := Bootstrap(cmd)
 		if err != nil {
 			return err
 		}
@@ -95,9 +48,9 @@ func WithApp(opts Options, fn RunFunc) func(cmd *cobra.Command, args []string) e
 	}
 }
 
-// Bootstrap initializes the App according to the given options.
+// Bootstrap initializes the App.
 // Callers are responsible for calling App.Close() when done.
-func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
+func Bootstrap(cmd *cobra.Command) (*App, error) {
 	app := &App{}
 
 	// Load configuration; --db overrides the configured locator.
@@ -111,74 +64,38 @@ func Bootstrap(cmd *cobra.Command, opts Options) (*App, error) {
 	}
 	app.Config = cfg
 
-	// Open database if needed
-	if opts.NeedsDB {
-		if app.Config.RemoteEndpoint != "" {
-			return nil, fmt.Errorf("remote database locator %q is not valid for this local command", app.Config.DBLocator)
-		}
-		if app.Config.DBPath == "" {
-			return nil, config.MissingDatabasePathError()
-		}
-		database, err := db.Open(app.Config.DBPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open database: %w", err)
-		}
-
-		// Check for pending migrations
-		if err := database.RequiresMigrationError(); err != nil {
-			_ = database.Close()
-			return nil, err
-		}
-
-		app.DB = database
-
-		// Override project root from --project flag if provided
-		if projectFlag := cmd.Flag("project"); projectFlag != nil {
-			if projectSelector := projectFlag.Value.String(); projectSelector != "" {
-				projectPath, err := resolveProjectFlag(database, projectSelector)
-				if err != nil {
-					_ = database.Close()
-					return nil, err
-				}
-				app.Config.ProjectRoot = projectPath
-			}
-		}
+	if app.Config.RemoteEndpoint != "" {
+		return nil, fmt.Errorf("remote database locator %q is not valid for this local command", app.Config.DBLocator)
+	}
+	if app.Config.DBPath == "" {
+		return nil, config.MissingDatabasePathError()
+	}
+	database, err := db.Open(app.Config.DBPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Resolve attribution if needed.
-	if opts.NeedsActor {
-		if app.DB == nil {
-			app.Close()
-			return nil, fmt.Errorf("attribution resolution requires database (set NeedsDB: true)")
-		}
+	// Check for pending migrations
+	if err := database.RequiresMigrationError(); err != nil {
+		_ = database.Close()
+		return nil, err
+	}
 
-		resolvedScope := resolveScopeForCommand(cmd)
-		attr, err := attribution.Resolve(attribution.ResolveOptions{
-			DB:            app.DB.DB,
-			Config:        app.Config,
-			Command:       cmd,
-			ResolvedScope: resolvedScope,
-		})
-		if err != nil {
-			app.Close()
-			return nil, err
+	app.DB = database
+
+	// Override project root from --project flag if provided
+	if projectFlag := cmd.Flag("project"); projectFlag != nil {
+		if projectSelector := projectFlag.Value.String(); projectSelector != "" {
+			projectPath, err := resolveProjectFlag(database, projectSelector)
+			if err != nil {
+				_ = database.Close()
+				return nil, err
+			}
+			app.Config.ProjectRoot = projectPath
 		}
-		app.PrincipalRef = attr.PrincipalRef
-		app.ScopeRef = attr.ScopeRef
 	}
 
 	return app, nil
-}
-
-func resolveScopeForCommand(cmd *cobra.Command) *scope.ResolvedScope {
-	var scopeOverride string
-	if scopeFlag := cmd.Flag("scope"); scopeFlag != nil {
-		scopeOverride = scopeFlag.Value.String()
-	}
-	if resolved, _, err := scope.Resolve(scopeOverride); err == nil {
-		return &resolved
-	}
-	return nil
 }
 
 // resolveProjectFlag resolves a project selector (path, slug, or ID) to a project
