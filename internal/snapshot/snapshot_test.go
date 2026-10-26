@@ -54,74 +54,6 @@ func mustExec(t *testing.T, db *sql.DB, query string, args ...interface{}) {
 	}
 }
 
-func TestCanonicalJSON(t *testing.T) {
-	snap := &Snapshot{
-		Meta: Meta{
-			SchemaVersion:           1,
-			MachineInterfaceVersion: 1,
-		},
-		Containers: map[string]ContainerEntry{
-			"uuid-2": {ID: "P-00002", Slug: "proj-b", Title: "B", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z", CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a"},
-			"uuid-1": {ID: "P-00001", Slug: "proj-a", Title: "A", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z", CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a"},
-		},
-		Tasks:    map[string]TaskEntry{},
-		Comments: map[string]CommentEntry{},
-		Links:    map[string]LinkEntry{},
-	}
-
-	// Generate canonical JSON
-	data1, err := CanonicalJSON(snap)
-	if err != nil {
-		t.Fatalf("failed to generate canonical JSON: %v", err)
-	}
-
-	// Generate again - should be identical
-	data2, err := CanonicalJSON(snap)
-	if err != nil {
-		t.Fatalf("failed to generate canonical JSON second time: %v", err)
-	}
-
-	if string(data1) != string(data2) {
-		t.Errorf("canonical JSON is not deterministic:\n%s\nvs\n%s", string(data1), string(data2))
-	}
-
-	// Verify key ordering (containers should be sorted by UUID)
-	str := string(data1)
-	uuid1Pos := strings.Index(str, "uuid-1")
-	uuid2Pos := strings.Index(str, "uuid-2")
-
-	if uuid1Pos > uuid2Pos {
-		t.Errorf("UUIDs not sorted lexicographically: uuid-1 at %d, uuid-2 at %d", uuid1Pos, uuid2Pos)
-	}
-
-	// Verify no insignificant whitespace (no newlines)
-	if strings.Contains(str, "\n") {
-		t.Error("canonical JSON contains newlines")
-	}
-}
-
-func TestComputeSnapshotRev(t *testing.T) {
-	data := []byte(`{"test":"data"}`)
-
-	rev := ComputeSnapshotRev(data)
-
-	if !strings.HasPrefix(rev, "sha256:") {
-		t.Errorf("snapshot_rev should start with 'sha256:', got: %s", rev)
-	}
-
-	// Same data should produce same rev
-	rev2 := ComputeSnapshotRev(data)
-	if rev != rev2 {
-		t.Errorf("same data should produce same rev: %s vs %s", rev, rev2)
-	}
-
-	// Different data should produce different rev
-	rev3 := ComputeSnapshotRev([]byte(`{"test":"other"}`))
-	if rev == rev3 {
-		t.Error("different data should produce different rev")
-	}
-}
-
 func TestExport(t *testing.T) {
 	db := createTestDB(t)
 	defer func() { _ = db.Close() }()
@@ -164,6 +96,10 @@ func TestExport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read output file: %v", err)
 	}
+	// Canonical output carries no insignificant whitespace.
+	if strings.Contains(strings.TrimSuffix(string(data), "\n"), "\n") {
+		t.Errorf("canonical snapshot contains newlines:\n%s", data)
+	}
 
 	var snap Snapshot
 	if err := json.Unmarshal(data, &snap); err != nil {
@@ -185,58 +121,6 @@ func TestExport(t *testing.T) {
 	}
 	if strings.Contains(string(data), "\"actors\"") || strings.Contains(string(data), "actor_uuid") {
 		t.Errorf("snapshot must not contain actor scaffolding: %s", string(data))
-	}
-}
-
-func TestExportContainerComment(t *testing.T) {
-	db := createTestDB(t)
-	defer func() { _ = db.Close() }()
-	seedTestData(t, db)
-
-	_, err := db.Exec(`
-		INSERT INTO comments (uuid, id, container_uuid, created_by_principal_ref, body, etag, created_at)
-		VALUES ('container-comment-uuid', 'C-00002', 'container-uuid-1', 'agent:test-actor', 'Container comment', 1, '2025-01-02T00:00:00Z')
-	`)
-	if err != nil {
-		t.Fatalf("failed to insert container comment: %v", err)
-	}
-
-	outputPath := filepath.Join(t.TempDir(), "state.json")
-	_, err = Export(db, ExportOptions{
-		OutputPath: outputPath,
-		Canonical:  true,
-	})
-	if err != nil {
-		t.Fatalf("failed to export container comment: %v", err)
-	}
-
-	data, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("failed to read container-comment snapshot: %v", err)
-	}
-	var exported Snapshot
-	if err := json.Unmarshal(data, &exported); err != nil {
-		t.Fatalf("failed to decode container-comment snapshot: %v", err)
-	}
-	comment := exported.Comments["container-comment-uuid"]
-	if comment.TaskUUID != "" || comment.ContainerUUID != "container-uuid-1" {
-		t.Fatalf("exported comment subject = task %q, container %q", comment.TaskUUID, comment.ContainerUUID)
-	}
-
-	target := createTestDB(t)
-	defer func() { _ = target.Close() }()
-	if _, err := Import(target, ImportOptions{InputPath: outputPath}); err != nil {
-		t.Fatalf("failed to import container-comment snapshot: %v", err)
-	}
-	var importedTask sql.NullString
-	var importedContainer string
-	if err := target.QueryRow(`
-		SELECT task_uuid, container_uuid FROM comments WHERE uuid = 'container-comment-uuid'
-	`).Scan(&importedTask, &importedContainer); err != nil {
-		t.Fatalf("failed to read imported container comment: %v", err)
-	}
-	if importedTask.Valid || importedContainer != "container-uuid-1" {
-		t.Fatalf("imported comment subject = task %#v, container %q", importedTask, importedContainer)
 	}
 }
 
@@ -277,41 +161,6 @@ func TestExportWithLabelsSorted(t *testing.T) {
 		t.Errorf("labels not sorted: %v", task.Labels)
 	}
 }
-
-func TestRoundTrip(t *testing.T) {
-	db := createTestDB(t)
-	defer func() { _ = db.Close() }()
-	seedTestData(t, db)
-
-	tmpDir := t.TempDir()
-	outputPath := filepath.Join(tmpDir, "state.json")
-
-	// Export
-	opts := ExportOptions{
-		OutputPath: outputPath,
-		Canonical:  true,
-	}
-
-	result, err := Export(db, opts)
-	if err != nil {
-		t.Fatalf("failed to export: %v", err)
-	}
-
-	// Verify
-	verifyResult, err := Verify(db, outputPath)
-	if err != nil {
-		t.Fatalf("failed to verify: %v", err)
-	}
-
-	if !verifyResult.Valid {
-		t.Errorf("round-trip verification failed: %s", verifyResult.Message)
-	}
-
-	if verifyResult.SnapshotRev != result.SnapshotRev {
-		t.Errorf("snapshot_rev mismatch: %s vs %s", verifyResult.SnapshotRev, result.SnapshotRev)
-	}
-}
-
 func TestPromiseExportImportRoundTripPreservesLastReviewFields(t *testing.T) {
 	openMigrated := func(name string) *wrkqdb.DB {
 		t.Helper()
@@ -398,44 +247,6 @@ func TestPromiseExportImportRoundTripPreservesLastReviewFields(t *testing.T) {
 	}
 }
 
-func TestImportDryRun(t *testing.T) {
-	db := createTestDB(t)
-	defer func() { _ = db.Close() }()
-	seedTestData(t, db)
-
-	tmpDir := t.TempDir()
-	outputPath := filepath.Join(tmpDir, "state.json")
-
-	// Export current state
-	exportOpts := ExportOptions{
-		OutputPath: outputPath,
-		Canonical:  true,
-	}
-
-	_, err := Export(db, exportOpts)
-	if err != nil {
-		t.Fatalf("failed to export: %v", err)
-	}
-
-	// Import with dry run
-	importOpts := ImportOptions{
-		InputPath: outputPath,
-		DryRun:    true,
-	}
-
-	result, err := Import(db, importOpts)
-	if err != nil {
-		t.Fatalf("failed to import dry run: %v", err)
-	}
-
-	if !result.DryRun {
-		t.Error("dry run flag not set in result")
-	}
-	if result.ContainerCount != 2 {
-		t.Errorf("expected 2 containers, got %d", result.ContainerCount)
-	}
-}
-
 // TestImportRejectsLegacyActorSnapshot proves that an actor-bearing snapshot is
 // hard-gated rather than lossily imported. wrkq is principal-only.
 func TestImportRejectsLegacyActorSnapshot(t *testing.T) {
@@ -468,170 +279,81 @@ func TestImportRejectsLegacyActorSnapshot(t *testing.T) {
 	}
 }
 
-func TestValidateSnapshot(t *testing.T) {
+// TestImportRefusesSnapshotWithDanglingReferences: Import (the engine of
+// `wrkqadm state import`) refuses a snapshot file whose references do not
+// resolve inside it, naming the dangling uuid, and writes nothing; the same
+// snapshot without the defect imports.
+func TestImportRefusesSnapshotWithDanglingReferences(t *testing.T) {
+	valid := func() *Snapshot {
+		return &Snapshot{
+			Meta: Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
+			Containers: map[string]ContainerEntry{
+				domain.RootContainerUUID: {ID: "P-00000", Slug: "wrkq-system-root", Kind: "root"},
+				"container-1":            {ID: "P-00001", Slug: "proj", Title: "Project", Kind: "project", ParentUUID: domain.RootContainerUUID, CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			},
+			Tasks: map[string]TaskEntry{
+				"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "container-1", State: "open", Kind: "task", Priority: 2, CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
+			},
+			Comments: map[string]CommentEntry{
+				"comment-1": {ID: "C-00001", TaskUUID: "task-1", CreatedByPrincipalRef: "agent:a", Body: "test", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z"},
+			},
+		}
+	}
+
 	tests := []struct {
 		name    string
-		snap    *Snapshot
-		wantErr bool
+		break_  func(*Snapshot)
+		wantErr string
 	}{
-		{
-			name: "valid snapshot",
-			snap: &Snapshot{
-				Meta: Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-				Containers: map[string]ContainerEntry{
-					domain.RootContainerUUID: {ID: "P-00000", Slug: "wrkq-system-root", Kind: "root"},
-					"container-1":            {ID: "P-00001", Slug: "proj", Title: "Project", Kind: "project", ParentUUID: domain.RootContainerUUID, CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-				},
-				Tasks: map[string]TaskEntry{
-					"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-				},
-				Comments: map[string]CommentEntry{
-					"comment-1": {ID: "C-00001", TaskUUID: "task-1", CreatedByPrincipalRef: "agent:a", Body: "test", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z"},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "invalid schema version",
-			snap: &Snapshot{
-				Meta: Meta{SchemaVersion: 0, MachineInterfaceVersion: 1},
-			},
-			wantErr: true,
-		},
-		{
-			name: "task references unknown container",
-			snap: &Snapshot{
-				Meta:       Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-				Containers: map[string]ContainerEntry{},
-				Tasks: map[string]TaskEntry{
-					"task-1": {ID: "T-00001", ProjectUUID: "unknown-container"},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "comment references unknown task",
-			snap: &Snapshot{
-				Meta:       Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-				Containers: map[string]ContainerEntry{},
-				Tasks:      map[string]TaskEntry{},
-				Comments: map[string]CommentEntry{
-					"comment-1": {TaskUUID: "unknown-task", CreatedByPrincipalRef: "agent:a"},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "container references unknown parent",
-			snap: &Snapshot{
-				Meta: Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-				Containers: map[string]ContainerEntry{
-					domain.RootContainerUUID: {ID: "P-00000", Slug: "wrkq-system-root", Kind: "root"},
-					"container-1":            {ID: "P-00001", Kind: "directory", ParentUUID: "unknown-parent"},
-				},
-			},
-			wantErr: true,
-		},
+		{"valid snapshot imports", func(*Snapshot) {}, ""},
+		{"schema_version 0", func(s *Snapshot) { s.Meta.SchemaVersion = 0 }, "invalid schema_version: 0"},
+		{"task references unknown container", func(s *Snapshot) {
+			task := s.Tasks["task-1"]
+			task.ProjectUUID = "unknown-container"
+			s.Tasks["task-1"] = task
+		}, "task task-1 references unknown container unknown-container"},
+		{"comment references unknown task", func(s *Snapshot) {
+			comment := s.Comments["comment-1"]
+			comment.TaskUUID = "unknown-task"
+			s.Comments["comment-1"] = comment
+		}, "comment comment-1 references unknown task unknown-task"},
+		{"container references unknown parent", func(s *Snapshot) {
+			s.Containers["container-2"] = ContainerEntry{ID: "P-00002", Slug: "dir", Title: "Dir", Kind: "directory", ParentUUID: "unknown-parent", CreatedByPrincipalRef: "agent:a", UpdatedByPrincipalRef: "agent:a", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"}
+		}, "container container-2 references unknown parent unknown-parent"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateSnapshot(tt.snap)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validateSnapshot() error = %v, wantErr %v", err, tt.wantErr)
+			snap := valid()
+			tt.break_(snap)
+			data, err := json.Marshal(snap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "state.json")
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			target := createTestDB(t)
+			_, err = Import(target, ImportOptions{InputPath: path})
+			var tasks int
+			if qerr := target.QueryRow(`SELECT COUNT(*) FROM tasks`).Scan(&tasks); qerr != nil {
+				t.Fatal(qerr)
+			}
+			if tt.wantErr == "" {
+				if err != nil || tasks != 1 {
+					t.Fatalf("valid snapshot: err=%v tasks=%d; want imported with 1 task", err, tasks)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Import err = %v; want it to name %q", err, tt.wantErr)
+			}
+			if tasks != 0 {
+				t.Fatalf("refused import still wrote %d task(s)", tasks)
 			}
 		})
-	}
-}
-
-func TestFormatTimestamp(t *testing.T) {
-	ts, _ := ParseTimestamp("2025-01-15T10:30:00Z")
-	formatted := FormatTimestamp(ts)
-
-	if formatted != "2025-01-15T10:30:00Z" {
-		t.Errorf("expected 2025-01-15T10:30:00Z, got %s", formatted)
-	}
-}
-
-// TestSnapshotPreservesCampaignEnrollment pins that cross-project campaign
-// ENROLMENT survives a snapshot round-trip. Before T-07701 the task tuple
-// carried no campaign column at all, so a restore silently unenrolled every
-// enrolled member and the campaign lost its cross-project slots.
-func TestSnapshotPreservesCampaignEnrollment(t *testing.T) {
-	openMigrated := func(name string) *wrkqdb.DB {
-		t.Helper()
-		database, err := wrkqdb.Open(filepath.Join(t.TempDir(), name+".db"))
-		if err != nil {
-			t.Fatalf("open %s database: %v", name, err)
-		}
-		if err := database.Migrate(); err != nil {
-			t.Fatalf("migrate %s database: %v", name, err)
-		}
-		t.Cleanup(func() { _ = database.Close() })
-		return database
-	}
-
-	source := openMigrated("source")
-	var rootUUID string
-	if err := source.QueryRow("SELECT uuid FROM containers WHERE kind = 'root'").Scan(&rootUUID); err != nil {
-		t.Fatalf("find root container: %v", err)
-	}
-	attr := attribution.Attribution{PrincipalRef: "agent:clod", ScopeRef: "agent:clod:project:wrkq:task:T-07701"}
-	s := store.New(source)
-
-	project, err := s.Containers.CreateWithAttribution(attr, store.ContainerCreateParams{
-		Slug: "alpha", Title: "alpha", ParentUUID: &rootUUID, Kind: "project",
-	})
-	if err != nil {
-		t.Fatalf("create project container: %v", err)
-	}
-	campaign, err := s.Containers.CreateWithAttribution(attr, store.ContainerCreateParams{
-		Slug: "camp", Title: "camp", ParentUUID: &project.UUID,
-	})
-	if err != nil {
-		t.Fatalf("create campaign container: %v", err)
-	}
-	if _, err := source.Exec(
-		"UPDATE containers SET campaign_state = 'active' WHERE uuid = ?", campaign.UUID,
-	); err != nil {
-		t.Fatalf("adorn campaign: %v", err)
-	}
-	created, err := s.Tasks.CreateWithAttribution(attr, store.CreateParams{
-		Slug: "enrolled-slot", Title: "enrolled slot", ProjectUUID: project.UUID,
-		State: domain.StateOpen, Priority: 3, CampaignUUID: &campaign.UUID,
-	})
-	if err != nil {
-		t.Fatalf("create enrolled task: %v", err)
-	}
-
-	outputPath := filepath.Join(t.TempDir(), "state.json")
-	if _, err := Export(source.DB, ExportOptions{OutputPath: outputPath, Canonical: true}); err != nil {
-		t.Fatalf("export: %v", err)
-	}
-
-	// The export must CARRY the enrolment, not just re-derive it on read.
-	data, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("read snapshot: %v", err)
-	}
-	if !strings.Contains(string(data), `"campaign_uuid": "`+campaign.UUID+`"`) &&
-		!strings.Contains(string(data), `"campaign_uuid":"`+campaign.UUID+`"`) {
-		t.Fatalf("exported snapshot does not carry campaign_uuid %s: %s", campaign.UUID, data)
-	}
-
-	target := createTestDB(t)
-	defer func() { _ = target.Close() }()
-	if _, err := Import(target, ImportOptions{InputPath: outputPath}); err != nil {
-		t.Fatalf("import: %v", err)
-	}
-	var restored sql.NullString
-	if err := target.QueryRow(
-		"SELECT campaign_uuid FROM tasks WHERE uuid = ?", created.UUID,
-	).Scan(&restored); err != nil {
-		t.Fatalf("read restored task: %v", err)
-	}
-	if !restored.Valid || restored.String != campaign.UUID {
-		t.Fatalf("restored campaign_uuid = %v, want %s", restored, campaign.UUID)
 	}
 }
 

@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-func TestUpdateGitignoreAddsRelativeDBPath(t *testing.T) {
+func TestInitAppendsRelativeDBPathToGitignore(t *testing.T) {
 	withTempCwd(t, func() {
-		if err := updateGitignore(".wrkq/wrkq.db"); err != nil {
-			t.Fatalf("updateGitignore: %v", err)
+		if out, err := runAdm(t, "init", "--db", ".wrkq/wrkq.db"); err != nil {
+			t.Fatalf("wrkqadm init: %v\n%s", err, out)
 		}
 		data, err := os.ReadFile(".gitignore")
 		if err != nil {
@@ -23,14 +23,18 @@ func TestUpdateGitignoreAddsRelativeDBPath(t *testing.T) {
 	})
 }
 
-func TestUpdateGitignoreSkipsAbsoluteDBPath(t *testing.T) {
+func TestInitLeavesGitignoreAloneForAbsoluteDBPath(t *testing.T) {
 	withTempCwd(t, func() {
 		const original = "# existing\n"
 		if err := os.WriteFile(".gitignore", []byte(original), 0o644); err != nil {
 			t.Fatalf("write .gitignore: %v", err)
 		}
-		if err := updateGitignore(filepath.Join(t.TempDir(), "wrkq.db")); err != nil {
-			t.Fatalf("updateGitignore: %v", err)
+		dbPath := filepath.Join(t.TempDir(), "wrkq.db")
+		if out, err := runAdm(t, "init", "--db", dbPath); err != nil {
+			t.Fatalf("wrkqadm init: %v\n%s", err, out)
+		}
+		if _, err := os.Stat(dbPath); err != nil {
+			t.Fatalf("init did not create %s: %v", dbPath, err)
 		}
 		data, err := os.ReadFile(".gitignore")
 		if err != nil {

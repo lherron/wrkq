@@ -1,61 +1,28 @@
 package admincli
 
 import (
-	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
-
-	"github.com/lherron/wrkq/internal/db"
 )
 
-const (
-	testActorUUID = "00000000-0000-0000-0000-000000000001"
-	testActorID   = "A-00001"
-)
+// TestMergeCommandRefusesLegacyActorMovementWithExit1 asserts that the legacy
+// cross-database merge data mover is disabled under principal-only
+// attribution: it relied on the actors table and *_actor_uuid remapping,
+// which are no longer a write surface.
+func TestMergeCommandRefusesLegacyActorMovementWithExit1(t *testing.T) {
+	_, source := migratedDB(t, "source.db")
+	_, dest := migratedDB(t, "dest.db")
 
-func setupMergeDB(t *testing.T) (*db.DB, string) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "test.db")
-	database, err := db.Open(path)
-	if err != nil {
-		t.Fatalf("failed to open db: %v", err)
-	}
-	if err := database.Migrate(); err != nil {
-		t.Fatalf("failed to migrate db: %v", err)
-	}
-	_, err = database.Exec(`
-		INSERT INTO actors (uuid, id, slug, display_name, role, created_at, updated_at)
-		VALUES (?, ?, 'test-user', 'Test User', 'human', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')
-	`, testActorUUID, testActorID)
-	if err != nil {
-		t.Fatalf("failed to seed actor: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = database.Close()
-	})
-	return database, path
-}
-
-// TestMergeIsHardGated asserts that the legacy cross-database merge data mover
-// is disabled under principal-only attribution. The mover relied on the actors
-// table and *_actor_uuid remapping, which are no longer a write surface.
-func TestMergeIsHardGated(t *testing.T) {
-	srcDB, _ := setupMergeDB(t)
-	destDB, _ := setupMergeDB(t)
-
-	_, err := mergeProjectIntoCanonical(mergeOptions{
-		SourceDB:        srcDB,
-		DestDB:          destDB,
-		SourceAttachDir: t.TempDir(),
-		DestAttachDir:   t.TempDir(),
-		ProjectSelector: "proj",
-		PathPrefix:      "canonical",
-		DryRun:          false,
-	})
+	out, err := runAdm(t, "merge", "--source", source, "--dest", dest, "--project", "proj",
+		"--source-attach-dir", filepath.Join(t.TempDir(), "src-att"), "--dest-attach-dir", filepath.Join(t.TempDir(), "dst-att"))
 	if err == nil {
-		t.Fatal("expected merge to be hard-gated, got nil error")
+		t.Fatalf("wrkqadm merge succeeded; want the legacy-movement refusal\n%s", out)
 	}
-	if !errors.Is(err, errLegacyActorMovement) {
-		t.Fatalf("expected errLegacyActorMovement, got %v", err)
+	if code := ExitCodeForError(err); code != 1 {
+		t.Fatalf("exit code = %d; want 1 (err %v)", code, err)
+	}
+	if !strings.Contains(err.Error(), "legacy actor data movement is no longer supported") {
+		t.Fatalf("err = %v; want it to name the retired legacy actor data movement", err)
 	}
 }

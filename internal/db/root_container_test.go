@@ -2,6 +2,7 @@ package db
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -104,26 +105,36 @@ func TestRootInvariantsRejectInvalidWrites(t *testing.T) {
 		return `INSERT INTO containers (uuid, id, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid) VALUES ('` + uuid + `','` + id + `','` + slug + `','` + slug + `','` + parent + `','` + kind + `','` + testSystemUUID + `','` + testSystemUUID + `')`
 	}
 
+	const (
+		parentKind    = "container parent/kind invariant"
+		rootImmutable = "root container is immutable"
+	)
 	mustReject := []struct {
 		name string
 		sql  string
+		want string
 	}{
-		{"second root", ins("a1", "x1", "r2", "", "root")},
-		{"non-root null parent", ins("a2", "x2", "nrn", "", "directory")},
-		{"null-parent project", ins("a3", "x3", "np", "", "project")},
-		{"project parent != root", ins("a4", "x4", "bp", proj, "project")},
-		{"directory under root", ins("a5", "x5", "dur", testRootUUID, "directory")},
-		{"demote root kind", `UPDATE containers SET kind='directory' WHERE kind='root'`},
-		{"move root parent", `UPDATE containers SET parent_uuid='` + proj + `' WHERE kind='root'`},
-		{"rename root slug", `UPDATE containers SET slug='other' WHERE kind='root'`},
-		{"archive root", `UPDATE containers SET archived_at='2026-01-01' WHERE kind='root'`},
-		{"delete root", `DELETE FROM containers WHERE kind='root'`},
-		{"task insert under root", `INSERT INTO tasks (uuid,id,slug,title,project_uuid,state,created_by_actor_uuid,updated_by_actor_uuid) VALUES ('tk2','T-10002','t2','T2','` + testRootUUID + `','open','` + testSystemUUID + `','` + testSystemUUID + `')`},
-		{"task move under root", `UPDATE tasks SET project_uuid='` + testRootUUID + `' WHERE id='T-10001'`},
+		{"second root", ins("a1", "x1", "r2", "", "root"), "UNIQUE constraint failed: containers.kind"},
+		{"non-root null parent", ins("a2", "x2", "nrn", "", "directory"), parentKind},
+		{"null-parent project", ins("a3", "x3", "np", "", "project"), parentKind},
+		{"project parent != root", ins("a4", "x4", "bp", proj, "project"), parentKind},
+		{"directory under root", ins("a5", "x5", "dur", testRootUUID, "directory"), parentKind},
+		{"demote root kind", `UPDATE containers SET kind='directory' WHERE kind='root'`, rootImmutable},
+		{"move root parent", `UPDATE containers SET parent_uuid='` + proj + `' WHERE kind='root'`, rootImmutable},
+		{"rename root slug", `UPDATE containers SET slug='other' WHERE kind='root'`, rootImmutable},
+		{"archive root", `UPDATE containers SET archived_at='2026-01-01' WHERE kind='root'`, rootImmutable},
+		{"delete root", `DELETE FROM containers WHERE kind='root'`, "root container cannot be deleted"},
+		{"task insert under root", `INSERT INTO tasks (uuid,id,slug,title,project_uuid,state,created_by_actor_uuid,updated_by_actor_uuid) VALUES ('tk2','T-10002','t2','T2','` + testRootUUID + `','open','` + testSystemUUID + `','` + testSystemUUID + `')`, "tasks cannot be created directly under the root container"},
+		{"task move under root", `UPDATE tasks SET project_uuid='` + testRootUUID + `' WHERE id='T-10001'`, "tasks cannot be moved directly under the root container"},
 	}
 	for _, tc := range mustReject {
-		if _, err := database.Exec(tc.sql); err == nil {
+		_, err := database.Exec(tc.sql)
+		if err == nil {
 			t.Errorf("%s: expected ABORT, but write succeeded", tc.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: refused by %q; want the guard %q", tc.name, err, tc.want)
 		}
 	}
 
@@ -139,6 +150,21 @@ func TestRootInvariantsRejectInvalidWrites(t *testing.T) {
 		if _, err := database.Exec(tc.sql); err != nil {
 			t.Errorf("%s: expected success, got %v", tc.name, err)
 		}
+	}
+
+	// A nested container inserted without a kind defaults to directory.
+	if _, err := database.Exec(`
+		INSERT INTO containers (uuid, id, slug, title, parent_uuid, created_by_actor_uuid, updated_by_actor_uuid)
+		VALUES ('b4', 'P-10013', 'nokind', 'nokind', ?, ?, ?)
+	`, proj, testSystemUUID, testSystemUUID); err != nil {
+		t.Fatalf("nested container without kind: expected success, got %v", err)
+	}
+	var kind string
+	if err := database.QueryRow(`SELECT kind FROM containers WHERE uuid = 'b4'`).Scan(&kind); err != nil {
+		t.Fatalf("query defaulted kind: %v", err)
+	}
+	if kind != "directory" {
+		t.Fatalf("nested container without kind defaulted to %q, want directory", kind)
 	}
 }
 

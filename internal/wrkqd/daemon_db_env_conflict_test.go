@@ -1,11 +1,8 @@
 package wrkqd
 
 import (
-	"net"
-	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 // TestServeDaemonWithDBFlagStaysUpUnderConflictingDBEnv pins the fleet
@@ -21,35 +18,6 @@ func TestServeDaemonWithDBFlagStaysUpUnderConflictingDBEnv(t *testing.T) {
 	t.Setenv("WRKQ_DB_PATH", filepath.Join(t.TempDir(), "stale.db"))
 	t.Setenv("WRKQ_DB_PATH_FILE", "")
 
-	sigCh := make(chan chan<- os.Signal, 1)
-	oldNotify, oldStop := signalNotify, signalStop
-	signalNotify = func(ch chan<- os.Signal) { sigCh <- ch }
-	signalStop = func(chan<- os.Signal) {}
-	t.Cleanup(func() { signalNotify, signalStop = oldNotify, oldStop })
-
-	addr := freeAddr(t)
-	done := make(chan error, 1)
-	go func() {
-		done <- ServeDaemon(DaemonOptions{Addr: addr, DBPath: dbPath, Token: "test-token"})
-	}()
-
-	var daemonSig chan<- os.Signal
-	select {
-	case daemonSig = <-sigCh:
-	case err := <-done:
-		t.Fatalf("ServeDaemon exited before serving: %v", err)
-	case <-time.After(10 * time.Second):
-		t.Fatal("ServeDaemon did not start serving")
-	}
-
-	conn, err := net.DialTimeout("tcp", addr, time.Second)
-	if err != nil {
-		t.Fatalf("daemon not accepting connections on %s: %v", addr, err)
-	}
-	_ = conn.Close()
-
-	daemonSig <- os.Interrupt
-	if err := <-done; err != nil {
-		t.Fatalf("ServeDaemon shutdown: %v", err)
-	}
+	stop := serveDaemon(t, DaemonOptions{Addr: freeAddr(t), DBPath: dbPath, Token: "test-token"})
+	stop()
 }

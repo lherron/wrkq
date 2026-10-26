@@ -13,8 +13,9 @@ import (
 
 // dbWithPendingMigration returns a fully migrated database whose newest
 // migration has been un-recorded, so the current binary sees one pending
-// migration — a DB that is behind the code serving it.
-func dbWithPendingMigration(t *testing.T) string {
+// migration — a DB that is behind the code serving it. It also returns the
+// newest migration still recorded, which the refusal must name.
+func dbWithPendingMigration(t *testing.T) (string, string) {
 	t.Helper()
 
 	dbPath := filepath.Join(t.TempDir(), "pending.db")
@@ -35,7 +36,12 @@ func dbWithPendingMigration(t *testing.T) string {
 		_ = database.Close()
 		t.Fatalf("fixture precondition: applied=%d pending=%d", len(applied), len(pending))
 	}
+	if len(applied) < 2 {
+		_ = database.Close()
+		t.Fatalf("fixture precondition: need two applied migrations, have %d", len(applied))
+	}
 	newest := applied[len(applied)-1]
+	stillApplied := applied[len(applied)-2]
 	if _, err := database.Exec("DELETE FROM schema_migrations WHERE version = ?", newest); err != nil {
 		_ = database.Close()
 		t.Fatalf("un-record migration: %v", err)
@@ -47,7 +53,7 @@ func dbWithPendingMigration(t *testing.T) string {
 	if err := database.Close(); err != nil {
 		t.Fatalf("close fixture db: %v", err)
 	}
-	return dbPath
+	return dbPath, stillApplied
 }
 
 // freeAddr reserves a loopback port and releases it, so the test can prove
@@ -72,25 +78,42 @@ func freeAddr(t *testing.T) string {
 // exposure outright. Remote clients rely on this readiness gate rather than
 // trying to infer DB compatibility from migration names, which they cannot do
 // — the canonical DB legitimately carries retired migration names that no
-// current binary embeds.
+// current binary embeds. The refusal is the operator's instruction: it names
+// the database, the version it is at ("none" for a never-migrated file), and
+// the command that fixes it.
 func TestServeDaemonRefusesPendingMigrationBeforeExposingRPC(t *testing.T) {
-	dbPath := dbWithPendingMigration(t)
-	addr := freeAddr(t)
+	behind, stillApplied := dbWithPendingMigration(t)
+	unmigrated := filepath.Join(t.TempDir(), "unmigrated.db")
 
-	err := ServeDaemon(DaemonOptions{Addr: addr, DBPath: dbPath, Token: "test-token"})
-	if err == nil {
-		t.Fatal("ServeDaemon exposed a daemon backed by a DB with a pending migration")
-	}
-	if !strings.Contains(err.Error(), "requires migration") {
-		t.Fatalf("error = %q, want a migration-readiness refusal", err)
-	}
+	for _, tc := range []struct {
+		name        string
+		dbPath      string
+		wantVersion string
+	}{
+		{"one migration behind names the newest applied version", behind, "(version: " + stillApplied + ")"},
+		{"never-migrated file reports version none", unmigrated, "(version: none)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			addr := freeAddr(t)
 
-	// The refusal must happen before the listener exists: no client can have
-	// reached business dispatch on this endpoint.
-	conn, dialErr := net.DialTimeout("tcp", addr, 250*time.Millisecond)
-	if dialErr == nil {
-		_ = conn.Close()
-		t.Fatalf("daemon listener is accepting connections on %s despite the migration refusal", addr)
+			err := ServeDaemon(DaemonOptions{Addr: addr, DBPath: tc.dbPath, Token: "test-token"})
+			if err == nil {
+				t.Fatal("ServeDaemon exposed a daemon backed by a DB with a pending migration")
+			}
+			for _, want := range []string{"requires migration", tc.dbPath, tc.wantVersion, "pending migration", "Run 'wrkqadm migrate'"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %q, want it to contain %q", err, want)
+				}
+			}
+
+			// The refusal must happen before the listener exists: no client can have
+			// reached business dispatch on this endpoint.
+			conn, dialErr := net.DialTimeout("tcp", addr, 250*time.Millisecond)
+			if dialErr == nil {
+				_ = conn.Close()
+				t.Fatalf("daemon listener is accepting connections on %s despite the migration refusal", addr)
+			}
+		})
 	}
 }
 
@@ -98,7 +121,7 @@ func TestServeDaemonRefusesPendingMigrationBeforeExposingRPC(t *testing.T) {
 // entrypoint: an opened workrpc handle must not be constructed over a DB that
 // is behind its binary.
 func TestBootstrapOpenRefusesPendingMigration(t *testing.T) {
-	dbPath := dbWithPendingMigration(t)
+	dbPath, _ := dbWithPendingMigration(t)
 
 	handle, err := bootstrap.Open(dbPath)
 	if err == nil {

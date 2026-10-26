@@ -1,33 +1,39 @@
 package wrkqd
 
 import (
-	"github.com/lherron/wrkq/internal/store"
+	"net/http"
 	"testing"
+
+	"github.com/lherron/wrkq/internal/store"
 )
 
+// TestLegacyHTTPContainerViewsExcludeNamedSubtasks pins the legacy list and
+// tree routes: a named subtask is not a row of its own in either view; its
+// owner stands for it and carries open_subtask_count.
 func TestLegacyHTTPContainerViewsExcludeNamedSubtasks(t *testing.T) {
 	database, _ := setupTestEnv(t)
+	mux := http.NewServeMux()
+	(&daemonServer{db: database}).registerRoutes(mux)
+	c := &legacyClient{t: t, handler: mux}
+
 	s := store.New(database)
 	owner, err := s.Tasks.Create("00000000-0000-0000-0000-000000000001", store.CreateParams{ProjectUUID: "00000000-0000-0000-0000-000000000002", Slug: "owner", Title: "Owner", State: "open", Priority: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.Tasks.Create("00000000-0000-0000-0000-000000000001", store.CreateParams{SubtaskOwnerUUID: &owner.UUID, Slug: "preview", Title: "Preview", State: "open", Priority: 3})
-	if err != nil {
+	if _, err := s.Tasks.Create("00000000-0000-0000-0000-000000000001", store.CreateParams{SubtaskOwnerUUID: &owner.UUID, Slug: "preview", Title: "Preview", State: "open", Priority: 3}); err != nil {
 		t.Fatal(err)
 	}
-	rows, _, err := findTasks(database, findOptions{paths: []string{"inbox"}, state: "all", sortField: "id"}, false)
-	if err != nil {
-		t.Fatal(err)
+
+	requireOnlyOwner := func(view string, rows []interface{}) {
+		t.Helper()
+		if len(rows) != 1 {
+			t.Fatalf("%s: %d rows %v; want only the owner", view, len(rows), rows)
+		}
+		row := rows[0].(map[string]interface{})
+		requireField(t, view, row, "id", owner.ID)
+		requireField(t, view, row, "open_subtask_count", float64(1))
 	}
-	if len(rows) != 1 || rows[0].ID != owner.ID || rows[0].OpenSubtaskCount != 1 {
-		t.Fatalf("list: %+v", rows)
-	}
-	tree, err := buildTree(database, "inbox", 0, true, false, false, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tree.Children) != 1 || tree.Children[0].ID != owner.ID || tree.Children[0].OpenSubtaskCount != 1 {
-		t.Fatalf("tree: %+v", tree)
-	}
+	requireOnlyOwner("/v1/tasks/list", listOf(t, c.post("/v1/tasks/list", `{"filter":"all","path_prefix":["inbox"]}`, http.StatusOK), "tasks"))
+	requireOnlyOwner("/v1/containers/tree", listOf(t, c.post("/v1/containers/tree", `{"path":"inbox"}`, http.StatusOK), "children"))
 }

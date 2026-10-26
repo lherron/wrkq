@@ -1,848 +1,436 @@
 package patch
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	wrkqdb "github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/snapshot"
 )
 
-func TestDiffSnapshots_AddTask(t *testing.T) {
-	base := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks:    map[string]snapshot.TaskEntry{},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
+const at = "2025-01-01T00:00:00Z"
 
-	target := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "new-task", Title: "New Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
+func containerEntry(id, slug, parent string) snapshot.ContainerEntry {
+	return snapshot.ContainerEntry{ID: id, Slug: slug, Title: slug, Kind: "project", ParentUUID: parent, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: at, UpdatedAt: at}
+}
 
-	patch := DiffSnapshots(base, target)
+func taskEntry(id, slug, projectUUID string) snapshot.TaskEntry {
+	return snapshot.TaskEntry{ID: id, Slug: slug, Title: slug, ProjectUUID: projectUUID, State: "open", Kind: "task", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: at, UpdatedAt: at}
+}
 
-	if len(patch) != 1 {
-		t.Fatalf("expected 1 operation, got %d", len(patch))
-	}
-
-	op := patch[0]
-	if op.Op != "add" {
-		t.Errorf("expected 'add' op, got '%s'", op.Op)
-	}
-	if op.Path != "/tasks/task-1" {
-		t.Errorf("expected path '/tasks/task-1', got '%s'", op.Path)
+// taskValue is a task entry as a patch "add" value.
+func taskValue(id, slug, projectUUID string) map[string]interface{} {
+	return map[string]interface{}{
+		"id": id, "slug": slug, "title": slug, "project_uuid": projectUUID, "state": "open", "kind": "task",
+		"priority": float64(2), "created_by_principal_ref": "agent:tester", "updated_by_principal_ref": "agent:tester",
+		"etag": float64(1), "created_at": at, "updated_at": at,
 	}
 }
 
-func TestDiffSnapshots_RemoveTask(t *testing.T) {
-	base := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "old-task", Title: "Old Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	target := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks:    map[string]snapshot.TaskEntry{},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	patch := DiffSnapshots(base, target)
-
-	if len(patch) != 1 {
-		t.Fatalf("expected 1 operation, got %d", len(patch))
-	}
-
-	op := patch[0]
-	if op.Op != "remove" {
-		t.Errorf("expected 'remove' op, got '%s'", op.Op)
-	}
-	if op.Path != "/tasks/task-1" {
-		t.Errorf("expected path '/tasks/task-1', got '%s'", op.Path)
-	}
-}
-
-func TestDiffSnapshots_ReplaceTask(t *testing.T) {
-	base := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "task", Title: "Old Title", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	target := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "task", Title: "New Title", ProjectUUID: "container-1", State: "completed", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 2, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-02T00:00:00Z"},
-		},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	patch := DiffSnapshots(base, target)
-
-	if len(patch) != 1 {
-		t.Fatalf("expected 1 operation, got %d", len(patch))
-	}
-
-	op := patch[0]
-	if op.Op != "replace" {
-		t.Errorf("expected 'replace' op, got '%s'", op.Op)
-	}
-	if op.Path != "/tasks/task-1" {
-		t.Errorf("expected path '/tasks/task-1', got '%s'", op.Path)
-	}
-}
-
-func TestDiffSnapshots_NoChanges(t *testing.T) {
-	snap := &snapshot.Snapshot{
+func ledger(containers map[string]snapshot.ContainerEntry, tasks map[string]snapshot.TaskEntry) *snapshot.Snapshot {
+	return &snapshot.Snapshot{
 		Meta:       snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{},
-		Tasks:      map[string]snapshot.TaskEntry{},
+		Containers: containers,
+		Tasks:      tasks,
 		Comments:   map[string]snapshot.CommentEntry{},
 	}
-
-	patch := DiffSnapshots(snap, snap)
-
-	if len(patch) != 0 {
-		t.Errorf("expected 0 operations for identical snapshots, got %d", len(patch))
-	}
 }
 
-func TestApplyToSnapshot_Add(t *testing.T) {
-	base := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks:    map[string]snapshot.TaskEntry{},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	p := Patch{
-		{
-			Op:   "add",
-			Path: "/tasks/task-1",
-			Value: map[string]interface{}{
-				"id":                       "T-00001",
-				"slug":                     "new-task",
-				"title":                    "New Task",
-				"project_uuid":             "container-1",
-				"state":                    "open",
-				"priority":                 float64(2),
-				"created_by_principal_ref": "agent:tester",
-				"updated_by_principal_ref": "agent:tester",
-				"etag":                     float64(1),
-				"created_at":               "2025-01-01T00:00:00Z",
-				"updated_at":               "2025-01-01T00:00:00Z",
-			},
-		},
-	}
-
-	result, err := ApplyToSnapshot(base, p)
+func writeJSONFile(t *testing.T, dir, name string, v interface{}) string {
+	t.Helper()
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		t.Fatalf("failed to apply patch: %v", err)
+		t.Fatal(err)
 	}
-
-	if len(result.Tasks) != 1 {
-		t.Errorf("expected 1 task, got %d", len(result.Tasks))
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
 	}
-
-	task, ok := result.Tasks["task-1"]
-	if !ok {
-		t.Fatal("task-1 not found in result")
-	}
-
-	if task.Title != "New Task" {
-		t.Errorf("expected title 'New Task', got '%s'", task.Title)
-	}
+	return path
 }
 
-func TestApplyToSnapshot_Remove(t *testing.T) {
-	base := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Comments: map[string]snapshot.CommentEntry{},
+func savePatch(t *testing.T, dir string, p Patch) string {
+	t.Helper()
+	path := filepath.Join(dir, "patch.json")
+	if err := p.Save(path); err != nil {
+		t.Fatal(err)
 	}
-
-	p := Patch{
-		{Op: "remove", Path: "/tasks/task-1"},
-	}
-
-	result, err := ApplyToSnapshot(base, p)
-	if err != nil {
-		t.Fatalf("failed to apply patch: %v", err)
-	}
-
-	if len(result.Tasks) != 0 {
-		t.Errorf("expected 0 tasks, got %d", len(result.Tasks))
-	}
+	return path
 }
 
-func TestApplyToSnapshot_RemoveNotFound(t *testing.T) {
-	base := &snapshot.Snapshot{
-		Meta:       snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{},
-		Tasks:      map[string]snapshot.TaskEntry{},
-		Comments:   map[string]snapshot.CommentEntry{},
+func opsOf(p Patch) []string {
+	ops := make([]string, len(p))
+	for i, op := range p {
+		ops[i] = op.Op + " " + op.Path
 	}
-
-	p := Patch{
-		{Op: "remove", Path: "/tasks/nonexistent"},
-	}
-
-	_, err := ApplyToSnapshot(base, p)
-	if err == nil {
-		t.Fatal("expected error for removing nonexistent task")
-	}
+	return ops
 }
 
-func TestValidateSnapshot_Valid(t *testing.T) {
-	snap := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Comments: map[string]snapshot.CommentEntry{
-			"comment-1": {ID: "C-00001", TaskUUID: "task-1", CreatedByPrincipalRef: "agent:tester", Body: "test", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z"},
-		},
-	}
+// TestPatchCreateWritesOneRFC6902OpPerChangedEntity drives Create (the
+// engine of `wrkqadm patch create`: two snapshot files in, a patch file out)
+// and reads the saved patch back.
+func TestPatchCreateWritesOneRFC6902OpPerChangedEntity(t *testing.T) {
+	proj := map[string]snapshot.ContainerEntry{"container-1": containerEntry("P-00001", "proj", "")}
+	retitled := taskEntry("T-00001", "task", "container-1")
+	retitled.Title, retitled.State, retitled.ETag, retitled.UpdatedAt = "New Title", "completed", 2, "2025-01-02T00:00:00Z"
 
-	err := ValidateSnapshot(snap)
-	if err != nil {
-		t.Errorf("expected no error for valid snapshot, got: %v", err)
-	}
-}
-
-func TestValidateSnapshot_InvalidFK(t *testing.T) {
-	snap := &snapshot.Snapshot{
-		Meta:       snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{},
-		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "task", Title: "Task", ProjectUUID: "nonexistent", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1},
-		},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	err := ValidateSnapshot(snap)
-	if err == nil {
-		t.Error("expected error for task with invalid container FK")
-	}
-}
-
-func TestValidateSnapshot_DuplicateSlug(t *testing.T) {
-	snap := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks: map[string]snapshot.TaskEntry{
-			"task-1": {ID: "T-00001", Slug: "same-slug", Title: "Task 1", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-			"task-2": {ID: "T-00002", Slug: "same-slug", Title: "Task 2", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	err := ValidateSnapshot(snap)
-	if err == nil {
-		t.Error("expected error for duplicate task slug in same container")
-	}
-}
-
-func TestValidateSnapshot_ContainerCycle(t *testing.T) {
-	snap := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj1", Title: "Project 1", ParentUUID: "container-2", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-			"container-2": {ID: "P-00002", Slug: "proj2", Title: "Project 2", ParentUUID: "container-1", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks:    map[string]snapshot.TaskEntry{},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	err := ValidateSnapshot(snap)
-	if err == nil {
-		t.Error("expected error for container cycle")
-	}
-}
-
-func TestEscapeJSONPointer(t *testing.T) {
 	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"simple", "simple"},
-		{"with/slash", "with~1slash"},
-		{"with~tilde", "with~0tilde"},
-		{"both/and~here", "both~1and~0here"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := escapeJSONPointer(tt.input)
-			if result != tt.expected {
-				t.Errorf("expected '%s', got '%s'", tt.expected, result)
-			}
-		})
-	}
-}
-
-func TestUnescapeJSONPointer(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"simple", "simple"},
-		{"with~1slash", "with/slash"},
-		{"with~0tilde", "with~tilde"},
-		{"both~1and~0here", "both/and~here"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := unescapeJSONPointer(tt.input)
-			if result != tt.expected {
-				t.Errorf("expected '%s', got '%s'", tt.expected, result)
-			}
-		})
-	}
-}
-
-func TestPatchCountOps(t *testing.T) {
-	p := Patch{
-		{Op: "add", Path: "/tasks/1"},
-		{Op: "add", Path: "/tasks/2"},
-		{Op: "replace", Path: "/tasks/3"},
-		{Op: "remove", Path: "/tasks/4"},
-	}
-
-	adds, replaces, removes := p.CountOps()
-
-	if adds != 2 {
-		t.Errorf("expected 2 adds, got %d", adds)
-	}
-	if replaces != 1 {
-		t.Errorf("expected 1 replace, got %d", replaces)
-	}
-	if removes != 1 {
-		t.Errorf("expected 1 remove, got %d", removes)
-	}
-}
-
-func TestPatchSaveAndLoad(t *testing.T) {
-	tmpDir := t.TempDir()
-	patchPath := filepath.Join(tmpDir, "test.patch")
-
-	original := Patch{
-		{Op: "add", Path: "/tasks/1", Value: map[string]string{"id": "T-00001"}},
-	}
-
-	if err := original.Save(patchPath); err != nil {
-		t.Fatalf("failed to save patch: %v", err)
-	}
-
-	loaded, err := LoadPatch(patchPath)
-	if err != nil {
-		t.Fatalf("failed to load patch: %v", err)
-	}
-
-	if len(loaded) != len(original) {
-		t.Errorf("length mismatch: %d vs %d", len(loaded), len(original))
-	}
-
-	if loaded[0].Op != original[0].Op {
-		t.Errorf("op mismatch: %s vs %s", loaded[0].Op, original[0].Op)
-	}
-}
-
-func TestCreate(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create base snapshot
-	base := &snapshot.Snapshot{
-		Meta:       snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{},
-		Tasks:      map[string]snapshot.TaskEntry{},
-		Comments:   map[string]snapshot.CommentEntry{},
-	}
-
-	basePath := filepath.Join(tmpDir, "base.json")
-	baseData, _ := json.MarshalIndent(base, "", "  ")
-	_ = os.WriteFile(basePath, baseData, 0644)
-
-	// Create target snapshot that adds one container
-	target := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks:    map[string]snapshot.TaskEntry{},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	targetPath := filepath.Join(tmpDir, "target.json")
-	targetData, _ := json.MarshalIndent(target, "", "  ")
-	_ = os.WriteFile(targetPath, targetData, 0644)
-
-	// Create patch
-	patchPath := filepath.Join(tmpDir, "test.patch")
-	result, err := Create(CreateOptions{
-		FromPath:   basePath,
-		ToPath:     targetPath,
-		OutputPath: patchPath,
-	})
-
-	if err != nil {
-		t.Fatalf("failed to create patch: %v", err)
-	}
-
-	if result.OpCount != 1 {
-		t.Errorf("expected 1 op, got %d", result.OpCount)
-	}
-	if result.AddCount != 1 {
-		t.Errorf("expected 1 add, got %d", result.AddCount)
-	}
-}
-
-func TestValidatePatchOps(t *testing.T) {
-	tests := []struct {
-		name     string
-		patch    Patch
-		wantErrs int
+		name                        string
+		base, target                *snapshot.Snapshot
+		wantOps                     []string
+		wantAdd, wantRepl, wantRemv int
 	}{
 		{
-			name: "valid patch",
-			patch: Patch{
-				{Op: "add", Path: "/tasks/1", Value: "test"},
-				{Op: "remove", Path: "/tasks/2"},
-				{Op: "replace", Path: "/tasks/3", Value: "new"},
-			},
-			wantErrs: 0,
+			name:    "added task",
+			base:    ledger(proj, map[string]snapshot.TaskEntry{}),
+			target:  ledger(proj, map[string]snapshot.TaskEntry{"task-1": taskEntry("T-00001", "new-task", "container-1")}),
+			wantOps: []string{"add /tasks/task-1"}, wantAdd: 1,
 		},
 		{
-			name: "add without value",
-			patch: Patch{
-				{Op: "add", Path: "/tasks/1"},
-			},
-			wantErrs: 1,
+			name:    "removed task",
+			base:    ledger(proj, map[string]snapshot.TaskEntry{"task-1": taskEntry("T-00001", "old-task", "container-1")}),
+			target:  ledger(proj, map[string]snapshot.TaskEntry{}),
+			wantOps: []string{"remove /tasks/task-1"}, wantRemv: 1,
 		},
 		{
-			name: "invalid op",
-			patch: Patch{
-				{Op: "invalid", Path: "/tasks/1"},
-			},
-			wantErrs: 1,
+			name:    "changed task is one whole-entity replace",
+			base:    ledger(proj, map[string]snapshot.TaskEntry{"task-1": taskEntry("T-00001", "task", "container-1")}),
+			target:  ledger(proj, map[string]snapshot.TaskEntry{"task-1": retitled}),
+			wantOps: []string{"replace /tasks/task-1"}, wantRepl: 1,
 		},
 		{
-			name: "empty path",
-			patch: Patch{
-				{Op: "add", Path: "", Value: "test"},
-			},
-			wantErrs: 1,
+			name: "added container plus mixed task changes are counted per op",
+			base: ledger(proj, map[string]snapshot.TaskEntry{
+				"task-1": taskEntry("T-00001", "task", "container-1"),
+				"task-2": taskEntry("T-00002", "gone", "container-1"),
+			}),
+			target: ledger(map[string]snapshot.ContainerEntry{
+				"container-1": containerEntry("P-00001", "proj", ""),
+				"container-2": containerEntry("P-00002", "other", ""),
+			}, map[string]snapshot.TaskEntry{
+				"task-1": retitled,
+				"task-3": taskEntry("T-00003", "new", "container-1"),
+			}),
+			wantOps: []string{"add /containers/container-2", "replace /tasks/task-1", "remove /tasks/task-2", "add /tasks/task-3"},
+			wantAdd: 2, wantRepl: 1, wantRemv: 1,
 		},
 		{
-			name: "path without leading slash",
-			patch: Patch{
-				{Op: "add", Path: "tasks/1", Value: "test"},
-			},
-			wantErrs: 1,
+			name:    "identical snapshots write an empty patch",
+			base:    ledger(proj, map[string]snapshot.TaskEntry{"task-1": taskEntry("T-00001", "task", "container-1")}),
+			target:  ledger(proj, map[string]snapshot.TaskEntry{"task-1": taskEntry("T-00001", "task", "container-1")}),
+			wantOps: []string{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			errors := ValidatePatchOps(tt.patch)
-			if len(errors) != tt.wantErrs {
-				t.Errorf("expected %d errors, got %d: %v", tt.wantErrs, len(errors), errors)
+			dir := t.TempDir()
+			out := filepath.Join(dir, "out", "change.patch")
+			result, err := Create(CreateOptions{
+				FromPath:   writeJSONFile(t, dir, "base.json", tt.base),
+				ToPath:     writeJSONFile(t, dir, "target.json", tt.target),
+				OutputPath: out,
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			saved, err := LoadPatch(out)
+			if err != nil {
+				t.Fatalf("load saved patch: %v", err)
+			}
+			got := opsOf(saved)
+			if strings.Join(got, "\n") != strings.Join(tt.wantOps, "\n") {
+				t.Fatalf("saved patch ops = %q; want %q", got, tt.wantOps)
+			}
+			if result.OpCount != len(tt.wantOps) || result.AddCount != tt.wantAdd || result.ReplaceCount != tt.wantRepl || result.RemoveCount != tt.wantRemv {
+				t.Fatalf("counts = op %d add %d replace %d remove %d; want op %d add %d replace %d remove %d",
+					result.OpCount, result.AddCount, result.ReplaceCount, result.RemoveCount,
+					len(tt.wantOps), tt.wantAdd, tt.wantRepl, tt.wantRemv)
 			}
 		})
 	}
 }
 
-func TestIncrementFriendlyID(t *testing.T) {
+// TestPatchApplyWritesAddsAndRemovesAndRefusesMissingTargets drives Apply (the
+// engine of `wrkqadm patch apply`) against a real migrated database: an add
+// lands a task, a remove deletes one, and a patch that targets a missing
+// task or a stale base rev is refused with the database unchanged.
+func TestPatchApplyWritesAddsAndRemovesAndRefusesMissingTargets(t *testing.T) {
+	newLedgerDB := func(t *testing.T) *sql.DB {
+		t.Helper()
+		database, err := wrkqdb.Open(filepath.Join(t.TempDir(), "wrkq.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = database.Close() })
+		if err := database.Migrate(); err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range []string{
+			`INSERT INTO containers (uuid, id, slug, title, kind, parent_uuid, etag, created_at, updated_at, created_by_principal_ref, updated_by_principal_ref)
+			 VALUES ('container-1', 'P-00001', 'proj', 'proj', 'project', '` + domain.RootContainerUUID + `', 1, '` + at + `', '` + at + `', 'agent:tester', 'agent:tester')`,
+			`INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, priority, etag, created_at, updated_at, created_by_principal_ref, updated_by_principal_ref)
+			 VALUES ('task-old', 'T-00001', 'old', 'old', 'container-1', 'open', 2, 1, '` + at + `', '` + at + `', 'agent:tester', 'agent:tester')`,
+		} {
+			if _, err := database.Exec(stmt); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+		}
+		return database.DB
+	}
+	taskUUIDs := func(t *testing.T, db *sql.DB) string {
+		t.Helper()
+		var uuids sql.NullString
+		if err := db.QueryRow(`SELECT group_concat(uuid, ',') FROM (SELECT uuid FROM tasks ORDER BY uuid)`).Scan(&uuids); err != nil {
+			t.Fatal(err)
+		}
+		return uuids.String
+	}
+
 	tests := []struct {
-		name     string
-		id       string
-		existing map[string]bool
-		strict   bool
-		want     string
-		wantErr  bool
+		name      string
+		patch     Patch
+		ifMatch   string
+		wantTasks string
+		wantErr   string
 	}{
-		{
-			name:     "increment task ID",
-			id:       "T-00050",
-			existing: map[string]bool{"T-00050": true, "T-00051": true},
-			strict:   false,
-			want:     "T-00052",
-			wantErr:  false,
-		},
-		{
-			name:     "increment with gap",
-			id:       "T-00001",
-			existing: map[string]bool{"T-00001": true, "T-00005": true},
-			strict:   false,
-			want:     "T-00006",
-			wantErr:  false,
-		},
-		{
-			name:     "preserve width",
-			id:       "T-00001",
-			existing: map[string]bool{"T-00001": true},
-			strict:   false,
-			want:     "T-00002",
-			wantErr:  false,
-		},
-		{
-			name:     "malformed ID in strict mode",
-			id:       "T-abc",
-			existing: map[string]bool{},
-			strict:   true,
-			want:     "",
-			wantErr:  true,
-		},
-		{
-			name:     "malformed ID in non-strict mode",
-			id:       "T-abc",
-			existing: map[string]bool{"T-abc": true},
-			strict:   false,
-			want:     "T-abc-2",
-			wantErr:  false,
-		},
+		{"add lands the task", Patch{{Op: "add", Path: "/tasks/task-new", Value: taskValue("T-00002", "new", "container-1")}}, "", "task-new,task-old", ""},
+		{"remove deletes the task", Patch{{Op: "remove", Path: "/tasks/task-old"}}, "", "", ""},
+		{"remove of a missing task is refused", Patch{
+			{Op: "add", Path: "/tasks/task-new", Value: taskValue("T-00002", "new", "container-1")},
+			{Op: "remove", Path: "/tasks/nonexistent"},
+		}, "", "task-old", "task not found: nonexistent"},
+		{"stale base rev is refused", Patch{{Op: "add", Path: "/tasks/task-new", Value: taskValue("T-00002", "new", "container-1")}}, "sha256:stale", "task-old", "snapshot_rev mismatch: expected sha256:stale"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := incrementFriendlyID(tt.id, tt.existing, tt.strict)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("incrementFriendlyID() error = %v, wantErr %v", err, tt.wantErr)
+			db := newLedgerDB(t)
+			result, err := Apply(db, ApplyOptions{PatchPath: savePatch(t, t.TempDir(), tt.patch), IfMatch: tt.ifMatch})
+			if tt.wantErr == "" {
+				if err != nil || !result.Applied {
+					t.Fatalf("Apply: result %+v err %v; want applied", result, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Apply err = %v; want %q", err, tt.wantErr)
+			}
+			if got := taskUUIDs(t, db); got != tt.wantTasks {
+				t.Fatalf("tasks after apply = %q; want %q", got, tt.wantTasks)
+			}
+		})
+	}
+}
+
+// TestPatchValidateRejectsResultsThatBreakLedgerInvariants drives Validate
+// (the engine of `wrkqadm patch validate`: base snapshot + patch) and asserts
+// the named violation for each broken ledger invariant.
+func TestPatchValidateRejectsResultsThatBreakLedgerInvariants(t *testing.T) {
+	base := ledger(map[string]snapshot.ContainerEntry{
+		"container-1": containerEntry("P-00001", "proj", ""),
+		"container-2": containerEntry("P-00002", "child", "container-1"),
+	}, map[string]snapshot.TaskEntry{"task-1": taskEntry("T-00001", "task", "container-1")})
+
+	cycled := containerEntry("P-00001", "proj", "container-2")
+	tests := []struct {
+		name      string
+		patch     Patch
+		wantError string // empty: the result is valid
+	}{
+		{"valid result", Patch{{Op: "add", Path: "/tasks/task-2", Value: taskValue("T-00002", "other", "container-1")}}, ""},
+		{"task in an unknown container", Patch{{Op: "add", Path: "/tasks/task-2", Value: taskValue("T-00002", "other", "nonexistent")}},
+			"task task-2 references unknown container nonexistent"},
+		{"duplicate task slug in one container", Patch{{Op: "add", Path: "/tasks/task-2", Value: taskValue("T-00002", "task", "container-1")}},
+			"duplicate task slug 'task' in container container-1"},
+		{"container parent cycle", Patch{{Op: "replace", Path: "/containers/container-1", Value: cycled}},
+			"cycle detected in container hierarchy"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			result, err := Validate(ValidateOptions{BasePath: writeJSONFile(t, dir, "base.json", base), PatchPath: savePatch(t, dir, tt.patch)})
+			if err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+			if tt.wantError == "" {
+				if !result.Valid || len(result.Errors) != 0 {
+					t.Fatalf("valid result reported %+v", result)
+				}
 				return
 			}
-			if got != tt.want {
-				t.Errorf("incrementFriendlyID() = %v, want %v", got, tt.want)
+			if result.Valid || !strings.Contains(strings.Join(result.Errors, "\n"), tt.wantError) {
+				t.Fatalf("result = %+v; want invalid naming %q", result, tt.wantError)
 			}
 		})
 	}
 }
 
-func TestFindNewEntities(t *testing.T) {
-	branch := []string{"a", "b", "c", "d"}
-	base := []string{"a", "b"}
-
-	newEntities := findNewEntities(branch, base)
-
-	if len(newEntities) != 2 {
-		t.Fatalf("expected 2 new entities, got %d", len(newEntities))
-	}
-
-	// Should be sorted
-	if newEntities[0] != "c" || newEntities[1] != "d" {
-		t.Errorf("expected ['c', 'd'], got %v", newEntities)
-	}
-}
-
-func TestRebase_NoCollision(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create old-base snapshot
-	oldBase := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks:    map[string]snapshot.TaskEntry{},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	// New-base is same as old-base
-	newBase := oldBase
-
-	// Create patch that adds a task
-	p := Patch{
-		{
-			Op:   "add",
-			Path: "/tasks/task-1",
-			Value: map[string]interface{}{
-				"id":                       "T-00001",
-				"slug":                     "new-task",
-				"title":                    "New Task",
-				"project_uuid":             "container-1",
-				"state":                    "open",
-				"priority":                 float64(2),
-				"created_by_principal_ref": "agent:tester",
-				"updated_by_principal_ref": "agent:tester",
-				"etag":                     float64(1),
-				"created_at":               "2025-01-01T00:00:00Z",
-				"updated_at":               "2025-01-01T00:00:00Z",
-			},
-		},
-	}
-
-	// Save files
-	oldBasePath := filepath.Join(tmpDir, "old-base.json")
-	newBasePath := filepath.Join(tmpDir, "new-base.json")
-	patchPath := filepath.Join(tmpDir, "patch.json")
-	outPath := filepath.Join(tmpDir, "rebased.json")
-
-	oldBaseData, _ := json.MarshalIndent(oldBase, "", "  ")
-	_ = os.WriteFile(oldBasePath, oldBaseData, 0644)
-
-	newBaseData, _ := json.MarshalIndent(newBase, "", "  ")
-	_ = os.WriteFile(newBasePath, newBaseData, 0644)
-
-	_ = p.Save(patchPath)
-
-	// Rebase
-	result, err := Rebase(RebaseOptions{
-		PatchPath:   patchPath,
-		OldBasePath: oldBasePath,
-		NewBasePath: newBasePath,
-		OutputPath:  outPath,
-	})
-
-	if err != nil {
-		t.Fatalf("rebase failed: %v", err)
-	}
-
-	// Should have no rewrites since no collision
-	if len(result.CodeRewrites) > 0 {
-		t.Errorf("expected no rewrites, got %v", result.CodeRewrites)
-	}
-
-	// Should have 1 add operation
-	if result.AddCount != 1 {
-		t.Errorf("expected 1 add, got %d", result.AddCount)
-	}
-}
-
-func TestRebase_WithCollision(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create old-base snapshot (no tasks)
-	oldBase := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks:    map[string]snapshot.TaskEntry{},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	// Create new-base with T-00001 already taken
-	newBase := &snapshot.Snapshot{
-		Meta: snapshot.Meta{SchemaVersion: 1, MachineInterfaceVersion: 1},
-		Containers: map[string]snapshot.ContainerEntry{
-			"container-1": {ID: "P-00001", Slug: "proj", Title: "Project", CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Tasks: map[string]snapshot.TaskEntry{
-			"existing-task": {ID: "T-00001", Slug: "existing", Title: "Existing Task", ProjectUUID: "container-1", State: "open", Priority: 2, CreatedByPrincipalRef: "agent:tester", UpdatedByPrincipalRef: "agent:tester", ETag: 1, CreatedAt: "2025-01-01T00:00:00Z", UpdatedAt: "2025-01-01T00:00:00Z"},
-		},
-		Comments: map[string]snapshot.CommentEntry{},
-	}
-
-	// Create patch that adds a task with T-00001 (will collide)
-	p := Patch{
-		{
-			Op:   "add",
-			Path: "/tasks/new-task",
-			Value: map[string]interface{}{
-				"id":                       "T-00001",
-				"slug":                     "new-task",
-				"title":                    "New Task",
-				"project_uuid":             "container-1",
-				"state":                    "open",
-				"priority":                 float64(2),
-				"created_by_principal_ref": "agent:tester",
-				"updated_by_principal_ref": "agent:tester",
-				"etag":                     float64(1),
-				"created_at":               "2025-01-01T00:00:00Z",
-				"updated_at":               "2025-01-01T00:00:00Z",
-			},
-		},
-	}
-
-	// Save files
-	oldBasePath := filepath.Join(tmpDir, "old-base.json")
-	newBasePath := filepath.Join(tmpDir, "new-base.json")
-	patchPath := filepath.Join(tmpDir, "patch.json")
-	outPath := filepath.Join(tmpDir, "rebased.json")
-
-	oldBaseData, _ := json.MarshalIndent(oldBase, "", "  ")
-	_ = os.WriteFile(oldBasePath, oldBaseData, 0644)
-
-	newBaseData, _ := json.MarshalIndent(newBase, "", "  ")
-	_ = os.WriteFile(newBasePath, newBaseData, 0644)
-
-	_ = p.Save(patchPath)
-
-	// Rebase
-	result, err := Rebase(RebaseOptions{
-		PatchPath:   patchPath,
-		OldBasePath: oldBasePath,
-		NewBasePath: newBasePath,
-		OutputPath:  outPath,
-	})
-
-	if err != nil {
-		t.Fatalf("rebase failed: %v", err)
-	}
-
-	// Should have rewrites
-	if result.CodeRewrites == nil || len(result.CodeRewrites["tasks"]) == 0 {
-		t.Error("expected task rewrites due to collision")
-	}
-
-	// Check the rewrite
-	if rewrite, ok := result.CodeRewrites["tasks"]["new-task"]; ok {
-		if rewrite.From != "T-00001" {
-			t.Errorf("expected rewrite from T-00001, got %s", rewrite.From)
+// TestPatchRebaseRenumbersCollidingFriendlyIDs drives Rebase (the engine of
+// `wrkqadm patch rebase`: patch + old base + new base in, rebased patch out).
+func TestPatchRebaseRenumbersCollidingFriendlyIDs(t *testing.T) {
+	proj := map[string]snapshot.ContainerEntry{"container-1": containerEntry("P-00001", "proj", "")}
+	oldBase := ledger(proj, map[string]snapshot.TaskEntry{})
+	newBaseWith := func(ids ...string) *snapshot.Snapshot {
+		tasks := map[string]snapshot.TaskEntry{}
+		for i, id := range ids {
+			tasks["existing-"+string(rune('a'+i))] = taskEntry(id, "existing-"+string(rune('a'+i)), "container-1")
 		}
-		if rewrite.To != "T-00002" {
-			t.Errorf("expected rewrite to T-00002, got %s", rewrite.To)
+		return ledger(proj, tasks)
+	}
+	add := func(uuid, id string) Operation {
+		return Operation{Op: "add", Path: "/tasks/" + uuid, Value: taskValue(id, uuid, "container-1")}
+	}
+
+	tests := []struct {
+		name      string
+		newBase   *snapshot.Snapshot
+		patch     Patch
+		strictIDs bool
+		// wantIDs maps each added task uuid to its friendly id in the rebased patch.
+		wantIDs map[string]string
+		// wantRewrites maps renumbered task uuids to "from->to".
+		wantRewrites map[string]string
+		wantErr      string
+	}{
+		{name: "no collision keeps the id", newBase: newBaseWith(), patch: Patch{add("task-new", "T-00001")},
+			wantIDs: map[string]string{"task-new": "T-00001"}},
+		{name: "collision takes the next id", newBase: newBaseWith("T-00001"), patch: Patch{add("task-new", "T-00001")},
+			wantIDs: map[string]string{"task-new": "T-00002"}, wantRewrites: map[string]string{"task-new": "T-00001->T-00002"}},
+		{name: "collision past a gap takes max plus one", newBase: newBaseWith("T-00001", "T-00005"), patch: Patch{add("task-new", "T-00001")},
+			wantIDs: map[string]string{"task-new": "T-00006"}, wantRewrites: map[string]string{"task-new": "T-00001->T-00006"}},
+		{name: "several new tasks renumber in uuid order", newBase: newBaseWith("T-00001"), patch: Patch{add("task-b", "T-00001"), add("task-a", "T-00001")},
+			wantIDs:      map[string]string{"task-a": "T-00002", "task-b": "T-00003"},
+			wantRewrites: map[string]string{"task-a": "T-00001->T-00002", "task-b": "T-00001->T-00003"}},
+		{name: "malformed colliding id is refused with --strict-ids", newBase: newBaseWith("T-abc"), patch: Patch{add("task-new", "T-abc")}, strictIDs: true,
+			wantErr: "task task-new: malformed friendly ID: T-abc"},
+		{name: "malformed colliding id gets a -2 suffix without --strict-ids", newBase: newBaseWith("T-abc"), patch: Patch{add("task-new", "T-abc")},
+			wantIDs: map[string]string{"task-new": "T-abc-2"}, wantRewrites: map[string]string{"task-new": "T-abc->T-abc-2"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			out := filepath.Join(dir, "rebased.json")
+			result, err := Rebase(RebaseOptions{
+				PatchPath:   savePatch(t, dir, tt.patch),
+				OldBasePath: writeJSONFile(t, dir, "old-base.json", oldBase),
+				NewBasePath: writeJSONFile(t, dir, "new-base.json", tt.newBase),
+				OutputPath:  out,
+				StrictIDs:   tt.strictIDs,
+			})
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Rebase err = %v; want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Rebase: %v", err)
+			}
+
+			gotRewrites := map[string]string{}
+			for uuid, rw := range result.CodeRewrites["tasks"] {
+				gotRewrites[uuid] = rw.From + "->" + rw.To
+			}
+			if len(gotRewrites) != len(tt.wantRewrites) {
+				t.Fatalf("task rewrites = %v; want %v", gotRewrites, tt.wantRewrites)
+			}
+			for uuid, want := range tt.wantRewrites {
+				if gotRewrites[uuid] != want {
+					t.Fatalf("task rewrites = %v; want %v", gotRewrites, tt.wantRewrites)
+				}
+			}
+
+			rebased, err := LoadPatch(out)
+			if err != nil {
+				t.Fatalf("load rebased patch: %v", err)
+			}
+			// Only the adds are asserted: the rebased patch is diff(new base,
+			// patch applied to old base), which today also removes whatever the
+			// new base gained since the old base (reported, not pinned here).
+			adds := 0
+			for _, op := range rebased {
+				if op.Op != "add" {
+					continue
+				}
+				adds++
+				uuid := strings.TrimPrefix(op.Path, "/tasks/")
+				value, _ := op.Value.(map[string]interface{})
+				if want, ok := tt.wantIDs[uuid]; !ok || value["id"] != want {
+					t.Fatalf("rebased add %s id=%v; want id %q", op.Path, value["id"], tt.wantIDs[uuid])
+				}
+			}
+			if adds != len(tt.wantIDs) || result.AddCount != len(tt.wantIDs) {
+				t.Fatalf("rebased patch has %d adds (AddCount %d); want %d: %q", adds, result.AddCount, len(tt.wantIDs), opsOf(rebased))
+			}
+		})
+	}
+}
+
+// TestPatchSummarizeRendersEachFormat drives Summarize (the engine of
+// `wrkqadm patch summarize`) over one patch per output format.
+func TestPatchSummarizeRendersEachFormat(t *testing.T) {
+	t.Run("text counts each entity's ops in one sentence", func(t *testing.T) {
+		result, err := Summarize(SummarizeOptions{PatchPath: savePatch(t, t.TempDir(), Patch{
+			{Op: "add", Path: "/tasks/task-1", Value: map[string]interface{}{"id": "T-00001", "slug": "task-one", "title": "Task One", "state": "open"}},
+			{Op: "add", Path: "/tasks/task-2", Value: map[string]interface{}{"id": "T-00002", "slug": "task-two", "title": "Task Two", "state": "open"}},
+			{Op: "replace", Path: "/containers/container-1", Value: map[string]interface{}{"id": "P-00001", "slug": "project", "title": "Updated Project"}},
+		}), Format: "text"})
+		if err != nil {
+			t.Fatalf("summarize failed: %v", err)
 		}
-	} else {
-		t.Error("expected rewrite for new-task UUID")
-	}
-}
-
-func TestSummarize_TextFormat(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create a patch with multiple operations
-	p := Patch{
-		{Op: "add", Path: "/tasks/task-1", Value: map[string]interface{}{
-			"id": "T-00001", "slug": "task-one", "title": "Task One", "state": "open",
-		}},
-		{Op: "add", Path: "/tasks/task-2", Value: map[string]interface{}{
-			"id": "T-00002", "slug": "task-two", "title": "Task Two", "state": "open",
-		}},
-		{Op: "replace", Path: "/containers/container-1", Value: map[string]interface{}{
-			"id": "P-00001", "slug": "project", "title": "Updated Project",
-		}},
-	}
-
-	patchPath := filepath.Join(tmpDir, "patch.json")
-	_ = p.Save(patchPath)
-
-	result, err := Summarize(SummarizeOptions{
-		PatchPath: patchPath,
-		Format:    "text",
+		if result.Counts.Tasks.Add != 2 || result.Counts.Containers.Replace != 1 {
+			t.Errorf("counts = %+v; want 2 tasks added and 1 container replaced", result.Counts)
+		}
+		if result.Summary != "2 tasks added, 1 container updated." {
+			t.Errorf("summary = %q", result.Summary)
+		}
 	})
 
-	if err != nil {
-		t.Fatalf("summarize failed: %v", err)
-	}
-
-	// Check counts
-	if result.Counts.Tasks.Add != 2 {
-		t.Errorf("expected 2 tasks added, got %d", result.Counts.Tasks.Add)
-	}
-	if result.Counts.Containers.Replace != 1 {
-		t.Errorf("expected 1 container replaced, got %d", result.Counts.Containers.Replace)
-	}
-
-	// Check summary text
-	if result.Summary == "" {
-		t.Error("expected non-empty summary")
-	}
-}
-
-func TestSummarize_MarkdownFormat(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	p := Patch{
-		{Op: "add", Path: "/tasks/task-1", Value: map[string]interface{}{
-			"id": "T-00001", "slug": "task-one", "title": "Task One",
-		}},
-	}
-
-	patchPath := filepath.Join(tmpDir, "patch.json")
-	_ = p.Save(patchPath)
-
-	result, err := Summarize(SummarizeOptions{
-		PatchPath: patchPath,
-		Format:    "markdown",
+	t.Run("markdown renders a row per op", func(t *testing.T) {
+		result, err := Summarize(SummarizeOptions{PatchPath: savePatch(t, t.TempDir(), Patch{
+			{Op: "add", Path: "/tasks/task-1", Value: map[string]interface{}{"id": "T-00001", "slug": "task-one", "title": "Task One"}},
+		}), Format: "markdown"})
+		if err != nil {
+			t.Fatalf("summarize failed: %v", err)
+		}
+		if !strings.Contains(result.Summary, "| Entity | Op | ID | Path / Title |") {
+			t.Errorf("expected markdown table header in %q", result.Summary)
+		}
+		if !strings.Contains(result.Summary, "| task | add | T-00001 |") {
+			t.Errorf("expected task row in %q", result.Summary)
+		}
 	})
 
-	if err != nil {
-		t.Fatalf("summarize failed: %v", err)
-	}
-
-	// Check markdown contains table
-	if !contains(result.Summary, "| Entity | Op | ID | Path / Title |") {
-		t.Error("expected markdown table header")
-	}
-	if !contains(result.Summary, "| task | add | T-00001 |") {
-		t.Error("expected task row in table")
-	}
-}
-
-func TestSummarize_JSONFormat(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	p := Patch{
-		{Op: "remove", Path: "/comments/comment-1"},
-	}
-
-	patchPath := filepath.Join(tmpDir, "patch.json")
-	_ = p.Save(patchPath)
-
-	result, err := Summarize(SummarizeOptions{
-		PatchPath: patchPath,
-		Format:    "json",
+	t.Run("json details name the entity and op", func(t *testing.T) {
+		result, err := Summarize(SummarizeOptions{PatchPath: savePatch(t, t.TempDir(), Patch{
+			{Op: "remove", Path: "/comments/comment-1"},
+		}), Format: "json"})
+		if err != nil {
+			t.Fatalf("summarize failed: %v", err)
+		}
+		if result.Counts.Comments.Remove != 1 {
+			t.Errorf("expected 1 comment removed, got %d", result.Counts.Comments.Remove)
+		}
+		if len(result.Details) != 1 || result.Details[0].Entity != "comment" || result.Details[0].Op != "remove" {
+			t.Fatalf("details = %+v; want one comment remove", result.Details)
+		}
 	})
 
-	if err != nil {
-		t.Fatalf("summarize failed: %v", err)
-	}
-
-	// Check counts
-	if result.Counts.Comments.Remove != 1 {
-		t.Errorf("expected 1 comment removed, got %d", result.Counts.Comments.Remove)
-	}
-
-	// Check details
-	if len(result.Details) != 1 {
-		t.Fatalf("expected 1 detail, got %d", len(result.Details))
-	}
-	if result.Details[0].Entity != "comment" {
-		t.Errorf("expected entity 'comment', got '%s'", result.Details[0].Entity)
-	}
-	if result.Details[0].Op != "remove" {
-		t.Errorf("expected op 'remove', got '%s'", result.Details[0].Op)
-	}
+	t.Run("empty patch reads No changes", func(t *testing.T) {
+		result, err := Summarize(SummarizeOptions{PatchPath: savePatch(t, t.TempDir(), Patch{}), Format: "text"})
+		if err != nil {
+			t.Fatalf("summarize failed: %v", err)
+		}
+		if result.Summary != "No changes." {
+			t.Errorf("expected 'No changes.', got '%s'", result.Summary)
+		}
+	})
 }
 
 func TestSummarize_WithBase(t *testing.T) {
@@ -893,28 +481,6 @@ func TestSummarize_WithBase(t *testing.T) {
 	}
 }
 
-func TestSummarize_EmptyPatch(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	p := Patch{}
-
-	patchPath := filepath.Join(tmpDir, "patch.json")
-	_ = p.Save(patchPath)
-
-	result, err := Summarize(SummarizeOptions{
-		PatchPath: patchPath,
-		Format:    "text",
-	})
-
-	if err != nil {
-		t.Fatalf("summarize failed: %v", err)
-	}
-
-	if result.Summary != "No changes." {
-		t.Errorf("expected 'No changes.', got '%s'", result.Summary)
-	}
-}
-
 func TestSummarize_DeterministicOrder(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -949,18 +515,4 @@ func TestSummarize_DeterministicOrder(t *testing.T) {
 	if result1.Details[1].UUID != "aaa-task" {
 		t.Error("expected tasks sorted by UUID")
 	}
-}
-
-// Helper function
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

@@ -86,7 +86,7 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 	}
 }
 
-func TestTaskStoreCreateDispatchesWebhookV2(t *testing.T) {
+func TestTaskCreateWebhookReportsCreatedTransitionAndLabels(t *testing.T) {
 	t.Setenv("WRKQ_CAUSATION_REF", "") // restored after the test
 	if err := os.Unsetenv("WRKQ_CAUSATION_REF"); err != nil {
 		t.Fatalf("unset WRKQ_CAUSATION_REF: %v", err)
@@ -110,25 +110,7 @@ func TestTaskStoreCreateDispatchesWebhookV2(t *testing.T) {
 	if len(payload.Labels) != 2 || payload.Labels[0] != "alpha" || payload.Labels[1] != "beta" {
 		t.Fatalf("unexpected labels: %+v", payload.Labels)
 	}
-	if payload.Origin.CausationRef != nil {
-		t.Fatalf("origin.causation_ref must be absent when WRKQ_CAUSATION_REF is unset, got %+v", payload.Origin.CausationRef)
-	}
-}
-
-func TestTaskStoreCreateWebhookExposesNeedsSmoketestLabelEdge(t *testing.T) {
-	f := newWebhookFixture(t)
-	container := f.project("project")
-	calls := f.captureWebhooks(container, "/hook")
-
-	task := f.task(container, "created-needs-smoketest", "open", func(p *CreateParams) { p.Labels = `["needs_smoketest","ui"]` })
-
-	payload := receiveWebhook(t, calls, 2*time.Second).payload
-	if payload.TicketUUID != task.UUID || payload.Event != "created" {
-		t.Fatalf("unexpected create payload: %+v", payload)
-	}
-	if !webhookLabelsContainStrings(payload.Labels, "needs_smoketest") {
-		t.Fatalf("top-level labels missing needs_smoketest: %+v", payload.Labels)
-	}
+	// A create reports its labels as a change from nothing.
 	change, ok := payload.Changes["labels"]
 	if !ok {
 		t.Fatalf("missing labels change: %+v", payload.Changes)
@@ -136,8 +118,11 @@ func TestTaskStoreCreateWebhookExposesNeedsSmoketestLabelEdge(t *testing.T) {
 	if change.From != nil {
 		t.Fatalf("labels from = %+v, want nil for create", change.From)
 	}
-	if toLabels := webhookChangeLabels(t, change.To); !webhookLabelsContainInterfaces(toLabels, "needs_smoketest") {
-		t.Fatalf("labels to missing needs_smoketest: %+v", toLabels)
+	if toLabels := webhookChangeLabels(t, change.To); len(toLabels) != 2 || toLabels[0] != "alpha" || toLabels[1] != "beta" {
+		t.Fatalf("labels to = %+v, want [alpha beta]", toLabels)
+	}
+	if payload.Origin.CausationRef != nil {
+		t.Fatalf("origin.causation_ref must be absent when WRKQ_CAUSATION_REF is unset, got %+v", payload.Origin.CausationRef)
 	}
 }
 

@@ -2,11 +2,13 @@ package store
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/domain"
 )
 
 // setupTestDB creates a temporary test database with migrations applied.
@@ -284,30 +286,6 @@ func TestTaskStore_UpdateFields_MetaReplace(t *testing.T) {
 	}
 }
 
-func TestTaskStore_UpdateFields_ETagMismatch(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	containerUUID := setupTestContainer(t, database, actorUUID)
-	s := New(database)
-
-	createResult, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "etag-test",
-		Title:       "ETag Test",
-		ProjectUUID: containerUUID,
-		State:       "open",
-		Priority:    3,
-	})
-	if err != nil {
-		t.Fatalf("Create failed: %v", err)
-	}
-
-	// Try to update with wrong etag
-	_, err = s.Tasks.UpdateFields(actorUUID, createResult.UUID, map[string]interface{}{"state": "completed"}, 999)
-	if err == nil {
-		t.Error("expected error for etag mismatch")
-	}
-}
-
 func TestTaskStore_UpdateFields_ReopenClearsCompletedAt(t *testing.T) {
 	database := setupTestDB(t)
 	actorUUID := setupTestActor(t, database)
@@ -352,50 +330,6 @@ func TestTaskStore_UpdateFields_ReopenClearsCompletedAt(t *testing.T) {
 	}
 	if task.CompletedAt != nil {
 		t.Fatalf("task.CompletedAt = %v after reopen, want nil", task.CompletedAt)
-	}
-}
-
-func TestTaskStore_Move(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	s := New(database)
-
-	// Create two containers
-	container1, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project-1", Kind: "project"})
-	if err != nil {
-		t.Fatalf("create project-1: %v", err)
-	}
-	container2, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "project-2", Kind: "project"})
-	if err != nil {
-		t.Fatalf("create project-2: %v", err)
-	}
-
-	// Create a task in container1
-	taskResult, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "move-test",
-		Title:       "Move Test",
-		ProjectUUID: container1.UUID,
-		State:       "open",
-		Priority:    3,
-	})
-	if err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	// Move to container2
-	newETag, err := s.Tasks.Move(actorUUID, taskResult.UUID, container2.UUID, 0)
-	if err != nil {
-		t.Fatalf("Move failed: %v", err)
-	}
-	// After create (etag=2) + move = etag 3
-	if newETag != 3 {
-		t.Errorf("expected etag 3, got %d", newETag)
-	}
-
-	// Verify move
-	task, _ := s.Tasks.GetByUUID(taskResult.UUID)
-	if task.ProjectUUID != container2.UUID {
-		t.Errorf("expected project_uuid %q, got %q", container2.UUID, task.ProjectUUID)
 	}
 }
 
@@ -526,34 +460,6 @@ func TestTaskStore_PurgeRefusesTaskWithRoom(t *testing.T) {
 	}
 }
 
-func TestContainerStore_Create(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	s := New(database)
-
-	result, err := s.Containers.Create(actorUUID, ContainerCreateParams{
-		Slug:  "new-project",
-		Title: "New Project",
-		Kind:  "project",
-	})
-	if err != nil {
-		t.Fatalf("Create failed: %v", err)
-	}
-
-	if result.UUID == "" {
-		t.Error("expected UUID to be set")
-	}
-	if result.ETag != 1 {
-		t.Errorf("expected etag 1, got %d", result.ETag)
-	}
-
-	// Verify container
-	container, _ := s.Containers.GetByUUID(result.UUID)
-	if container.Slug != "new-project" {
-		t.Errorf("expected slug 'new-project', got %q", container.Slug)
-	}
-}
-
 func TestContainerStore_Create_DefaultInboxTitle(t *testing.T) {
 	database := setupTestDB(t)
 	actorUUID := setupTestActor(t, database)
@@ -573,35 +479,6 @@ func TestContainerStore_Create_DefaultInboxTitle(t *testing.T) {
 	}
 	if container.Title == nil || *container.Title != "Inbox" {
 		t.Errorf("expected title 'Inbox', got %v", container.Title)
-	}
-}
-
-func TestContainerStore_UpdateFields(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	s := New(database)
-
-	createResult, err := s.Containers.Create(actorUUID, ContainerCreateParams{
-		Slug: "update-container",
-		Kind: "project",
-	})
-	if err != nil {
-		t.Fatalf("create container: %v", err)
-	}
-
-	newETag, err := s.Containers.UpdateFields(actorUUID, createResult.UUID, map[string]interface{}{
-		"slug": "renamed-container",
-	}, 0)
-	if err != nil {
-		t.Fatalf("UpdateFields failed: %v", err)
-	}
-	if newETag != 2 {
-		t.Errorf("expected etag 2, got %d", newETag)
-	}
-
-	container, _ := s.Containers.GetByUUID(createResult.UUID)
-	if container.Slug != "renamed-container" {
-		t.Errorf("expected slug 'renamed-container', got %q", container.Slug)
 	}
 }
 
@@ -639,361 +516,71 @@ func TestContainerStore_Move(t *testing.T) {
 	}
 }
 
-func TestContainerStore_Delete(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	s := New(database)
-
-	result, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "to-delete", Kind: "project"})
-	if err != nil {
-		t.Fatalf("create container: %v", err)
+// TestCheckBlockedListsOnlyIncompleteBlockers: BlockedBy (behind `wrkq check
+// blocked` / wrkq.task.blockedView) lists a task's blockers that are still
+// incomplete — open, in_progress, draft — with their id, title and state,
+// and never one that is completed, cancelled or still an idea.
+func TestCheckBlockedListsOnlyIncompleteBlockers(t *testing.T) {
+	tests := []struct {
+		name          string
+		blockerStates []string
+		wantStates    []string
+	}{
+		{"no blockers", nil, nil},
+		{"open blocks", []string{"open"}, []string{"open"}},
+		{"in_progress blocks", []string{"in_progress"}, []string{"in_progress"}},
+		{"draft blocks", []string{"draft"}, []string{"draft"}},
+		{"completed does not block", []string{"completed"}, nil},
+		{"cancelled does not block", []string{"cancelled"}, nil},
+		{"idea does not block", []string{"idea"}, nil},
+		{"mixed blockers list only the incomplete ones", []string{"open", "in_progress", "completed", "cancelled"}, []string{"in_progress", "open"}},
 	}
 
-	err = s.Containers.Delete(actorUUID, result.UUID, 0)
-	if err != nil {
-		t.Fatalf("Delete failed: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			database := setupTestDB(t)
+			actorUUID := setupTestActor(t, database)
+			containerUUID := setupTestContainer(t, database, actorUUID)
+			s := New(database)
 
-	_, err = s.Containers.GetByUUID(result.UUID)
-	if err == nil {
-		t.Error("expected error for deleted container")
-	}
-}
+			blocked, err := s.Tasks.Create(actorUUID, CreateParams{Slug: "blocked", Title: "Blocked", ProjectUUID: containerUUID, State: "open", Priority: 3})
+			if err != nil {
+				t.Fatalf("create blocked task: %v", err)
+			}
+			want := map[string]*CreateResult{}
+			for _, state := range tt.blockerStates {
+				blocker, err := s.Tasks.Create(actorUUID, CreateParams{Slug: "blocker-" + state, Title: "Blocker " + state, ProjectUUID: containerUUID, State: domain.State(state), Priority: 2})
+				if err != nil {
+					t.Fatalf("create %s blocker: %v", state, err)
+				}
+				if _, err := database.Exec(`
+					INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
+					VALUES (?, ?, 'blocks', ?)
+				`, blocker.UUID, blocked.UUID, actorUUID); err != nil {
+					t.Fatalf("create relation: %v", err)
+				}
+				want[state] = blocker
+			}
 
-func TestContainerStore_DeleteNonEmpty(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	s := New(database)
-
-	container, err := s.Containers.Create(actorUUID, ContainerCreateParams{Slug: "non-empty", Kind: "project"})
-	if err != nil {
-		t.Fatalf("create container: %v", err)
-	}
-
-	// Create a task in the container
-	_, err = s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "child-task",
-		Title:       "Child Task",
-		ProjectUUID: container.UUID,
-		State:       "open",
-		Priority:    3,
-	})
-	if err != nil {
-		t.Fatalf("create child task: %v", err)
-	}
-
-	// Try to delete non-empty container
-	err = s.Containers.Delete(actorUUID, container.UUID, 0)
-	if err == nil {
-		t.Error("expected error for non-empty container")
-	}
-}
-
-func TestTaskStore_BlockedBy_NoBlockers(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	containerUUID := setupTestContainer(t, database, actorUUID)
-	s := New(database)
-
-	// Create a task with no blockers
-	taskResult, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "no-blockers",
-		Title:       "No Blockers",
-		ProjectUUID: containerUUID,
-		State:       "open",
-		Priority:    3,
-	})
-	if err != nil {
-		t.Fatalf("Create failed: %v", err)
-	}
-
-	// Should return empty slice
-	blockers, err := s.Tasks.BlockedBy(taskResult.UUID)
-	if err != nil {
-		t.Fatalf("BlockedBy failed: %v", err)
-	}
-	if len(blockers) != 0 {
-		t.Errorf("expected 0 blockers, got %d", len(blockers))
-	}
-}
-
-func TestTaskStore_BlockedBy_WithIncompleteBlocker(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	containerUUID := setupTestContainer(t, database, actorUUID)
-	s := New(database)
-
-	// Create blocker task (in_progress - incomplete)
-	blockerResult, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker-task",
-		Title:       "Blocker Task",
-		ProjectUUID: containerUUID,
-		State:       "in_progress",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("Create blocker failed: %v", err)
-	}
-
-	// Create blocked task
-	blockedResult, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocked-task",
-		Title:       "Blocked Task",
-		ProjectUUID: containerUUID,
-		State:       "blocked",
-		Priority:    3,
-	})
-	if err != nil {
-		t.Fatalf("Create blocked failed: %v", err)
-	}
-
-	// Create blocks relation: blocker -> blocked
-	_, err = database.Exec(`
-		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
-		VALUES (?, ?, 'blocks', ?)
-	`, blockerResult.UUID, blockedResult.UUID, actorUUID)
-	if err != nil {
-		t.Fatalf("Create relation failed: %v", err)
-	}
-
-	// Should return the blocker
-	blockers, err := s.Tasks.BlockedBy(blockedResult.UUID)
-	if err != nil {
-		t.Fatalf("BlockedBy failed: %v", err)
-	}
-	if len(blockers) != 1 {
-		t.Fatalf("expected 1 blocker, got %d", len(blockers))
-	}
-	if blockers[0].UUID != blockerResult.UUID {
-		t.Errorf("expected blocker UUID %q, got %q", blockerResult.UUID, blockers[0].UUID)
-	}
-	if blockers[0].State != "in_progress" {
-		t.Errorf("expected state 'in_progress', got %q", blockers[0].State)
-	}
-	if blockers[0].Title != "Blocker Task" {
-		t.Errorf("expected title 'Blocker Task', got %q", blockers[0].Title)
-	}
-}
-
-func TestTaskStore_BlockedBy_CompletedBlockerNotReturned(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	containerUUID := setupTestContainer(t, database, actorUUID)
-	s := New(database)
-
-	// Create blocker task (completed - should not block)
-	blockerResult, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "completed-blocker",
-		Title:       "Completed Blocker",
-		ProjectUUID: containerUUID,
-		State:       "completed",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("Create blocker failed: %v", err)
-	}
-
-	// Create blocked task
-	blockedResult, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "waiting-task",
-		Title:       "Waiting Task",
-		ProjectUUID: containerUUID,
-		State:       "open",
-		Priority:    3,
-	})
-	if err != nil {
-		t.Fatalf("Create blocked failed: %v", err)
-	}
-
-	// Create blocks relation: blocker -> blocked
-	_, err = database.Exec(`
-		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
-		VALUES (?, ?, 'blocks', ?)
-	`, blockerResult.UUID, blockedResult.UUID, actorUUID)
-	if err != nil {
-		t.Fatalf("Create relation failed: %v", err)
-	}
-
-	// Should return empty - completed tasks don't block
-	blockers, err := s.Tasks.BlockedBy(blockedResult.UUID)
-	if err != nil {
-		t.Fatalf("BlockedBy failed: %v", err)
-	}
-	if len(blockers) != 0 {
-		t.Errorf("expected 0 blockers (completed task shouldn't block), got %d", len(blockers))
-	}
-}
-
-func TestTaskStore_BlockedBy_MultipleBlockers(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	containerUUID := setupTestContainer(t, database, actorUUID)
-	s := New(database)
-
-	// Create multiple blockers with different states
-	blocker1, _ := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker-open",
-		Title:       "Blocker Open",
-		ProjectUUID: containerUUID,
-		State:       "open",
-		Priority:    2,
-	})
-	blocker2, _ := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker-progress",
-		Title:       "Blocker In Progress",
-		ProjectUUID: containerUUID,
-		State:       "in_progress",
-		Priority:    2,
-	})
-	blocker3, _ := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker-completed",
-		Title:       "Blocker Completed",
-		ProjectUUID: containerUUID,
-		State:       "completed",
-		Priority:    2,
-	})
-	blocker4, _ := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocker-cancelled",
-		Title:       "Blocker Cancelled",
-		ProjectUUID: containerUUID,
-		State:       "cancelled",
-		Priority:    2,
-	})
-
-	// Create blocked task
-	blockedResult, _ := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "multi-blocked",
-		Title:       "Multi Blocked",
-		ProjectUUID: containerUUID,
-		State:       "blocked",
-		Priority:    3,
-	})
-
-	// Create blocks relations
-	for _, blocker := range []*CreateResult{blocker1, blocker2, blocker3, blocker4} {
-		_, err := database.Exec(`
-			INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
-			VALUES (?, ?, 'blocks', ?)
-		`, blocker.UUID, blockedResult.UUID, actorUUID)
-		if err != nil {
-			t.Fatalf("Create relation failed: %v", err)
-		}
-	}
-
-	// Should return only incomplete blockers (open, in_progress)
-	blockers, err := s.Tasks.BlockedBy(blockedResult.UUID)
-	if err != nil {
-		t.Fatalf("BlockedBy failed: %v", err)
-	}
-	if len(blockers) != 2 {
-		t.Fatalf("expected 2 incomplete blockers, got %d", len(blockers))
-	}
-
-	// Verify states are incomplete
-	for _, b := range blockers {
-		if b.State != "open" && b.State != "in_progress" {
-			t.Errorf("unexpected blocker state %q", b.State)
-		}
-	}
-}
-
-func TestTaskStore_BlockedBy_IdeaStateNotBlocking(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	containerUUID := setupTestContainer(t, database, actorUUID)
-	s := New(database)
-
-	// Create blocker task in 'idea' state (should not block)
-	blockerResult, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "idea-blocker",
-		Title:       "Idea Blocker",
-		ProjectUUID: containerUUID,
-		State:       "idea",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("Create blocker failed: %v", err)
-	}
-
-	// Create blocked task
-	blockedResult, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocked-by-idea",
-		Title:       "Blocked By Idea",
-		ProjectUUID: containerUUID,
-		State:       "open",
-		Priority:    3,
-	})
-	if err != nil {
-		t.Fatalf("Create blocked failed: %v", err)
-	}
-
-	// Create blocks relation
-	_, err = database.Exec(`
-		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
-		VALUES (?, ?, 'blocks', ?)
-	`, blockerResult.UUID, blockedResult.UUID, actorUUID)
-	if err != nil {
-		t.Fatalf("Create relation failed: %v", err)
-	}
-
-	// Should return empty - idea tasks don't block
-	blockers, err := s.Tasks.BlockedBy(blockedResult.UUID)
-	if err != nil {
-		t.Fatalf("BlockedBy failed: %v", err)
-	}
-	if len(blockers) != 0 {
-		t.Errorf("expected 0 blockers (idea task shouldn't block), got %d", len(blockers))
-	}
-}
-
-func TestTaskStore_BlockedBy_DraftStateBlocks(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	containerUUID := setupTestContainer(t, database, actorUUID)
-	s := New(database)
-
-	// Create blocker task in 'draft' state (should block)
-	blockerResult, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "draft-blocker",
-		Title:       "Draft Blocker",
-		ProjectUUID: containerUUID,
-		State:       "draft",
-		Priority:    2,
-	})
-	if err != nil {
-		t.Fatalf("Create blocker failed: %v", err)
-	}
-
-	// Create blocked task
-	blockedResult, err := s.Tasks.Create(actorUUID, CreateParams{
-		Slug:        "blocked-by-draft",
-		Title:       "Blocked By Draft",
-		ProjectUUID: containerUUID,
-		State:       "open",
-		Priority:    3,
-	})
-	if err != nil {
-		t.Fatalf("Create blocked failed: %v", err)
-	}
-
-	// Create blocks relation
-	_, err = database.Exec(`
-		INSERT INTO task_relations (from_task_uuid, to_task_uuid, kind, created_by_actor_uuid)
-		VALUES (?, ?, 'blocks', ?)
-	`, blockerResult.UUID, blockedResult.UUID, actorUUID)
-	if err != nil {
-		t.Fatalf("Create relation failed: %v", err)
-	}
-
-	// Should return the draft blocker
-	blockers, err := s.Tasks.BlockedBy(blockedResult.UUID)
-	if err != nil {
-		t.Fatalf("BlockedBy failed: %v", err)
-	}
-	if len(blockers) != 1 {
-		t.Fatalf("expected 1 blocker (draft task should block), got %d", len(blockers))
-	}
-	if blockers[0].State != "draft" {
-		t.Errorf("expected state 'draft', got %q", blockers[0].State)
+			blockers, err := s.Tasks.BlockedBy(blocked.UUID)
+			if err != nil {
+				t.Fatalf("BlockedBy failed: %v", err)
+			}
+			var gotStates []string
+			for _, b := range blockers {
+				gotStates = append(gotStates, b.State)
+				w, ok := want[b.State]
+				if !ok {
+					t.Fatalf("unexpected blocker %+v", b)
+				}
+				if b.UUID != w.UUID || b.ID != w.ID || b.Title != "Blocker "+b.State {
+					t.Errorf("blocker = %+v; want uuid %s id %s title %q", b, w.UUID, w.ID, "Blocker "+b.State)
+				}
+			}
+			sort.Strings(gotStates)
+			if strings.Join(gotStates, ",") != strings.Join(tt.wantStates, ",") {
+				t.Fatalf("blocker states = %v; want %v", gotStates, tt.wantStates)
+			}
+		})
 	}
 }

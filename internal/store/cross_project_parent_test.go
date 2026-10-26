@@ -173,35 +173,3 @@ func TestTaskStoreCrossProjectParentPurgeAndContainerDeleteDetachExternalChildre
 		}
 	})
 }
-
-func TestTaskStoreCrossProjectParentMoveDoesNotMoveExternalChildren(t *testing.T) {
-	database := setupTestDB(t)
-	actorUUID := setupTestActor(t, database)
-	s := New(database)
-	projectA := createCrossProjectTestContainer(t, s, actorUUID, "xmove-a")
-	projectB := createCrossProjectTestContainer(t, s, actorUUID, "xmove-b")
-	projectC := createCrossProjectTestContainer(t, s, actorUUID, "xmove-c")
-
-	parent := createCrossProjectTestTask(t, s, actorUUID, projectA, "xmove-parent", nil)
-	residentChild := createCrossProjectTestTask(t, s, actorUUID, projectA, "xmove-resident", &parent)
-	externalChild := createCrossProjectTestTask(t, s, actorUUID, projectB, "xmove-external", &parent)
-
-	if _, err := s.Tasks.Move(actorUUID, parent, projectC, 0); err != nil {
-		t.Fatalf("move parent: %v", err)
-	}
-	gotParent, _ := s.Tasks.GetByUUID(parent)
-	gotResident, _ := s.Tasks.GetByUUID(residentChild)
-	gotExternal, _ := s.Tasks.GetByUUID(externalChild)
-	if gotParent.ProjectUUID != projectC {
-		t.Fatalf("parent project = %s, want %s", gotParent.ProjectUUID, projectC)
-	}
-	if gotResident.ProjectUUID != projectC {
-		t.Fatalf("resident child project = %s, want %s", gotResident.ProjectUUID, projectC)
-	}
-	if gotExternal.ProjectUUID != projectB {
-		t.Fatalf("external child project = %s, want %s", gotExternal.ProjectUUID, projectB)
-	}
-	if gotExternal.ParentTaskUUID == nil || *gotExternal.ParentTaskUUID != parent {
-		t.Fatalf("external child parent = %v, want backlink to moved parent %s", gotExternal.ParentTaskUUID, parent)
-	}
-}

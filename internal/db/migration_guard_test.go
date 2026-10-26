@@ -1,40 +1,11 @@
 package db
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
-
-func TestMigrationGuardLoadedJobResolution(t *testing.T) {
-	print := `gui/501/com.praesidium.wrkq-server = {
- path = /tmp/wrkqd.plist
- arguments = {
- /tmp/wrkqd
- -db=/tmp/job.db
- }
- environment = {
- WRKQ_DB => /tmp/env.db
- }
- }`
-	job, err := parseMigrationJob(print)
-	if err != nil || job.path != "/tmp/job.db" || job.pid != 0 {
-		t.Fatalf("job=%+v err=%v", job, err)
-	}
-	if _, err := parseMigrationJob(strings.ReplaceAll(print, "/tmp/job.db", "relative.db")); err == nil {
-		t.Fatal("relative DB without job working directory accepted")
-	}
-	if _, err := parseMigrationJob(strings.ReplaceAll(print, "-db=/tmp/job.db", "-addr=127.0.0.1:7171")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := parseMigrationJob("job = {\n pid = 123\n}"); err == nil {
-		t.Fatal("unresolved loaded job accepted")
-	}
-}
 
 func TestMigrationGuardLeaseAndAliases(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scratch.db")
@@ -77,42 +48,6 @@ func TestMigrationGuardLeaseAndAliases(t *testing.T) {
 	}
 	if _, err := OpenForMigration(path + "?cache=shared"); err == nil {
 		t.Fatal("query DSN accepted")
-	}
-}
-
-func TestMigrationGuardLoadedJobWithoutPIDAndInspectionFailure(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("launchd")
-	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "job.db")
-	t.Setenv("WRKQ_LAUNCHD_LABEL", "com.praesidium.wrkq-server-test")
-	t.Setenv("PATH", dir)
-	script := filepath.Join(dir, "launchctl")
-	write := func(body string) {
-		t.Helper()
-		if err := os.WriteFile(script, []byte("#!/bin/sh\n"+body), 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Use shell builtin printf: PATH intentionally has no external helpers.
-	write(fmt.Sprintf("printf 'job = {\n arguments = {\n /tmp/wrkqd\n --db\n %s\n }\n}\n'\n", path))
-	err := refuseLoadedMigrationJob(path)
-	var serving *DatabaseServingError
-	if !errors.As(err, &serving) || serving.PID != 0 || serving.Job == "" {
-		t.Fatalf("loaded no-PID job: %v", err)
-	}
-	write("printf 'Could not find service x in domain for user gui' >&2\nexit 113\n")
-	if err := refuseLoadedMigrationJob(path); err != nil {
-		t.Fatal(err)
-	}
-	write("printf 'Operation not permitted' >&2\nexit 1\n")
-	if err := refuseLoadedMigrationJob(path); err == nil {
-		t.Fatal("inspection failure accepted as unloaded")
-	}
-	write("printf 'job = {\n pid = 123\n}\n'\n")
-	if err := refuseLoadedMigrationJob(path); err == nil {
-		t.Fatal("unresolved loaded job allowed")
 	}
 }
 

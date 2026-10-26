@@ -1,9 +1,11 @@
 package wrkqd
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/lherron/wrkq/internal/db"
 )
@@ -40,4 +42,42 @@ func setupTestEnv(t *testing.T) (*db.DB, string) {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 	return database, dbPath
+}
+
+// serveDaemon runs ServeDaemon in the background until it is serving on
+// opts.Addr and returns a stop func that interrupts it and requires a clean
+// shutdown. Signal delivery is intercepted, so no real signal is involved.
+func serveDaemon(t *testing.T, opts DaemonOptions) (stop func()) {
+	t.Helper()
+	sigCh := make(chan chan<- os.Signal, 1)
+	oldNotify, oldStop := signalNotify, signalStop
+	signalNotify = func(ch chan<- os.Signal) { sigCh <- ch }
+	signalStop = func(chan<- os.Signal) {}
+	t.Cleanup(func() { signalNotify, signalStop = oldNotify, oldStop })
+
+	done := make(chan error, 1)
+	go func() { done <- ServeDaemon(opts) }()
+
+	var daemonSig chan<- os.Signal
+	select {
+	case daemonSig = <-sigCh:
+	case err := <-done:
+		t.Fatalf("ServeDaemon exited before serving: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("ServeDaemon did not start serving")
+	}
+
+	conn, err := net.DialTimeout("tcp", opts.Addr, time.Second)
+	if err != nil {
+		t.Fatalf("daemon not accepting connections on %s: %v", opts.Addr, err)
+	}
+	_ = conn.Close()
+
+	return func() {
+		t.Helper()
+		daemonSig <- os.Interrupt
+		if err := <-done; err != nil {
+			t.Fatalf("ServeDaemon shutdown: %v", err)
+		}
+	}
 }

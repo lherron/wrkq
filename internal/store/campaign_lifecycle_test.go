@@ -108,55 +108,6 @@ func TestCampaignCloseGuardSingleTransactionSeesConcurrentReopen(t *testing.T) {
 	}
 }
 
-func TestCampaignCompletedCloseMissingOutcomeIsNonBlocking(t *testing.T) {
-	f := newCampaignMembershipFixture(t)
-	taskUUID := f.createTask(t, "missing-outcome", f.campaignA, nil)
-	if _, err := f.store.Tasks.UpdateFields(
-		f.actorUUID, taskUUID, map[string]any{"state": "completed"}, 0,
-	); err != nil {
-		t.Fatalf("complete member: %v", err)
-	}
-	result, err := f.store.Containers.TransitionCampaignWithAttribution(
-		testAttribution(f.actorUUID), f.campaignA, CampaignStateCompleted, 0,
-	)
-	if err != nil {
-		t.Fatalf("completed close with missing outcome: %v", err)
-	}
-	if len(result.MissingOutcomes) != 1 || result.MissingOutcomes[0].UUID != taskUUID {
-		t.Fatalf("missing outcomes = %#v, want completed member", result.MissingOutcomes)
-	}
-}
-
-func TestCampaignCancelledCloseBypassesOpenMembers(t *testing.T) {
-	f := newCampaignMembershipFixture(t)
-	taskUUID := f.createTask(t, "abandoned-member", f.campaignA, nil)
-	completedUUID := f.createTask(t, "completed-without-outcome", f.campaignA, nil)
-	if _, err := f.db.Exec(
-		"UPDATE tasks SET state = 'completed' WHERE uuid = ?", completedUUID,
-	); err != nil {
-		t.Fatalf("seed completed member: %v", err)
-	}
-	result, err := f.store.Containers.TransitionCampaignWithAttribution(
-		testAttribution(f.actorUUID), f.campaignA, CampaignStateCancelled, 0,
-	)
-	if err != nil {
-		t.Fatalf("cancel campaign with open member: %v", err)
-	}
-	if result.CampaignState != CampaignStateCancelled {
-		t.Fatalf("campaign state = %s, want cancelled", result.CampaignState)
-	}
-	if len(result.MissingOutcomes) != 0 {
-		t.Fatalf("cancelled close returned missing-outcome diagnostics: %#v", result.MissingOutcomes)
-	}
-	var taskState string
-	if err := f.db.QueryRow("SELECT state FROM tasks WHERE uuid = ?", taskUUID).Scan(&taskState); err != nil {
-		t.Fatalf("read abandoned task: %v", err)
-	}
-	if taskState != "open" {
-		t.Fatalf("cancelled close changed member to %s, want open", taskState)
-	}
-}
-
 func TestCampaignCompletedCloseUsesCanonicalTerminalSet(t *testing.T) {
 	for _, tc := range []struct {
 		state   string

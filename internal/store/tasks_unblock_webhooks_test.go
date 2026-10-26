@@ -8,35 +8,42 @@ import (
 	"github.com/lherron/wrkq/internal/webhooks"
 )
 
-func TestUnblockWebhookSingleBlocker(t *testing.T) {
-	f := newWebhookFixture(t)
-	container := f.project("project")
-	taskA := f.task(container, "blocker-task", "open")
-	taskB := f.task(container, "blocked-task", "blocked")
-	f.blocks(taskB, taskA)
-	calls := f.captureWebhooks(container, "/hook/{ticket_id}")
+// TestBlockerReachingTerminalStateSendsUnblockedWebhook: when a task's only
+// blocker reaches a terminal state, the blocker's own webhook fires and the
+// blocked task gets an "unblocked" webhook with no state transition and
+// changed=[blocked_by].
+func TestBlockerReachingTerminalStateSendsUnblockedWebhook(t *testing.T) {
+	for _, terminal := range []string{"completed", "cancelled"} {
+		t.Run(terminal, func(t *testing.T) {
+			f := newWebhookFixture(t)
+			container := f.project("project")
+			taskA := f.task(container, "blocker-task", "open")
+			taskB := f.task(container, "blocked-task", "blocked")
+			f.blocks(taskB, taskA)
+			calls := f.captureWebhooks(container, "/hook/{ticket_id}")
 
-	// Completing A fires its own webhook and B's unblock.
-	f.update(taskA, map[string]interface{}{"state": "completed"})
-	received := receiveWebhooksByTicket(t, calls, 2, 3*time.Second)
+			f.update(taskA, map[string]interface{}{"state": terminal})
+			received := receiveWebhooksByTicket(t, calls, 2, 3*time.Second)
 
-	if payload, ok := received[taskA.UUID]; !ok {
-		t.Fatalf("did not receive webhook for completed task A")
-	} else if payload.State != "completed" {
-		t.Fatalf("task A webhook has wrong state: %s (expected completed)", payload.State)
-	}
-	payload, ok := received[taskB.UUID]
-	switch {
-	case !ok:
-		t.Fatalf("did not receive webhook for unblocked task B")
-	case payload.Event != "unblocked":
-		t.Fatalf("unblocked task webhook has wrong event: %s", payload.Event)
-	case payload.Transition != nil:
-		t.Fatalf("unblocked task should not report a state transition: %+v", payload.Transition)
-	case payload.EventID == "" || payload.EventSeq == 0:
-		t.Fatalf("unblocked task missing event identity: %+v", payload)
-	case len(payload.Changed) != 1 || payload.Changed[0] != "blocked_by":
-		t.Fatalf("unblocked task changed fields = %+v", payload.Changed)
+			if payload, ok := received[taskA.UUID]; !ok {
+				t.Fatalf("did not receive webhook for %s task A", terminal)
+			} else if payload.State != terminal {
+				t.Fatalf("task A webhook has wrong state: %s (expected %s)", payload.State, terminal)
+			}
+			payload, ok := received[taskB.UUID]
+			switch {
+			case !ok:
+				t.Fatalf("did not receive webhook for unblocked task B")
+			case payload.Event != "unblocked":
+				t.Fatalf("unblocked task webhook has wrong event: %s", payload.Event)
+			case payload.Transition != nil:
+				t.Fatalf("unblocked task should not report a state transition: %+v", payload.Transition)
+			case payload.EventID == "" || payload.EventSeq == 0:
+				t.Fatalf("unblocked task missing event identity: %+v", payload)
+			case len(payload.Changed) != 1 || payload.Changed[0] != "blocked_by":
+				t.Fatalf("unblocked task changed fields = %+v", payload.Changed)
+			}
+		})
 	}
 }
 
@@ -64,25 +71,6 @@ func TestUnblockWebhookMultipleBlockers(t *testing.T) {
 	}
 	if _, ok := received[taskB.UUID]; !ok {
 		t.Fatalf("did not receive webhook for unblocked task B")
-	}
-}
-
-func TestUnblockWebhookCancelledState(t *testing.T) {
-	f := newWebhookFixture(t)
-	container := f.project("project")
-	blocker := f.task(container, "blocker", "open")
-	blocked := f.task(container, "blocked", "blocked")
-	f.blocks(blocked, blocker)
-	calls := f.captureWebhooks(container, "/hook")
-
-	// Cancelling the blocker also unblocks the blocked task.
-	f.update(blocker, map[string]interface{}{"state": "cancelled"})
-	received := receiveWebhooksByTicket(t, calls, 2, 4*time.Second)
-	if _, ok := received[blocker.UUID]; !ok {
-		t.Fatalf("did not receive webhook for cancelled blocker")
-	}
-	if _, ok := received[blocked.UUID]; !ok {
-		t.Fatalf("did not receive webhook for unblocked task")
 	}
 }
 

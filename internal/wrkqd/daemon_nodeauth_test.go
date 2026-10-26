@@ -2,11 +2,14 @@ package wrkqd
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/lherron/wrkq/internal/nodeauth"
 )
@@ -99,46 +102,60 @@ func TestDaemonNeverTrustsCallerSuppliedNode(t *testing.T) {
 	}
 }
 
-func TestLoadNodeRegistrySources(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nodes.tokens")
-	if err := os.WriteFile(path, []byte("max3=tok-max3\n"), 0o600); err != nil {
+// TestServeDaemonRefusesInlineAndFileNodeTokensTogether pins the daemon's own
+// node-token configuration rule (token parsing itself is internal/nodeauth's):
+// tokens come inline or from a file, never both, and the refusal happens
+// before anything listens. A file-configured registry is the one the served
+// daemon authenticates callers against.
+func TestServeDaemonRefusesInlineAndFileNodeTokensTogether(t *testing.T) {
+	database, _ := setupTestEnv(t)
+	dbPath := database.Path()
+	_ = database.Close()
+
+	tokensFile := filepath.Join(t.TempDir(), "nodes.tokens")
+	if err := os.WriteFile(tokensFile, []byte("max3=tok-max3\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
-	fromFile, err := loadNodeRegistry(DaemonOptions{NodeTokensFile: path})
-	if err != nil {
-		t.Fatalf("file source: %v", err)
-	}
-	if node, ok := fromFile.Resolve("tok-max3"); !ok || node != "max3" {
-		t.Fatalf("file source resolved %q,%v; want max3,true", node, ok)
-	}
+	t.Run("inline and file together is refused before listening", func(t *testing.T) {
+		addr := freeAddr(t)
+		err := ServeDaemon(DaemonOptions{Addr: addr, DBPath: dbPath, NodeTokens: "max3=tok-max3", NodeTokensFile: tokensFile})
+		if err == nil || !strings.Contains(err.Error(), "not both") {
+			t.Fatalf("ServeDaemon err = %v; want the inline-or-file refusal", err)
+		}
+		if conn, dialErr := net.DialTimeout("tcp", addr, 250*time.Millisecond); dialErr == nil {
+			_ = conn.Close()
+			t.Fatalf("daemon listener is accepting connections on %s despite the config refusal", addr)
+		}
+	})
 
-	inline, err := loadNodeRegistry(DaemonOptions{NodeTokens: "max3=tok-max3"})
-	if err != nil {
-		t.Fatalf("inline source: %v", err)
-	}
-	if node, ok := inline.Resolve("tok-max3"); !ok || node != "max3" {
-		t.Fatalf("inline source resolved %q,%v; want max3,true", node, ok)
-	}
+	t.Run("file-configured token resolves the caller node", func(t *testing.T) {
+		addr := freeAddr(t)
+		stop := serveDaemon(t, DaemonOptions{Addr: addr, DBPath: dbPath, NodeTokensFile: tokensFile})
+		defer stop()
 
-	if _, err := loadNodeRegistry(DaemonOptions{NodeTokens: "max3=tok-max3", NodeTokensFile: path}); err == nil {
-		t.Fatal("configuring both sources should be a config error")
-	}
-
-	none, err := loadNodeRegistry(DaemonOptions{})
-	if err != nil {
-		t.Fatalf("unconfigured: %v", err)
-	}
-	if none.Enabled() {
-		t.Fatal("unconfigured registry should be disabled")
-	}
-}
-
-func TestServeDaemonRejectsBadNodeTokenConfig(t *testing.T) {
-	if _, err := loadNodeRegistry(DaemonOptions{NodeTokens: "max3=dupe,lab=dupe"}); err == nil {
-		t.Fatal("duplicate-mapped token should be rejected at load")
-	}
-	if _, err := loadNodeRegistry(DaemonOptions{NodeTokens: "local=tok"}); err == nil {
-		t.Fatal("reserved nodeId should be rejected at load")
-	}
+		get := func(token string) (int, string) {
+			req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/health", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("GET /v1/health: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			var payload struct {
+				Node string `json:"node"`
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&payload)
+			return resp.StatusCode, payload.Node
+		}
+		if status, node := get("tok-max3"); status != http.StatusOK || node != "max3" {
+			t.Fatalf("file token: status=%d node=%q; want 200 max3", status, node)
+		}
+		if status, _ := get("tok-unknown"); status != http.StatusUnauthorized {
+			t.Fatalf("unknown token: status=%d; want 401", status)
+		}
+	})
 }

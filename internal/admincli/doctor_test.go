@@ -1,693 +1,256 @@
 package admincli
 
 import (
-	"fmt"
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
 )
 
-func TestDoctorDatabaseFileChecks(t *testing.T) {
-	t.Run("healthy database passes all file checks", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		dbPath := filepath.Join(tmpDir, "test.db")
-
-		database, err := db.Open(dbPath)
-		if err != nil {
-			t.Fatalf("Failed to open database: %v", err)
+// doctorJSON runs `wrkqadm doctor --json --db <dbPath>` (plus extra argv) and
+// decodes the report. With --fix the fix summary precedes the JSON on stdout,
+// so decoding starts at the first '{'.
+func doctorJSON(t *testing.T, dbPath string, extra ...string) (doctorReportAdm, map[string]checkResultAdm, string) {
+	t.Helper()
+	args := append([]string{"doctor", "--json", "--db", dbPath}, extra...)
+	out, err := runAdm(t, args...)
+	if err != nil {
+		t.Fatalf("wrkqadm %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	start := strings.Index(out, "{")
+	if start < 0 {
+		t.Fatalf("wrkqadm %s printed no JSON report:\n%s", strings.Join(args, " "), out)
+	}
+	var report doctorReportAdm
+	if err := json.Unmarshal([]byte(out[start:]), &report); err != nil {
+		t.Fatalf("decode doctor report: %v\n%s", err, out)
+	}
+	checks := map[string]checkResultAdm{}
+	for _, check := range report.Checks {
+		// root_container may report twice; keep the worst status.
+		if prev, ok := checks[check.Name]; ok && prev.Status != "ok" {
+			continue
 		}
-		_ = database.Migrate()
-		_ = database.Close()
-
-		results := checkDatabaseFileAdm(dbPath)
-
-		// Should have 2 checks: exists and permissions
-		if len(results) != 2 {
-			t.Errorf("Expected 2 checks, got %d", len(results))
-		}
-
-		// Both should pass
-		for _, result := range results {
-			if result.Status != "ok" {
-				t.Errorf("Check %s failed: %s", result.Name, result.Message)
-			}
-		}
-	})
-
-	t.Run("missing database file reports error", func(t *testing.T) {
-		results := checkDatabaseFileAdm("/nonexistent/path/db.db")
-
-		if len(results) == 0 {
-			t.Fatal("Expected at least one check result")
-		}
-
-		// First check should be db_file_exists with error status
-		found := false
-		for _, result := range results {
-			if result.Name == "db_file_exists" && result.Status == "error" {
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			t.Error("Expected db_file_exists check to fail for missing file")
-		}
-	})
-
-	t.Run("read-only database reports permission error", func(t *testing.T) {
-		if os.Geteuid() == 0 {
-			t.Skip("permission check is not meaningful as root")
-		}
-
-		tmpDir := t.TempDir()
-		dbPath := filepath.Join(tmpDir, "readonly.db")
-
-		// Create database
-		database, _ := db.Open(dbPath)
-		_ = database.Migrate()
-		_ = database.Close()
-
-		// Make read-only
-		_ = os.Chmod(dbPath, 0444)
-		defer func() { _ = os.Chmod(dbPath, 0644) }() // Cleanup
-
-		results := checkDatabaseFileAdm(dbPath)
-
-		// Should report permission error
-		foundPermError := false
-		for _, result := range results {
-			if result.Name == "db_file_permissions" && result.Status == "error" {
-				foundPermError = true
-				break
-			}
-		}
-
-		if !foundPermError {
-			t.Error("Expected db_file_permissions check to fail for read-only file")
-		}
-	})
+		checks[check.Name] = check
+	}
+	return report, checks, out[:start]
 }
 
-func TestDoctorDatabasePragmaChecks(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	database, err := db.Open(dbPath)
+// execNoFK runs one statement on a single connection with foreign keys off,
+// so a seeded row can reference something that does not exist.
+func execNoFK(t *testing.T, database *db.DB, query string, args ...interface{}) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := database.Conn(ctx)
 	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
+		t.Fatalf("conn: %v", err)
 	}
-	defer func() { _ = database.Close() }()
-
-	_ = database.Migrate()
-
-	t.Run("WAL mode enabled passes check", func(t *testing.T) {
-		results := checkDatabasePragmasAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "wal_mode" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected WAL mode check to pass, got: %s - %s", result.Status, result.Message)
-				}
-			}
-		}
-
-		if !found {
-			t.Error("Expected wal_mode check in results")
-		}
-	})
-
-	t.Run("foreign keys enabled passes check", func(t *testing.T) {
-		results := checkDatabasePragmasAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "foreign_keys" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected foreign_keys check to pass, got: %s - %s", result.Status, result.Message)
-				}
-			}
-		}
-
-		if !found {
-			t.Error("Expected foreign_keys check in results")
-		}
-	})
-
-	t.Run("integrity check passes on healthy database", func(t *testing.T) {
-		results := checkDatabasePragmasAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "integrity_check" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected integrity_check to pass, got: %s - %s", result.Status, result.Message)
-				}
-			}
-		}
-
-		if !found {
-			t.Error("Expected integrity_check in results")
-		}
-	})
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		t.Fatalf("foreign_keys off: %v", err)
+	}
+	defer func() { _, _ = conn.ExecContext(ctx, "PRAGMA foreign_keys = ON") }()
+	if _, err := conn.ExecContext(ctx, query, args...); err != nil {
+		t.Fatalf("seed %q: %v", query, err)
+	}
 }
 
-func TestDoctorSchemaChecks(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
+// TestDoctorJSONFlagsEachSeededDefect drives `wrkqadm doctor --json` over a
+// database seeded with one defect per row and asserts the check that names
+// it, its status, and how it rolls up into overall_status.
+func TestDoctorJSONFlagsEachSeededDefect(t *testing.T) {
+	healthyAttachDir := func(t *testing.T) string {
+		dir := filepath.Join(t.TempDir(), "attachments")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return dir
 	}
-	defer func() { _ = database.Close() }()
 
-	_ = database.Migrate()
+	cases := []struct {
+		name string
+		// seed returns the --db path and the WRKQ_ATTACH_DIR to run under.
+		seed        func(t *testing.T) (dbPath, attachDir string)
+		wantChecks  map[string]string
+		wantOverall string
+	}{
+		{
+			name: "healthy migrated database reports every check ok",
+			seed: func(t *testing.T) (string, string) {
+				_, path := migratedDB(t, "healthy.db")
+				return path, healthyAttachDir(t)
+			},
+			wantChecks: map[string]string{
+				"db_file_exists": "ok", "db_file_permissions": "ok",
+				"wal_mode": "ok", "foreign_keys": "ok", "integrity_check": "ok",
+				"schema_tables": "ok", "root_container": "ok",
+				"orphaned_tasks": "ok", "orphaned_attachments": "ok", "duplicate_slugs": "ok",
+				"sequence_drift": "ok", "attach_dir_exists": "ok", "orphaned_files": "ok",
+			},
+			wantOverall: "ok",
+		},
+		{
+			name: "missing database file",
+			seed: func(t *testing.T) (string, string) {
+				return filepath.Join(t.TempDir(), "absent.db"), healthyAttachDir(t)
+			},
+			wantChecks:  map[string]string{"db_file_exists": "error"},
+			wantOverall: "error",
+		},
+		{
+			name: "read-only database file",
+			seed: func(t *testing.T) (string, string) {
+				if os.Geteuid() == 0 {
+					t.Skip("permission check is not meaningful as root")
+				}
+				database, path := migratedDB(t, "readonly.db")
+				_ = database.Close()
+				if err := os.Chmod(path, 0o444); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+				return path, healthyAttachDir(t)
+			},
+			wantChecks:  map[string]string{"db_file_exists": "ok", "db_file_permissions": "error"},
+			wantOverall: "error",
+		},
+		{
+			name: "unmigrated schema",
+			seed: func(t *testing.T) (string, string) {
+				path := filepath.Join(t.TempDir(), "unmigrated.db")
+				database, err := db.Open(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = database.Close()
+				return path, healthyAttachDir(t)
+			},
+			wantChecks:  map[string]string{"db_file_exists": "ok", "schema_tables": "error"},
+			wantOverall: "error",
+		},
+		{
+			name: "task whose project does not exist",
+			seed: func(t *testing.T) (string, string) {
+				database, path := migratedDB(t, "orphan-task.db")
+				execNoFK(t, database, `
+					INSERT INTO tasks (uuid, id, slug, title, project_uuid, state, created_by_principal_ref, updated_by_principal_ref)
+					VALUES ('orphan-task', '', 'orphan', 'Orphan', 'no-such-project', 'open', 'agent:tester', 'agent:tester')`)
+				return path, healthyAttachDir(t)
+			},
+			wantChecks:  map[string]string{"orphaned_tasks": "warning", "orphaned_attachments": "ok", "duplicate_slugs": "ok", "sequence_drift": "ok"},
+			wantOverall: "warning",
+		},
+		{
+			name: "attachment whose task does not exist",
+			seed: func(t *testing.T) (string, string) {
+				database, path := migratedDB(t, "orphan-attachment.db")
+				execNoFK(t, database, `
+					INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
+					VALUES ('no-such-task', 'orphan.txt', 'tasks/no-such-task/orphan.txt', 'text/plain', 50)`)
+				return path, healthyAttachDir(t)
+			},
+			wantChecks:  map[string]string{"orphaned_tasks": "ok", "orphaned_attachments": "warning"},
+			wantOverall: "warning",
+		},
+		{
+			name: "duplicate task slug in one project",
+			seed: func(t *testing.T) (string, string) {
+				database, path := migratedDB(t, "duplicate-slug.db")
+				proj := seedProject(t, database, "proj-uuid", "proj")
+				if _, err := database.Exec(`DROP INDEX tasks_unique_slug_in_container`); err != nil {
+					t.Fatal(err)
+				}
+				seedTask(t, database, "dup-1", "", "duplicate", proj)
+				seedTask(t, database, "dup-2", "", "duplicate", proj)
+				return path, healthyAttachDir(t)
+			},
+			wantChecks:  map[string]string{"duplicate_slugs": "error", "orphaned_tasks": "ok", "sequence_drift": "ok"},
+			wantOverall: "error",
+		},
+		{
+			name: "attachment directory missing",
+			seed: func(t *testing.T) (string, string) {
+				_, path := migratedDB(t, "no-attach-dir.db")
+				return path, filepath.Join(t.TempDir(), "missing-attachments")
+			},
+			wantChecks:  map[string]string{"attach_dir_exists": "error"},
+			wantOverall: "error",
+		},
+		{
+			name: "attachment directory for a task that does not exist",
+			seed: func(t *testing.T) (string, string) {
+				_, path := migratedDB(t, "orphan-dir.db")
+				attachDir := healthyAttachDir(t)
+				if err := os.MkdirAll(filepath.Join(attachDir, "tasks", "no-such-task-uuid"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				return path, attachDir
+			},
+			wantChecks:  map[string]string{"attach_dir_exists": "ok", "orphaned_files": "warning"},
+			wantOverall: "warning",
+		},
+	}
 
-	t.Run("all required tables present", func(t *testing.T) {
-		results := checkSchemaAdm(database)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dbPath, attachDir := tc.seed(t)
+			t.Setenv("WRKQ_ATTACH_DIR", attachDir)
 
-		found := false
-		for _, result := range results {
-			if result.Name == "schema_tables" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected schema check to pass, got: %s - %s", result.Status, result.Message)
+			report, checks, _ := doctorJSON(t, dbPath)
+			for name, want := range tc.wantChecks {
+				got, ok := checks[name]
+				if !ok {
+					t.Errorf("check %s missing from report %+v", name, report.Checks)
+					continue
+				}
+				if got.Status != want {
+					t.Errorf("check %s = %s (%s); want %s", name, got.Status, got.Message, want)
 				}
 			}
-		}
-
-		if !found {
-			t.Error("Expected schema_tables check in results")
-		}
-	})
-
-	t.Run("missing tables reported as error", func(t *testing.T) {
-		// Create fresh database without migrations
-		tmpDir2 := t.TempDir()
-		dbPath2 := filepath.Join(tmpDir2, "incomplete.db")
-		db2, _ := db.Open(dbPath2)
-		defer func() { _ = db2.Close() }()
-
-		// Don't run migrations - empty database
-		results := checkSchemaAdm(db2)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "schema_tables" && result.Status == "error" {
-				found = true
+			if report.OverallStatus != tc.wantOverall {
+				t.Errorf("overall_status = %s (errors=%d warnings=%d); want %s; checks %+v", report.OverallStatus, report.Errors, report.Warnings, tc.wantOverall, report.Checks)
 			}
-		}
-
-		if !found {
-			t.Error("Expected schema_tables check to fail for empty database")
-		}
-	})
+			if tc.wantOverall == "ok" && (report.Errors != 0 || report.Warnings != 0) {
+				t.Errorf("healthy report counted errors=%d warnings=%d", report.Errors, report.Warnings)
+			}
+		})
+	}
 }
 
-func TestDoctorDataIntegrityChecks(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
+// TestDoctorReportsAndFixesSequenceDriftAfterExplicitIDInsert: a task inserted
+// with an explicit friendly id leaves task_seq behind the ids in use, so the
+// next minted id would collide. doctor reports the drift, --fix repairs it,
+// and the next doctor run is clean.
+func TestDoctorReportsAndFixesSequenceDriftAfterExplicitIDInsert(t *testing.T) {
+	database, dbPath := migratedDB(t, "drift.db")
+	proj := seedProject(t, database, "proj-uuid", "proj")
+	seedTask(t, database, "drift-task", "T-00042", "drift", proj)
+	attachDir := filepath.Join(t.TempDir(), "attachments")
+	if err := os.MkdirAll(attachDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	defer func() { _ = database.Close() }()
+	t.Setenv("WRKQ_ATTACH_DIR", attachDir)
 
-	_ = database.Migrate()
-
-	// Create test data
-	actorUUID := "test-actor"
-	_, _ = database.Exec(`
-		INSERT INTO actors (uuid, slug, display_name, role)
-		VALUES (?, 'test', 'Test', 'human')
-	`, actorUUID)
-
-	containerUUID := "test-container"
-	_, _ = database.Exec(`
-		INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES (?, 'proj', 'Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
-	`, containerUUID, actorUUID, actorUUID)
-
-	t.Run("no orphaned tasks in healthy database", func(t *testing.T) {
-		taskUUID := "valid-task"
-		_, _ = database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES (?, 'task1', 'Task 1', ?, 'open', 2, ?, ?, 1)
-		`, taskUUID, containerUUID, actorUUID, actorUUID)
-
-		results := checkDataIntegrityAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "orphaned_tasks" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected no orphaned tasks, got: %s - %s", result.Status, result.Message)
-				}
-			}
-		}
-
-		if !found {
-			t.Error("Expected orphaned_tasks check in results")
-		}
-	})
-
-	t.Run("orphaned tasks detected", func(t *testing.T) {
-		// Temporarily disable foreign keys to create orphaned task
-		_, _ = database.Exec("PRAGMA foreign_keys = OFF")
-		defer func() { _, _ = database.Exec("PRAGMA foreign_keys = ON") }()
-
-		// Create task with invalid project_uuid
-		_, _ = database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('orphan-task-uuid', 'orphan', 'Orphaned', 'nonexistent-uuid', 'open', 2, ?, ?, 1)
-		`, actorUUID, actorUUID)
-
-		results := checkDataIntegrityAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "orphaned_tasks" && result.Status == "warning" {
-				found = true
-			}
-		}
-
-		if !found {
-			t.Error("Expected orphaned_tasks warning")
-		}
-
-		// Cleanup
-		_, _ = database.Exec(`DELETE FROM tasks WHERE slug = 'orphan'`)
-	})
-
-	t.Run("no orphaned attachments in healthy database", func(t *testing.T) {
-		taskUUID := "task-with-att"
-		_, _ = database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES (?, 'task-att', 'Task Att', ?, 'open', 2, ?, ?, 1)
-		`, taskUUID, containerUUID, actorUUID, actorUUID)
-
-		_, _ = database.Exec(`
-			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES (?, 'file.txt', 'tasks/task-with-att/file.txt', 'text/plain', 100)
-		`, taskUUID)
-
-		results := checkDataIntegrityAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "orphaned_attachments" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected no orphaned attachments, got: %s - %s", result.Status, result.Message)
-				}
-			}
-		}
-
-		if !found {
-			t.Error("Expected orphaned_attachments check in results")
-		}
-	})
-
-	t.Run("orphaned attachments detected", func(t *testing.T) {
-		// Temporarily disable foreign keys to create orphaned attachment
-		_, _ = database.Exec("PRAGMA foreign_keys = OFF")
-		defer func() { _, _ = database.Exec("PRAGMA foreign_keys = ON") }()
-
-		// Create attachment with invalid task_uuid
-		_, _ = database.Exec(`
-			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES ('nonexistent-task', 'orphan.txt', 'tasks/orphan/file.txt', 'text/plain', 50)
-		`)
-
-		results := checkDataIntegrityAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "orphaned_attachments" && result.Status == "warning" {
-				found = true
-			}
-		}
-
-		if !found {
-			t.Error("Expected orphaned_attachments warning")
-		}
-
-		// Cleanup
-		_, _ = database.Exec(`DELETE FROM attachments WHERE task_uuid = 'nonexistent-task'`)
-	})
-
-	t.Run("duplicate slugs detected", func(t *testing.T) {
-		// Drop unique index to allow duplicate slugs
-		_, _ = database.Exec("DROP INDEX IF EXISTS tasks_unique_slug_in_container")
-		defer func() {
-			_, _ = database.Exec("CREATE UNIQUE INDEX tasks_unique_slug_in_container ON tasks(project_uuid, slug)")
-		}()
-
-		// Create two tasks with same slug in same container
-		_, _ = database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('dup-task-1-uuid', 'duplicate', 'Dup 1', ?, 'open', 2, ?, ?, 1)
-		`, containerUUID, actorUUID, actorUUID)
-		_, _ = database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES ('dup-task-2-uuid', 'duplicate', 'Dup 2', ?, 'open', 2, ?, ?, 1)
-		`, containerUUID, actorUUID, actorUUID)
-
-		results := checkDataIntegrityAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "duplicate_slugs" && result.Status == "error" {
-				found = true
-			}
-		}
-
-		if !found {
-			t.Error("Expected duplicate_slugs error")
-		}
-
-		// Cleanup
-		_, _ = database.Exec(`DELETE FROM tasks WHERE slug = 'duplicate'`)
-	})
-
-	t.Run("no duplicate slugs in healthy database", func(t *testing.T) {
-		results := checkDataIntegrityAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "duplicate_slugs" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected no duplicate slugs, got: %s - %s", result.Status, result.Message)
-				}
-			}
-		}
-
-		if !found {
-			t.Error("Expected duplicate_slugs check in results")
-		}
-	})
-}
-
-func TestDoctorAttachmentChecks(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-	attachDir := filepath.Join(tmpDir, "attachments")
-	_ = os.MkdirAll(attachDir, 0755)
-
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
-	defer func() { _ = database.Close() }()
-
-	_ = database.Migrate()
-
-	t.Run("attachment directory exists check", func(t *testing.T) {
-		results := checkAttachmentsAdm(database, attachDir)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "attach_dir_exists" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected attach_dir check to pass, got: %s - %s", result.Status, result.Message)
-				}
-			}
-		}
-
-		if !found {
-			t.Error("Expected attach_dir_exists check in results")
-		}
-	})
-
-	t.Run("missing attachment directory reports error", func(t *testing.T) {
-		results := checkAttachmentsAdm(database, "/nonexistent/attachments")
-
-		found := false
-		for _, result := range results {
-			if result.Name == "attach_dir_exists" && result.Status == "error" {
-				found = true
-			}
-		}
-
-		if !found {
-			t.Error("Expected attach_dir_exists error for missing directory")
-		}
-	})
-
-	t.Run("attachment count and size reported", func(t *testing.T) {
-		// Create test data
-		actorUUID := "test-actor"
-		_, _ = database.Exec(`
-			INSERT INTO actors (uuid, slug, display_name, role)
-			VALUES (?, 'test', 'Test', 'human')
-		`, actorUUID)
-
-		containerUUID := "test-container"
-		_, _ = database.Exec(`
-			INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES (?, 'proj', 'Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
-		`, containerUUID, actorUUID, actorUUID)
-
-		taskUUID := "task-with-att"
-		_, _ = database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES (?, 'task', 'Task', ?, 'open', 2, ?, ?, 1)
-		`, taskUUID, containerUUID, actorUUID, actorUUID)
-
-		_, _ = database.Exec(`
-			INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
-			VALUES (?, 'file.txt', 'tasks/task/file.txt', 'text/plain', 1024)
-		`, taskUUID)
-
-		results := checkAttachmentsAdm(database, attachDir)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "attachments_count" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected attachments_count check to pass, got: %s - %s", result.Status, result.Message)
-				}
-			}
-		}
-
-		if !found {
-			t.Error("Expected attachments_count check in results")
-		}
-	})
-
-	t.Run("orphaned directories detected", func(t *testing.T) {
-		// Create orphaned directory
-		tasksDir := filepath.Join(attachDir, "tasks")
-		_ = os.MkdirAll(tasksDir, 0755)
-		orphanDir := filepath.Join(tasksDir, "orphaned-uuid-123")
-		_ = os.MkdirAll(orphanDir, 0755)
-
-		results := checkAttachmentsAdm(database, attachDir)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "orphaned_files" {
-				found = true
-				if result.Status == "warning" {
-					// This is expected - we have an orphaned directory
-					return
-				}
-			}
-		}
-
-		// It's ok if we get "ok" status if there are no orphans
-		// Just need to verify the check exists
-		if !found {
-			t.Error("Expected orphaned_files check in results")
-		}
-	})
-
-	t.Run("no orphaned directories in clean database", func(t *testing.T) {
-		// Clean attachments directory
-		cleanDir := filepath.Join(tmpDir, "clean-attachments")
-		_ = os.MkdirAll(cleanDir, 0755)
-
-		results := checkAttachmentsAdm(database, cleanDir)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "orphaned_files" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected no orphaned files in clean dir, got: %s - %s", result.Status, result.Message)
-				}
-			}
-		}
-
-		if !found {
-			t.Error("Expected orphaned_files check in results")
-		}
-	})
-}
-
-func TestDoctorPerformanceChecks(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
-	defer func() { _ = database.Close() }()
-
-	_ = database.Migrate()
-
-	// Create test data
-	actorUUID := "test-actor"
-	_, _ = database.Exec(`
-		INSERT INTO actors (uuid, slug, display_name, role)
-		VALUES (?, 'test', 'Test', 'human')
-	`, actorUUID)
-
-	containerUUID := "test-container"
-	_, _ = database.Exec(`
-		INSERT INTO containers (uuid, slug, title, parent_uuid, kind, created_by_actor_uuid, updated_by_actor_uuid, etag)
-		VALUES (?, 'proj', 'Project', (SELECT uuid FROM containers WHERE kind = 'root'), 'project', ?, ?, 1)
-	`, containerUUID, actorUUID, actorUUID)
-
-	// Add some tasks
-	for i := 0; i < 10; i++ {
-		state := "open"
-		if i < 3 {
-			state = "archived"
-		}
-		taskUUID := fmt.Sprintf("task-%d-uuid", i)
-		_, _ = database.Exec(`
-			INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, created_by_actor_uuid, updated_by_actor_uuid, etag)
-			VALUES (?, ?, ?, ?, ?, ?, 2, ?, ?, 1)
-		`, taskUUID, "T-"+string(rune('0'+i)), "task-"+string(rune('0'+i)), "Task "+string(rune('0'+i)), containerUUID, state, actorUUID, actorUUID)
+	_, checks, _ := doctorJSON(t, dbPath)
+	drift := checks["sequence_drift"]
+	if drift.Status != "error" || !strings.Contains(strings.Join(drift.Details, "\n"), "task_seq (table tasks): sqlite_sequence=0, max_id=42") {
+		t.Fatalf("before --fix: sequence_drift = %+v; want error naming task_seq at 0 behind max_id 42", drift)
 	}
 
-	t.Run("task counts reported correctly", func(t *testing.T) {
-		results := checkPerformanceAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "task_counts" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected task_counts check to pass, got: %s - %s", result.Status, result.Message)
-				}
-				// Message should mention active and archived counts
-			}
-		}
-
-		if !found {
-			t.Error("Expected task_counts check in results")
-		}
-	})
-
-	t.Run("container count reported", func(t *testing.T) {
-		results := checkPerformanceAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "container_count" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected container_count check to pass, got: %s - %s", result.Status, result.Message)
-				}
-			}
-		}
-
-		if !found {
-			t.Error("Expected container_count check in results")
-		}
-	})
-
-	t.Run("database size reported", func(t *testing.T) {
-		results := checkPerformanceAdm(database)
-
-		found := false
-		for _, result := range results {
-			if result.Name == "database_size" {
-				found = true
-				if result.Status != "ok" {
-					t.Errorf("Expected database_size check to pass, got: %s - %s", result.Status, result.Message)
-				}
-			}
-		}
-
-		if !found {
-			t.Error("Expected database_size check in results")
-		}
-	})
-}
-
-func TestDoctorReportGeneration(t *testing.T) {
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
-	attachDir := filepath.Join(tmpDir, "attachments")
-	_ = os.MkdirAll(attachDir, 0755)
-
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
+	_, _, fixOutput := doctorJSON(t, dbPath, "--fix")
+	if !strings.Contains(fixOutput, "Fixed sqlite_sequence drift for 1 table(s)") {
+		t.Fatalf("doctor --fix output = %q; want it to report one repaired table", fixOutput)
 	}
-	defer func() { _ = database.Close() }()
 
-	_ = database.Migrate()
-
-	t.Run("report structure is valid", func(t *testing.T) {
-		report := &doctorReportAdm{
-			Version:       "0.2.0",
-			DBPath:        dbPath,
-			Checks:        []checkResultAdm{},
-			OverallStatus: "ok",
-		}
-
-		report.Checks = append(report.Checks, checkDatabaseFileAdm(dbPath)...)
-		report.Checks = append(report.Checks, checkDatabasePragmasAdm(database)...)
-		report.Checks = append(report.Checks, checkSchemaAdm(database)...)
-		report.Checks = append(report.Checks, checkDataIntegrityAdm(database)...)
-		report.Checks = append(report.Checks, checkAttachmentsAdm(database, attachDir)...)
-		report.Checks = append(report.Checks, checkPerformanceAdm(database)...)
-
-		if report.Version == "" {
-			t.Error("Report version should be set")
-		}
-		if report.DBPath == "" {
-			t.Error("Report DBPath should be set")
-		}
-		if len(report.Checks) == 0 {
-			t.Error("Report should have checks")
-		}
-
-		// Count warnings and errors
-		for _, check := range report.Checks {
-			switch check.Status {
-			case "warning":
-				report.Warnings++
-			case "error":
-				report.Errors++
-				report.OverallStatus = "error"
-			}
-		}
-
-		if report.Warnings > 0 && report.OverallStatus == "ok" {
-			report.OverallStatus = "warning"
-		}
-
-		// Overall status should be ok for healthy database
-		if report.OverallStatus != "ok" {
-			t.Errorf("Expected overall status 'ok', got '%s' (warnings: %d, errors: %d)", report.OverallStatus, report.Warnings, report.Errors)
-		}
-	})
+	report, checks, _ := doctorJSON(t, dbPath)
+	if got := checks["sequence_drift"]; got.Status != "ok" {
+		t.Fatalf("after --fix: sequence_drift = %+v; want ok", got)
+	}
+	if report.OverallStatus != "ok" {
+		t.Fatalf("after --fix: overall_status = %s; want ok (%+v)", report.OverallStatus, report.Checks)
+	}
 }
