@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/lherron/wrkq/internal/domain"
 )
 
 func LoadTemplateFile(path string) (*Template, []byte, string, error) {
@@ -240,6 +242,7 @@ func ValidateTemplate(tpl *Template, canonical []byte, catalog *HookCatalog) []s
 			errs = append(errs, fmt.Sprintf("transition %s must declare outcomes", tr.ID))
 		}
 		for i, out := range tr.Outcomes {
+			errs = append(errs, validateEffectSpecs(out.Effects, fmt.Sprintf("transition %s outcome %s", tr.ID, out.ID))...)
 			if out.ID == "" {
 				errs = append(errs, fmt.Sprintf("transition %s outcome id is required", tr.ID))
 			}
@@ -311,9 +314,32 @@ func validateSuspensionPolicy(spec *SuspensionPolicySpec, suspendOutcomeCount in
 		default:
 			errs = append(errs, fmt.Sprintf("suspension.effects contains unknown disposition %q", disposition))
 		}
-		for i, effect := range effects {
-			if strings.TrimSpace(effect.Kind) == "" {
-				errs = append(errs, fmt.Sprintf("suspension.effects.%s[%d] kind is required", disposition, i))
+		errs = append(errs, validateEffectSpecs(effects, "suspension.effects."+disposition)...)
+	}
+	return errs
+}
+
+// Validate tokens using the runtime renderer with nonempty sentinel values.
+// Runtime context availability remains checked when the effect is enqueued.
+func validateEffectSpecs(effects []EffectSpec, label string) []string {
+	var errs []string
+	ctx := effectRenderContext{instance: Instance{ID: "instance", TaskUUID: "task", TaskRef: "task", Revision: 1}, outcomeID: "outcome", runID: "run", sequence: 1}
+	for i, effect := range effects {
+		prefix := fmt.Sprintf("%s effect[%d]", label, i)
+		if strings.TrimSpace(effect.Kind) == "" {
+			errs = append(errs, prefix+" kind is required")
+		}
+		if _, _, err := renderEffectSpec(effect, ctx); err != nil {
+			errs = append(errs, prefix+": "+err.Error())
+		}
+		if effect.Kind == "set_task_state" {
+			state, _ := effect.Data["state"].(string)
+			// Known tokens can intentionally derive the state at runtime. Literal
+			// states must already satisfy the same domain parser as delivery.
+			if !unresolvedEffectTokenRE.MatchString(state) {
+				if _, err := domain.ParseState(strings.TrimSpace(state)); err != nil {
+					errs = append(errs, fmt.Sprintf("%s state %q: %v", prefix, state, err))
+				}
 			}
 		}
 	}
