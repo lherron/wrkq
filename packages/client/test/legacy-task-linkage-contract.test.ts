@@ -51,6 +51,10 @@ const TASK_CONTRACT_PATH_PREFIXES = [
 const ALLOWED_PATH_SEGMENTS = [
   ["internal", "db", "migrations"],
   ["internal", "surfaceguard", "testdata"],
+  // The full-ledger snapshot (T-07498) is a storage mirror: it round-trips
+  // every column, including the retired cp_* linkage columns, byte-for-byte.
+  // It is a backup format, not a live task contract (Lance ruling, T-11948).
+  ["internal", "snapshot"],
 ];
 
 const ALLOWED_FILES = new Set([

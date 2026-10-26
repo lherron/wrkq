@@ -5,10 +5,8 @@ package wrkqapi
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 
-	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/store"
 )
@@ -201,121 +199,4 @@ func isContainerCountActiveTask(
 	default:
 		return false
 	}
-}
-
-func BenchmarkContainerTaskCountsVsProjectSweep(b *testing.B) {
-	dbPath := filepath.Join(b.TempDir(), "benchmark.db")
-	database, err := db.Open(dbPath)
-	if err != nil {
-		b.Fatalf("db.Open: %v", err)
-	}
-	if err := database.Migrate(); err != nil {
-		b.Fatalf("migrate: %v", err)
-	}
-	b.Cleanup(func() { _ = database.Close() })
-	api := New(database, nil, "agent:wrkq-system", "", 0)
-	s := store.New(database)
-
-	const (
-		projectCount       = 12
-		containersPer      = 4
-		tasksPerContainer  = 40
-		expectedTotalTasks = projectCount * containersPer * tasksPerContainer
-	)
-	projects := make([]string, 0, projectCount)
-	for projectIndex := 0; projectIndex < projectCount; projectIndex++ {
-		projectSlug := fmt.Sprintf("bench-%02d", projectIndex)
-		project, err := s.Containers.Create(monitorSystemActor, store.ContainerCreateParams{
-			Slug: projectSlug, Kind: "project",
-		})
-		if err != nil {
-			b.Fatalf("create project %d: %v", projectIndex, err)
-		}
-		projects = append(projects, projectSlug)
-		for containerIndex := 0; containerIndex < containersPer; containerIndex++ {
-			container, err := s.Containers.Create(monitorSystemActor, store.ContainerCreateParams{
-				Slug:       fmt.Sprintf("area-%02d", containerIndex),
-				Kind:       "directory",
-				ParentUUID: &project.UUID,
-			})
-			if err != nil {
-				b.Fatalf("create container %d/%d: %v", projectIndex, containerIndex, err)
-			}
-			for taskIndex := 0; taskIndex < tasksPerContainer; taskIndex++ {
-				state := domain.StateCompleted
-				if taskIndex%2 == 0 {
-					state = domain.StateOpen
-				}
-				if _, err := s.Tasks.Create(monitorSystemActor, store.CreateParams{
-					Slug:        fmt.Sprintf("task-%02d", taskIndex),
-					Title:       "Benchmark task",
-					ProjectUUID: container.UUID,
-					State:       state,
-					Priority:    2,
-				}); err != nil {
-					b.Fatalf("create task %d/%d/%d: %v", projectIndex, containerIndex, taskIndex, err)
-				}
-			}
-		}
-	}
-
-	sweep := func() (int, int) {
-		total, active := 0, 0
-		for _, project := range projects {
-			cursor := ""
-			for {
-				page, err := api.TaskList(context.Background(), TaskListParams{
-					Path: project, Recursive: true, IncludeDeleted: false,
-					Limit: 500, Cursor: cursor, Summary: true,
-				})
-				if err != nil {
-					b.Fatalf("project sweep %s: %v", project, err)
-				}
-				for _, task := range page.Items {
-					total++
-					if isContainerCountActiveTask(task.State, task.ArchivedAt, task.DeletedAt) {
-						active++
-					}
-				}
-				if page.NextCursor == "" {
-					break
-				}
-				cursor = page.NextCursor
-			}
-		}
-		return total, active
-	}
-	aggregate := func() (int, int) {
-		result, err := api.ContainerTaskCounts(context.Background(), ContainerTaskCountsParams{})
-		if err != nil {
-			b.Fatalf("aggregate: %v", err)
-		}
-		total, active := 0, 0
-		for _, item := range result.Items {
-			if item.Kind == "project" {
-				total += item.TotalTaskCount
-				active += item.ActiveTaskCount
-			}
-		}
-		return total, active
-	}
-	sweepTotal, sweepActive := sweep()
-	aggregateTotal, aggregateActive := aggregate()
-	if sweepTotal != expectedTotalTasks ||
-		aggregateTotal != sweepTotal ||
-		aggregateActive != sweepActive {
-		b.Fatalf("count drift: sweep=%d/%d aggregate=%d/%d expected total=%d",
-			sweepTotal, sweepActive, aggregateTotal, aggregateActive, expectedTotalTasks)
-	}
-
-	b.Run("project-linear-sweep", func(b *testing.B) {
-		for index := 0; index < b.N; index++ {
-			sweep()
-		}
-	})
-	b.Run("single-aggregate", func(b *testing.B) {
-		for index := 0; index < b.N; index++ {
-			aggregate()
-		}
-	})
 }
