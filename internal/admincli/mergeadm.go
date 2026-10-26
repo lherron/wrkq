@@ -2,9 +2,7 @@ package admincli
 
 import (
 	"errors"
-	"fmt"
 
-	"github.com/lherron/wrkq/internal/db"
 	"github.com/spf13/cobra"
 )
 
@@ -51,28 +49,4 @@ func init() {
 
 func runMergeAdm(cmd *cobra.Command, args []string) error {
 	return exitError(1, errLegacyActorMovement)
-}
-
-// mergeOptions is retained for callers/tests that referenced the legacy
-// data-mover entry point. The actor remapping fields were removed.
-type mergeOptions struct {
-	SourceDB        *db.DB
-	DestDB          *db.DB
-	SourceAttachDir string
-	DestAttachDir   string
-	ProjectSelector string
-	PathPrefix      string
-	DryRun          bool
-}
-
-// mergeReport is the (now always empty) report shape returned by the gated
-// merge entry point.
-type mergeReport struct {
-	DryRun bool `json:"dry_run"`
-}
-
-// mergeProjectIntoCanonical is hard-gated: principal-only attribution removed
-// the legacy actor remapping this data mover depended on.
-func mergeProjectIntoCanonical(opts mergeOptions) (*mergeReport, error) {
-	return nil, fmt.Errorf("merge project into canonical: %w", errLegacyActorMovement)
 }
