@@ -17,8 +17,8 @@ package workrpc_test
 //   - wrkq.task.move is not yet registered → the server returns JSON-RPC
 //     "method not found" (-32601) instead of a WrkqTask DTO or domain errors.
 //
-// Tests are driven through the real JSON-RPC dispatch surface via p2Run /
-// g1Run (go run ./cmd/wrkq rpc --stdio).  No direct references to
+// Tests are driven through the real JSON-RPC dispatch surface via p2Run
+// (go run ./cmd/wrkq rpc --stdio).  No direct references to
 // not-yet-existent Go symbols or struct fields.  Seeding uses direct DB SQL,
 // same discipline as gap1/gap2/gap4.
 //
@@ -213,80 +213,10 @@ func g5HierarchyMismatchCount(t *testing.T, dbPath string) int {
 	return count
 }
 
-// ─── catalog: method present on both entrypoints ──────────────────────────
+// ─── wrkq.task.move: result DTO + canonical path ──────────────────────────
 
-// TestTaskMoveMethods_PresentOnBothEntrypoints verifies that wrkq.task.move is
-// registered and reachable on BOTH wrkq rpc --stdio AND wrkf rpc --stdio.
-//
-// Each entrypoint is probed with empty params; an implemented method returns
-// WRKQ_VALIDATION (param validation error), not "method not found".
-//
-// RED: wrkq.task.move is not yet registered → each call returns "method not
-// found" → g1IsMethodNotFound returns true → test fails.
-func TestTaskMoveMethods_PresentOnBothEntrypoints(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-
-	entrypoints := []string{"wrkq", "wrkf"}
-	for _, ep := range entrypoints {
-		ep := ep
-		t.Run(ep, func(t *testing.T) {
-			dbPath := migratedDB(t)
-			frames := g1Run(t, ep, dbPath,
-				mkRPC("m1", "wrkq.task.move", map[string]any{}),
-			)
-			if g1IsMethodNotFound(frames[1]) {
-				t.Errorf("entrypoint %s: method %q is not registered (got 'method not found'); "+
-					"must be present on both wrkq and wrkf entrypoints", ep, "wrkq.task.move")
-			}
-		})
-	}
-}
-
-// ─── wrkq.task.move: DTO shape ────────────────────────────────────────────
-
-// TestWrkqTaskMove_ReturnsWrkqTaskDTO verifies that a successful wrkq.task.move
-// returns a WrkqTask DTO with all required camelCase fields and no DB column
-// name leaks.
-//
-// RED: method not registered → "method not found" instead of DTO.
-func TestWrkqTaskMove_ReturnsWrkqTaskDTO(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-
-	srcProjUUID := "g5000000-1000-4000-8000-000000000001"
-	dstProjUUID := "g5000000-1000-4000-8000-000000000002"
-	taskUUID := "g5000000-1000-4000-8000-000000000010"
-	g5SeedProject(t, dbPath, "g5-dto-src", srcProjUUID)
-	g5SeedProject(t, dbPath, "g5-dto-dst", dstProjUUID)
-	taskID := g5SeedRootTask(t, dbPath, "g5-dto-task", taskUUID, srcProjUUID)
-
-	frames := p2Run(t, dbPath,
-		mkRPC("mv1", "wrkq.task.move", map[string]any{
-			"task":       taskID,
-			"targetPath": "g5-dto-dst",
-		}),
-	)
-	result := p2ResultOrFail(t, frames[1], "wrkq.task.move DTO shape")
-
-	// Required WrkqTask camelCase fields.
-	p2AssertStr(t, result, "uuid")
-	p2AssertStr(t, result, "id")
-	p2AssertStr(t, result, "path")
-	p2AssertEtag(t, result)
-
-	// DB column name leaks forbidden.
-	p2AssertAbsent(t, result, "project_uuid")
-	p2AssertAbsent(t, result, "parent_task_uuid")
-	p2AssertAbsent(t, result, "created_at")
-	p2AssertAbsent(t, result, "updated_at")
-}
-
-// TestWrkqTaskMove_CanonicalPath_IsRecomputed verifies that the returned task's
-// path field is server-derived (from the DB after the move), not echoed from
+// TestWrkqTaskMove_CanonicalPath_IsRecomputed verifies that move returns the moved
+// task as a WrkqTask DTO whose path field is server-derived (from the DB after the move), not echoed from
 // the request params.  The path must include the destination container slug and
 // must NOT include the source container slug.
 //
@@ -311,6 +241,10 @@ func TestWrkqTaskMove_CanonicalPath_IsRecomputed(t *testing.T) {
 		}),
 	)
 	result := p2ResultOrFail(t, frames[1], "wrkq.task.move canonical path")
+
+	// move answers with the moved task as a WrkqTask DTO (camelCase, no column leaks).
+	assertWrkqTaskDTO(t, result)
+	p2AssertAbsent(t, result, "parent_task_uuid")
 
 	// The returned path must contain the destination container slug.
 	gotPath, _ := result["path"].(string)
@@ -638,54 +572,6 @@ func TestWrkqTaskMove_SameTarget_StaleEtag_ReturnsConflict(t *testing.T) {
 }
 
 // ─── wrkq.task.move: hierarchy invariant (SQL) ────────────────────────────
-
-// TestWrkqTaskMove_ResidentSubtreeMove_NoProjectMismatch verifies that after a
-// same-residency cascade move, no resident child is accidentally left behind.
-//
-// The test seeds a root task with subtasks, performs a move, then executes the
-// invariant SQL query directly on the DB.
-//
-// RED: method not registered → p2ResultOrFail fails with "method not found".
-func TestWrkqTaskMove_ResidentSubtreeMove_NoProjectMismatch(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-
-	srcProjUUID := "g5000000-8000-4000-8000-000000000001"
-	dstProjUUID := "g5000000-8000-4000-8000-000000000002"
-	rootTaskUUID := "g5000000-8000-4000-8000-000000000010"
-	sub1UUID := "g5000000-8000-4000-8000-000000000011"
-	sub2UUID := "g5000000-8000-4000-8000-000000000012"
-
-	g5SeedProject(t, dbPath, "g5-inv-src", srcProjUUID)
-	g5SeedProject(t, dbPath, "g5-inv-dst", dstProjUUID)
-	rootTaskID := g5SeedRootTask(t, dbPath, "g5-inv-root", rootTaskUUID, srcProjUUID)
-	g5SeedSubtask(t, dbPath, "g5-inv-sub1", sub1UUID, srcProjUUID, rootTaskUUID)
-	g5SeedSubtask(t, dbPath, "g5-inv-sub2", sub2UUID, srcProjUUID, rootTaskUUID)
-
-	// Pre-condition: invariant holds (all seeded tasks share the same project_uuid).
-	if n := g5HierarchyMismatchCount(t, dbPath); n != 0 {
-		t.Fatalf("hierarchy invariant pre-condition: expected 0 mismatches before move, got %d", n)
-	}
-
-	// Perform the cascade move.
-	// RED: if method not found, p2ResultOrFail calls t.Fatalf here.
-	frames := p2Run(t, dbPath,
-		mkRPC("mv1", "wrkq.task.move", map[string]any{
-			"task":       rootTaskID,
-			"targetPath": "g5-inv-dst",
-		}),
-	)
-	p2ResultOrFail(t, frames[1], "wrkq.task.move for hierarchy invariant")
-
-	// Post-condition: invariant must still hold after a correct cascade move.
-	if n := g5HierarchyMismatchCount(t, dbPath); n != 0 {
-		t.Errorf("resident subtree move: expected 0 child/parent project_uuid mismatches "+
-			"after cascade move, got %d; "+
-			"all seeded resident descendants should move with their parent", n)
-	}
-}
 
 // TestWrkqTaskMove_ResidentSubtreeMove_ArbitraryMovesSQL verifies the same-
 // residency cascade invariant after multiple successive moves across projects.

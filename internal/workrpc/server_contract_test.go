@@ -27,56 +27,54 @@ func TestMethodCatalogMatchesRegistry(t *testing.T) {
 	}
 }
 
+// TestInitializeProtocolMismatchCarriesServerIdentity: an initialize with a
+// foreign protocolVersion is refused with the server's protocol, schema hash and
+// revision in error.data; a server built without a revision reports "unknown".
 func TestInitializeProtocolMismatchCarriesServerIdentity(t *testing.T) {
-	revision := "0123456789abcdef0123456789abcdef01234567"
-	srv := NewRegistry(nil, RegistryOptions{ServerRevision: revision})
-	response, ok := srv.HandleRequest(t.Context(), Request{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage(`0`),
-		Method:  "rpc.initialize",
-		Params:  json.RawMessage(`{"protocolVersion":"2026-09-30"}`),
-	})
-	if !ok || response.Error == nil {
-		t.Fatalf("initialize response = (%#v, %v), want protocol mismatch", response, ok)
-	}
-	var data map[string]any
-	if err := json.Unmarshal(response.Error.Data, &data); err != nil {
-		t.Fatalf("decode error data: %v", err)
-	}
-	want := map[string]any{
-		"expected":                 ProtocolVersion,
-		"actual":                   "2026-09-30",
-		"serverProtocolSchemaHash": ProtocolSchemaHash(),
-		"serverRevision":           revision,
-	}
-	for key, value := range want {
-		if data[key] != value {
-			t.Errorf("error data %s = %#v, want %#v", key, data[key], value)
-		}
-	}
-}
-
-func TestInitializeProtocolMismatchUsesUnknownRevisionFallback(t *testing.T) {
-	srv := NewRegistry(nil, RegistryOptions{})
-	response, ok := srv.HandleRequest(t.Context(), Request{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage(`0`),
-		Method:  "rpc.initialize",
-		Params:  json.RawMessage(`{"protocolVersion":"2026-09-30"}`),
-	})
-	if !ok || response.Error == nil {
-		t.Fatalf("initialize response = (%#v, %v), want protocol mismatch", response, ok)
-	}
-	var data map[string]any
-	if err := json.Unmarshal(response.Error.Data, &data); err != nil {
-		t.Fatalf("decode error data: %v", err)
-	}
-	if data["serverRevision"] != "unknown" {
-		t.Fatalf("serverRevision = %#v, want unknown", data["serverRevision"])
+	for _, tc := range []struct {
+		name         string
+		revision     string
+		wantRevision string
+	}{
+		{"revision configured", "0123456789abcdef0123456789abcdef01234567", "0123456789abcdef0123456789abcdef01234567"},
+		{"no revision falls back to unknown", "", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := NewRegistry(nil, RegistryOptions{ServerRevision: tc.revision})
+			response, ok := srv.HandleRequest(t.Context(), Request{
+				JSONRPC: "2.0",
+				ID:      json.RawMessage(`0`),
+				Method:  "rpc.initialize",
+				Params:  json.RawMessage(`{"protocolVersion":"2026-09-30"}`),
+			})
+			if !ok || response.Error == nil {
+				t.Fatalf("initialize response = (%#v, %v), want protocol mismatch", response, ok)
+			}
+			var data map[string]any
+			if err := json.Unmarshal(response.Error.Data, &data); err != nil {
+				t.Fatalf("decode error data: %v", err)
+			}
+			want := map[string]any{
+				"expected":                 ProtocolVersion,
+				"actual":                   "2026-09-30",
+				"serverProtocolSchemaHash": ProtocolSchemaHash(),
+				"serverRevision":           tc.wantRevision,
+			}
+			for key, value := range want {
+				if data[key] != value {
+					t.Errorf("error data %s = %#v, want %#v", key, data[key], value)
+				}
+			}
+		})
 	}
 }
 
-func TestRoomOpenIsMethodNotFound(t *testing.T) {
+// TestRetiredAndCrossOwnerMethodsAnswerMethodNotFound: names that violate the
+// wrkq/wrkf ownership boundary (task mutation or workflow attachment under
+// wrkf.*), the deprecated wrkf.initialize lifecycle, the forbidden
+// wrkf.task.instances envelope, and the retired wrkq.room.open are not served —
+// an initialized dispatcher answers each with JSON-RPC -32601 "method not found".
+func TestRetiredAndCrossOwnerMethodsAnswerMethodNotFound(t *testing.T) {
 	srv := NewRegistry(nil, RegistryOptions{})
 	initialized, ok := srv.HandleRequest(t.Context(), Request{
 		JSONRPC: "2.0",
@@ -87,17 +85,35 @@ func TestRoomOpenIsMethodNotFound(t *testing.T) {
 	if !ok || initialized.Error != nil {
 		t.Fatalf("initialize response = (%#v, %v)", initialized, ok)
 	}
-	response, ok := srv.HandleRequest(t.Context(), Request{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage(`1`),
-		Method:  "wrkq.room.open",
-		Params:  json.RawMessage(`{"members":["cody@wrkq:primary"]}`),
-	})
-	if !ok || response.Error == nil {
-		t.Fatalf("wrkq.room.open response = (%#v, %v), want method-not-found", response, ok)
-	}
-	if response.Error.Code != -32601 || response.Error.Message != "method not found" {
-		t.Fatalf("wrkq.room.open error = %#v, want -32601 method not found", response.Error)
+	for i, method := range []string{
+		// Task mutation under wrkf.* — ownership boundary violation.
+		"wrkf.task.attach",
+		"wrkf.task.inspect",
+		"wrkf.task.timeline",
+		"wrkf.task.refresh",
+		"wrkf.task.syncMeta",
+		// Workflow attachment belongs to wrkq.*.
+		"wrkf.workflow.attach",
+		// Deprecated lifecycle prefix; the unified protocol uses rpc.initialize.
+		"wrkf.initialize",
+		// Instances are read through the wrkq workflow envelope, never wrkf.task.*.
+		"wrkf.task.instances",
+		// Rooms are no longer opened over RPC.
+		"wrkq.room.open",
+	} {
+		response, ok := srv.HandleRequest(t.Context(), Request{
+			JSONRPC: "2.0",
+			ID:      json.RawMessage(fmt.Sprintf("%d", i+1)),
+			Method:  method,
+			Params:  json.RawMessage(`{}`),
+		})
+		if !ok || response.Error == nil {
+			t.Errorf("%s response = (%#v, %v), want method-not-found", method, response, ok)
+			continue
+		}
+		if response.Error.Code != -32601 || response.Error.Message != "method not found" {
+			t.Errorf("%s error = %#v, want -32601 method not found", method, response.Error)
+		}
 	}
 }
 
@@ -153,22 +169,6 @@ func TestStdoutPurity_HandlerMustNotCorruptStream(t *testing.T) {
 	if !strings.Contains(captured.String(), `"protocolVersion"`) {
 		t.Fatalf("initialize response missing: %q", captured.String())
 	}
-}
-
-func TestStdoutPurity_OnlyRPCFrames_ShutdownNotification(t *testing.T) {
-	var output bytes.Buffer
-	srv := NewServer(&output)
-	srv.Register("rpc.initialize", HandlerFunc(func(context.Context, json.RawMessage) (json.RawMessage, error) {
-		return json.RawMessage(`{"protocolVersion":"2026-06-30"}`), nil
-	}))
-	requests := "" +
-		`{"jsonrpc":"2.0","id":"req_1","method":"rpc.initialize","params":{}}` + "\n" +
-		`{"jsonrpc":"2.0","id":"req_2","method":"rpc.shutdown","params":null}` + "\n" +
-		`{"jsonrpc":"2.0","method":"rpc.exit"}` + "\n"
-	if err := srv.Serve(context.Background(), strings.NewReader(requests)); err != nil {
-		t.Fatalf("Serve: %v", err)
-	}
-	assertOnlyRPCFrames(t, output.String())
 }
 
 func TestExternalExecutionDoesNotSerializeUnrelatedRPC(t *testing.T) {

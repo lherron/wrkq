@@ -220,41 +220,12 @@ func TestWrkqWebhookListView_RowShape(t *testing.T) {
 	}
 }
 
-// TestWrkqWebhookAdd_EventAttribution: a real add logs a container.updated event on
-// the ROOT container carrying the new webhook_urls, the bumped etag, and the
-// caller's principal attribution.
-func TestWrkqWebhookAdd_EventAttribution(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	rootUUID := g1RootUUID(t, dbPath)
-	beforeEtag := g1EtagOf(t, dbPath, rootUUID)
-
-	frames := p2Run(t, dbPath,
-		mkRPC("w1", "wrkq.webhook.add", map[string]any{"url": "https://evt.test/wrkq", "actor": "agent:clod"}),
-	)
-	p2ResultOrFail(t, frames[1], "webhook.add event")
-
-	if g1CountEvents(t, dbPath, "container.updated", rootUUID) == 0 {
-		t.Fatalf("container.updated event not logged for root uuid=%s", rootUUID)
-	}
-	payload, eventEtag, principalRef := g1LatestEvent(t, dbPath, "container.updated", rootUUID)
-	if eventEtag != beforeEtag+1 {
-		t.Errorf("event etag: want %d, got %d", beforeEtag+1, eventEtag)
-	}
-	if !strings.Contains(payload, "https://evt.test/wrkq") {
-		t.Errorf("event payload must carry the new webhook url, got %q", payload)
-	}
-	if principalRef == "" {
-		t.Error("event must record principal attribution (principal_ref)")
-	}
-}
-
 // TestWrkqWebhookAdd_ExactAttribution covers daedalus's T-05119 condition: a
-// caller-supplied canonical principal (--as agent:flag-principal, no legacy actor
-// row) must be recorded EXACTLY — both the container.updated event principal_ref
-// and the root container's updated_by_principal_ref — not coerced to wrkq-system.
+// webhook add logs one container.updated event on the root (etag+1, payload
+// carrying the new URL), and a caller-supplied canonical principal (--as
+// agent:flag-principal, no legacy actor row) must be recorded EXACTLY — both the
+// container.updated event principal_ref and the root container's
+// updated_by_principal_ref — not coerced to wrkq-system.
 // A bare compat slug is rejected WRKQ_VALIDATION, while a full agent ScopeRef
 // is accepted and reduced to its durable agent:<id> principal.
 func TestWrkqWebhookAdd_ExactAttribution(t *testing.T) {
@@ -263,13 +234,23 @@ func TestWrkqWebhookAdd_ExactAttribution(t *testing.T) {
 	}
 	dbPath := migratedDB(t)
 	rootUUID := g1RootUUID(t, dbPath)
+	beforeEtag := g1EtagOf(t, dbPath, rootUUID)
 
 	frames := p2Run(t, dbPath,
 		mkRPC("w1", "wrkq.webhook.add", map[string]any{"url": "https://attr.test/wrkq", "actor": "agent:flag-principal"}),
 	)
 	p2ResultOrFail(t, frames[1], "webhook.add exact-attribution")
 
-	_, _, principalRef := g1LatestEvent(t, dbPath, "container.updated", rootUUID)
+	if g1CountEvents(t, dbPath, "container.updated", rootUUID) == 0 {
+		t.Fatalf("container.updated event not logged for root uuid=%s", rootUUID)
+	}
+	payload, eventEtag, principalRef := g1LatestEvent(t, dbPath, "container.updated", rootUUID)
+	if eventEtag != beforeEtag+1 {
+		t.Errorf("event etag: want %d, got %d", beforeEtag+1, eventEtag)
+	}
+	if !strings.Contains(payload, "https://attr.test/wrkq") {
+		t.Errorf("event payload must carry the new webhook url, got %q", payload)
+	}
 	if principalRef != "agent:flag-principal" {
 		t.Errorf("event principal_ref: want agent:flag-principal, got %q", principalRef)
 	}

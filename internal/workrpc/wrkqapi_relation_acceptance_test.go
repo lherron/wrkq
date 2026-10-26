@@ -119,7 +119,8 @@ func TestWrkqRelationList_IncludesDirectionField(t *testing.T) {
 }
 
 // TestWrkqRelationRemove_ByCompositeKey removes a relation by its composite key,
-// with no "id" param.
+// with no "id" param: the relation is gone from wrkq.relation.list afterwards,
+// and removing it again answers WRKQ_NOT_FOUND.
 func TestWrkqRelationRemove_ByCompositeKey(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -128,6 +129,22 @@ func TestWrkqRelationRemove_ByCompositeKey(t *testing.T) {
 	taskA, taskB := createTaskPair(t, dbPath, "Rel Remove A", "Rel Remove B")
 	p2Run(t, dbPath, mkRPC("r1", "wrkq.relation.add", relationParams(taskA, "blocks", taskB)))
 
-	rmf := p2Run(t, dbPath, mkRPC("rm1", "wrkq.relation.remove", relationParams(taskA, "blocks", taskB)))
-	p2ResultOrFail(t, rmf[1], "wrkq.relation.remove by composite key")
+	rmf := p2Run(t, dbPath,
+		mkRPC("l0", "wrkq.relation.list", map[string]any{"task": taskA}),
+		mkRPC("rm1", "wrkq.relation.remove", relationParams(taskA, "blocks", taskB)),
+		mkRPC("l1", "wrkq.relation.list", map[string]any{"task": taskA}),
+		mkRPC("rm2", "wrkq.relation.remove", relationParams(taskA, "blocks", taskB)),
+	)
+	before, _ := p2ResultOrFail(t, rmf[1], "wrkq.relation.list before remove")["items"].([]any)
+	if len(before) != 1 {
+		t.Fatalf("precondition: want 1 relation on task A before remove, got %d: %#v", len(before), before)
+	}
+	p2ResultOrFail(t, rmf[2], "wrkq.relation.remove by composite key")
+	after, _ := p2ResultOrFail(t, rmf[3], "wrkq.relation.list after remove")["items"].([]any)
+	if len(after) != 0 {
+		t.Errorf("relation must be gone after remove; task A still lists %d: %#v", len(after), after)
+	}
+	if code := p2ErrCode(rmf[4]); code != "WRKQ_NOT_FOUND" {
+		t.Errorf("second remove of the same relation: want WRKQ_NOT_FOUND, got %q (frame=%#v)", code, rmf[4])
+	}
 }

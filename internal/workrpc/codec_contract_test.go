@@ -1,123 +1,48 @@
-package workrpc
+//go:build wrkq_local
+
+package workrpc_test
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
+
+	"github.com/lherron/wrkq/internal/workrpc"
 )
 
-func TestCodec_RequestRoundtrip(t *testing.T) {
-	original := Request{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage(`"req_init_1"`),
-		Method:  "rpc.initialize",
-		Params:  json.RawMessage(`{"protocolVersion":"2026-06-30"}`),
-	}
-	frame, err := json.Marshal(original)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	frame = append(frame, '\n')
-
-	got, err := NewReader(bytes.NewReader(frame), DefaultMaxFrameBytes).ReadRequest()
-	if err != nil {
-		t.Fatalf("ReadRequest: %v", err)
-	}
-	if got.JSONRPC != original.JSONRPC || string(got.ID) != string(original.ID) || got.Method != original.Method {
-		t.Fatalf("request roundtrip mismatch: got %+v want %+v", got, original)
-	}
-	var gotParams, wantParams map[string]any
-	if err := json.Unmarshal(got.Params, &gotParams); err != nil {
-		t.Fatalf("decode roundtrip params: %v", err)
-	}
-	if err := json.Unmarshal(original.Params, &wantParams); err != nil {
-		t.Fatalf("decode original params: %v", err)
-	}
-	if gotParams["protocolVersion"] != wantParams["protocolVersion"] {
-		t.Fatalf("protocolVersion = %v, want %v", gotParams["protocolVersion"], wantParams["protocolVersion"])
-	}
-}
-
-func TestCodec_ResponseEncoding(t *testing.T) {
-	resp := Response{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage(`"req_init_1"`),
-		Result:  json.RawMessage(`{"protocolVersion":"2026-06-30"}`),
-	}
-	var buf bytes.Buffer
-	if err := NewWriter(&buf).WriteResponse(resp); err != nil {
-		t.Fatalf("WriteResponse: %v", err)
-	}
-	frame := buf.String()
-	if !strings.HasSuffix(frame, "\n") || strings.Count(frame, "\n") != 1 {
-		t.Fatalf("response is not one newline-terminated frame: %q", frame)
-	}
-	var decoded Response
-	if err := json.Unmarshal([]byte(strings.TrimSuffix(frame, "\n")), &decoded); err != nil {
-		t.Fatalf("response is not valid JSON: %v", err)
-	}
-	if decoded.JSONRPC != "2.0" || string(decoded.ID) != `"req_init_1"` {
-		t.Fatalf("unexpected response envelope: %+v", decoded)
-	}
-}
-
-func TestCodec_ErrorResponseEncoding(t *testing.T) {
-	resp := Response{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage(`"req_2"`),
-		Error: &RPCError{
-			Code:    -32009,
-			Message: "workflow revision mismatch",
-			Data:    json.RawMessage(`{"code":"WRKF_STALE_REVISION","retryable":true}`),
-		},
-	}
-	var buf bytes.Buffer
-	if err := NewWriter(&buf).WriteResponse(resp); err != nil {
-		t.Fatalf("WriteResponse: %v", err)
-	}
-	var decoded Response
-	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &decoded); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if decoded.Error == nil || decoded.Error.Code != -32009 {
-		t.Fatalf("unexpected error envelope: %+v", decoded.Error)
-	}
-	var data map[string]any
-	if err := json.Unmarshal(decoded.Error.Data, &data); err != nil {
-		t.Fatalf("decode error data: %v", err)
-	}
-	if data["code"] != "WRKF_STALE_REVISION" || data["retryable"] != true {
-		t.Fatalf("unexpected error data: %+v", data)
-	}
-}
-
+// TestCodec_MaxFrameSizeRejected drives the real `wrkq rpc --stdio` binary: a
+// request line larger than the frame cap is refused with a WRKQ_VALIDATION
+// "frame too large" error frame carrying data.maxBytes, and the stream recovers —
+// the next request in the same session is still served.
 func TestCodec_MaxFrameSizeRejected(t *testing.T) {
-	const maxBytes = 64
-	big, err := json.Marshal(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      "req_big",
-		"method":  "wrkf.instance.next",
-		"params":  map[string]any{"task": strings.Repeat("X", 256)},
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
+	}
+	dbPath := migratedDB(t)
+	// Overshoot the cap by more than one read buffer, so the reader has to
+	// discard the rest of the line to resynchronize on the next frame.
+	oversized := mkRPC("big", "wrkq.task.create", map[string]any{
+		"title":       "oversized",
+		"description": strings.Repeat("X", workrpc.DefaultMaxFrameBytes+64<<10),
 	})
-	if err != nil {
-		t.Fatalf("marshal oversized request: %v", err)
-	}
-	small := []byte(`{"jsonrpc":"2.0","id":"req_small","method":"wrkf.instance.next"}`)
-	input := append(append(big, '\n'), append(small, '\n')...)
-	r := NewReader(bytes.NewReader(input), maxBytes)
+	frames := p2Run(t, dbPath,
+		oversized,
+		mkRPC("next", "wrkq.task.create", map[string]any{"title": "after oversized frame", "kind": "task"}),
+	)
 
-	_, err = r.ReadRequest()
-	var validation *ValidationError
-	if !errors.As(err, &validation) {
-		t.Fatalf("oversized frame error = %T %v, want ValidationError", err, err)
+	refused := frames[1]
+	if code := p2ErrCode(refused); code != "WRKQ_VALIDATION" {
+		t.Fatalf("oversized frame: want WRKQ_VALIDATION, got %q (frame=%#v)", code, refused)
 	}
-	next, err := r.ReadRequest()
-	if err != nil {
-		t.Fatalf("ReadRequest after oversized frame: %v", err)
+	if msg := g1ErrMessage(refused); msg != "frame too large" {
+		t.Errorf("oversized frame: error.message = %q, want \"frame too large\"", msg)
 	}
-	if next.Method != "wrkf.instance.next" {
-		t.Fatalf("next method = %q", next.Method)
+	if got := p2ErrDataField(refused, "maxBytes"); got != float64(workrpc.DefaultMaxFrameBytes) {
+		t.Errorf("oversized frame: error.data.maxBytes = %#v, want %d", got, workrpc.DefaultMaxFrameBytes)
 	}
+	if id, present := refused["id"]; !present || id != nil {
+		t.Errorf("oversized frame: refusal id = %#v, want null (the request was never parsed)", id)
+	}
+
+	next := p2ResultOrFail(t, frames[2], "wrkq.task.create after oversized frame")
+	p2AssertFieldEq(t, next, "title", "after oversized frame")
 }

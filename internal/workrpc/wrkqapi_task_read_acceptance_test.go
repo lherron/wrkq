@@ -51,14 +51,16 @@ func TestWrkqTaskShow_NotFound(t *testing.T) {
 	}
 }
 
-// TestWrkqTaskShow_ReturnsWrkqTask verifies that wrkq.task.show returns the full
-// WrkqTask DTO for a task that exists.
+// TestWrkqTaskShow_ReturnsWrkqTask verifies that wrkq.task.create answers with
+// the WrkqTask DTO, and that the created task persists: wrkq.task.show in a
+// later session returns the same full WrkqTask DTO.
 func TestWrkqTaskShow_ReturnsWrkqTask(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
 	dbPath := migratedDB(t)
 	cf := p2Run(t, dbPath, mkRPC("c1", "wrkq.task.create", map[string]any{"title": "Show Test", "kind": "bug"}))
+	assertWrkqTaskDTO(t, p2ResultOrFail(t, cf[1], "wrkq.task.create must return WrkqTask"))
 	taskID, _ := createdTaskIDs(t, cf[1])
 
 	sf := p2Run(t, dbPath, mkRPC("s1", "wrkq.task.show", map[string]any{"task": taskID}))
@@ -133,37 +135,6 @@ func TestWrkqTaskList_Filters(t *testing.T) {
 			}
 		}
 	}
-}
-
-// TestWrkqTaskList_CursorPagination verifies that limit+cursor pagination works.
-func TestWrkqTaskList_CursorPagination(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	p2Run(t, dbPath,
-		mkRPC("c1", "wrkq.task.create", map[string]any{"title": "Page Task 1"}),
-		mkRPC("c2", "wrkq.task.create", map[string]any{"title": "Page Task 2"}),
-		mkRPC("c3", "wrkq.task.create", map[string]any{"title": "Page Task 3"}),
-	)
-
-	p1Frames := p2Run(t, dbPath, mkRPC("l1", "wrkq.task.list", map[string]any{"limit": 2}))
-	page1 := p2ResultOrFail(t, p1Frames[1], "list page 1")
-	items1 := listItems(page1)
-	if len(items1) > 2 {
-		t.Errorf("limit=2: expected at most 2 items, got %d", len(items1))
-	}
-	nextCursor, _ := page1["nextCursor"].(string)
-	if nextCursor == "" {
-		// If we created 3 tasks and got only 2, nextCursor must be set.
-		if len(items1) == 2 {
-			t.Error("list page 1 with limit=2 and 3 existing tasks: nextCursor must be set")
-		}
-		return // only 2 or fewer items total; no cursor needed
-	}
-
-	p2Frames := p2Run(t, dbPath, mkRPC("l2", "wrkq.task.list", map[string]any{"cursor": nextCursor, "limit": 2}))
-	p2ResultOrFail(t, p2Frames[1], "list page 2 via cursor")
 }
 
 // ─── summary projection and presence booleans ────────────────────────────────

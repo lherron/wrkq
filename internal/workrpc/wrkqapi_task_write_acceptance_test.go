@@ -23,19 +23,6 @@ func assertWrkqTaskDTO(t *testing.T, result map[string]any) {
 
 // ─── wrkq.task.create ────────────────────────────────────────────────────────
 
-// TestWrkqTaskCreate_ReturnsNamedDTO verifies that wrkq.task.create returns a
-// WrkqTask DTO.
-func TestWrkqTaskCreate_ReturnsNamedDTO(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	frames := p2Run(t, dbPath,
-		mkRPC("c1", "wrkq.task.create", map[string]any{"title": "Named DTO Test", "kind": "task"}),
-	)
-	assertWrkqTaskDTO(t, p2ResultOrFail(t, frames[1], "wrkq.task.create"))
-}
-
 // TestWrkqTaskCreate_Rejections covers creates that must fail: a missing title
 // (WRKQ_VALIDATION) and an unknown container path, which must be an error
 // (WRKQ_NOT_FOUND or WRKQ_VALIDATION), never a result.
@@ -56,21 +43,6 @@ func TestWrkqTaskCreate_Rejections(t *testing.T) {
 	} else if code := p2ErrCode(frames[2]); code != "WRKQ_NOT_FOUND" && code != "WRKQ_VALIDATION" {
 		t.Errorf("create in unknown container: want WRKQ_NOT_FOUND or WRKQ_VALIDATION, got %q", code)
 	}
-}
-
-// TestWrkqTaskCreate_Persists verifies that a created task can be retrieved
-// with wrkq.task.show in a subsequent session.
-func TestWrkqTaskCreate_Persists(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	taskID, _ := createTaskRPC(t, dbPath, "Persist Test Task")
-
-	showFrames := p2Run(t, dbPath, mkRPC("s1", "wrkq.task.show", map[string]any{"task": taskID}))
-	showResult := p2ResultOrFail(t, showFrames[1], "wrkq.task.show must return the created task")
-	p2AssertStr(t, showResult, "uuid")
-	p2AssertFieldEq(t, showResult, "title", "Persist Test Task")
 }
 
 // TestWrkqTaskCreate_Idempotency_Replay verifies that two creates with the same

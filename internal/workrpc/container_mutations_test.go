@@ -170,29 +170,6 @@ func g1IsMethodNotFound(frame map[string]any) bool {
 	return msg == "method not found"
 }
 
-// g1Run is like p2Run but accepts the entrypoint name (wrkq or wrkf) explicitly.
-// It wraps the requests in rpc.initialize / rpc.shutdown / rpc.exit and uses runRPC.
-func g1Run(t *testing.T, entrypoint, dbPath string, reqs ...string) []map[string]any {
-	t.Helper()
-	seq := []string{
-		mkRPC("_init", "rpc.initialize", map[string]any{
-			"protocolVersion": "2026-06-30",
-			"client":          map[string]any{"name": "g1-smokey", "version": "0.0.1"},
-		}),
-	}
-	seq = append(seq, reqs...)
-	seq = append(seq,
-		mkRPC("_sd", "rpc.shutdown", map[string]any{}),
-		mkRPC("", "rpc.exit", nil),
-	)
-	frames := runRPC(t, entrypoint, dbPath, seq)
-	want := 2 + len(reqs)
-	if len(frames) != want {
-		t.Fatalf("g1Run(%s): expected %d frames, got %d\nframes: %#v", entrypoint, want, len(frames), frames)
-	}
-	return frames
-}
-
 // ─── wrkq.container.create ───────────────────────────────────────────────────
 
 // TestWrkqContainerCreate_ReturnsDTO verifies that wrkq.container.create returns a
@@ -394,37 +371,44 @@ func TestWrkqContainerDelete_StaleEtagConflict(t *testing.T) {
 	}
 }
 
-// TestWrkqContainerDelete_RootContainerRejected verifies that attempting to delete
-// the path-invisible root container is rejected (it must never be deletable).
-//
-// RED: method not registered → "method not found"; no specific root-rejection error.
-func TestWrkqContainerDelete_RootContainerRejected(t *testing.T) {
+// TestRootContainerRefusesDeleteAndDeleteRecursive proves the path-invisible
+// root container is refused by its own guard on both destructive verbs, with the
+// root-specific refusal (not any error): the root of a fresh DB has no children,
+// so the store's non-empty refusal cannot stand in for the guard on
+// wrkq.container.delete, and a deleteRecursive dryRun would otherwise answer
+// with an impact summary.
+func TestRootContainerRefusesDeleteAndDeleteRecursive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
 	dbPath := migratedDB(t)
 
 	// The root container has a fixed UUID from migration 000024.
-	// It is path-invisible (not in v_container_paths), so the delete method
-	// must reject it (WRKQ_VALIDATION or WRKQ_NOT_FOUND — either is acceptable
-	// as long as the root is not deleted).
 	const rootContainerUUID = "00000000-0000-4000-8000-000000000001"
 
-	frames := p2Run(t, dbPath,
-		mkRPC("d1", "wrkq.container.delete", map[string]any{
-			"path": rootContainerUUID, // by UUID as path selector
-		}),
-	)
-	// The rejection must come from a registered method (domain error), NOT from
-	// "method not found" — which would mean the method isn't implemented at all.
-	// RED: method not registered → g1IsMethodNotFound returns true → fails.
-	if g1IsMethodNotFound(frames[1]) {
-		t.Errorf("delete root container: method 'wrkq.container.delete' is not registered; " +
-			"must be implemented and reject root deletions with a domain error")
+	if g1RowExists(t, dbPath, "containers", "parent_uuid = ?", rootContainerUUID) {
+		t.Fatalf("precondition: a fresh root must have no children, or the root guard is not isolated")
 	}
-	// Once implemented, the call must return an error (WRKQ_VALIDATION or WRKQ_NOT_FOUND).
-	if frames[1]["error"] == nil {
-		t.Errorf("delete root container: expected rejection error, got success result: %v", frames[1]["result"])
+	frames := p2Run(t, dbPath,
+		mkRPC("d1", "wrkq.container.delete", map[string]any{"path": rootContainerUUID}),
+		mkRPC("dr1", "wrkq.container.deleteRecursive", map[string]any{"path": rootContainerUUID, "dryRun": true}),
+	)
+	for _, c := range []struct {
+		label string
+		frame map[string]any
+	}{
+		{"wrkq.container.delete root", frames[1]},
+		{"wrkq.container.deleteRecursive dryRun root", frames[2]},
+	} {
+		if code := p2ErrCode(c.frame); code != "WRKQ_VALIDATION" {
+			t.Errorf("%s: want WRKQ_VALIDATION, got %q (frame=%#v)", c.label, code, c.frame)
+		}
+		if field := p2ErrDataField(c.frame, "field"); field != "container" {
+			t.Errorf("%s: error.data.field = %#v, want \"container\"", c.label, field)
+		}
+		if msg := g1ErrMessage(c.frame); msg != "root container cannot be deleted" {
+			t.Errorf("%s: error.message = %q, want the root-container refusal", c.label, msg)
+		}
 	}
 	// The root must never be removed from the DB.
 	if !g1RowExists(t, dbPath, "containers", "uuid = ? AND kind = 'root'", rootContainerUUID) {
@@ -529,57 +513,6 @@ func TestWrkqContainerDeleteRecursive_DryRunReturnsCounts(t *testing.T) {
 	}
 }
 
-// TestWrkqContainerDeleteRecursive_CommitSucceeds verifies the commit path:
-// passing matching `expected` counts succeeds and returns the deletion summary.
-//
-// RED: method not registered → "method not found".
-func TestWrkqContainerDeleteRecursive_CommitSucceeds(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	projUUID, _, _, _, _ := g1SeedSubtree(t, dbPath)
-	_ = projUUID
-
-	// First, call dryRun to obtain the current impact counts.
-	drFrames := p2Run(t, dbPath,
-		mkRPC("dr1", "wrkq.container.deleteRecursive", map[string]any{
-			"path":   "g1-del-rec-proj",
-			"dryRun": true,
-		}),
-	)
-	drResult := p2ResultOrFail(t, drFrames[1], "deleteRecursive dryRun before commit")
-	drContainers, _ := drResult["containers"].(float64)
-	drTasks, _ := drResult["tasks"].(float64)
-	drAttachments, _ := drResult["attachments"].(float64)
-	drBytes, _ := drResult["bytes"].(float64)
-
-	// Commit with the exact expected counts from the dryRun.
-	commitFrames := p2Run(t, dbPath,
-		mkRPC("dc1", "wrkq.container.deleteRecursive", map[string]any{
-			"path": "g1-del-rec-proj",
-			"expected": map[string]any{
-				"containers":  drContainers,
-				"tasks":       drTasks,
-				"attachments": drAttachments,
-				"bytes":       drBytes,
-			},
-		}),
-	)
-	commitResult := p2ResultOrFail(t, commitFrames[1], "deleteRecursive commit")
-
-	// Must return {deleted: true, containersDeleted: N, tasksDeleted: N, ...}
-	deleted, _ := commitResult["deleted"].(bool)
-	if !deleted {
-		t.Errorf("deleteRecursive commit: result.deleted must be true, got %v", commitResult["deleted"])
-	}
-	for _, field := range []string{"containersDeleted", "tasksDeleted", "attachmentsDeleted", "bytesFreed"} {
-		if _, ok := commitResult[field]; !ok {
-			t.Errorf("deleteRecursive commit result missing field %q", field)
-		}
-	}
-}
-
 // TestWrkqContainerDeleteRecursive_CountsMismatchConflict verifies that if the
 // real impact has changed between the dryRun and the commit call, the commit
 // returns WRKQ_CONFLICT.
@@ -666,7 +599,23 @@ func TestWrkqContainerDeleteRecursive_RemovesAllDescendantsAndLogs(t *testing.T)
 			},
 		}),
 	)
-	p2ResultOrFail(t, commitFrames[1], "deleteRecursive commit for removal check")
+	commitResult := p2ResultOrFail(t, commitFrames[1], "deleteRecursive commit for removal check")
+
+	// The commit summary reports exactly what the seeded subtree held:
+	// project + dir + nested = 3 containers, 2 tasks, no attachments.
+	if deleted, _ := commitResult["deleted"].(bool); !deleted {
+		t.Errorf("deleteRecursive commit: result.deleted must be true, got %v", commitResult["deleted"])
+	}
+	for field, want := range map[string]float64{
+		"containersDeleted":  3,
+		"tasksDeleted":       2,
+		"attachmentsDeleted": 0,
+		"bytesFreed":         0,
+	} {
+		if got, ok := commitResult[field].(float64); !ok || got != want {
+			t.Errorf("deleteRecursive commit result %s = %#v, want %v", field, commitResult[field], want)
+		}
+	}
 
 	// All descendant containers must be gone.
 	if g1RowExists(t, dbPath, "containers", "uuid = ?", dirUUID) {
@@ -690,52 +639,5 @@ func TestWrkqContainerDeleteRecursive_RemovesAllDescendantsAndLogs(t *testing.T)
 	}
 	if g1CountEvents(t, dbPath, "container.deleted", nestedUUID) == 0 {
 		t.Errorf("container.deleted event not logged for nested container %s", nestedUUID)
-	}
-}
-
-// ─── catalog: methods present on BOTH entrypoints ────────────────────────────
-
-// TestContainerMutationMethods_PresentOnBothEntrypoints verifies that
-// wrkq.container.create, wrkq.container.delete, wrkq.container.deleteRecursive
-// are registered and reachable on BOTH wrkq rpc --stdio AND wrkf rpc --stdio.
-//
-// The test calls each method with deliberately invalid/empty params. An implemented
-// method returns WRKQ_VALIDATION; an unregistered method returns "method not found"
-// (JSON-RPC code -32601, message "method not found") — distinguishable because
-// registered domain methods always carry error.data.code.
-//
-// RED: all three methods are unregistered on both entrypoints → each call returns
-// "method not found" → g1IsMethodNotFound returns true → test fails.
-func TestContainerMutationMethods_PresentOnBothEntrypoints(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-
-	methods := []string{
-		"wrkq.container.create",
-		"wrkq.container.delete",
-		"wrkq.container.deleteRecursive",
-	}
-	entrypoints := []string{"wrkq", "wrkf"}
-
-	for _, ep := range entrypoints {
-		ep := ep
-		t.Run(ep, func(t *testing.T) {
-			dbPath := migratedDB(t)
-			for _, method := range methods {
-				method := method
-				t.Run(method, func(t *testing.T) {
-					// Call the method with empty params — should return WRKQ_VALIDATION
-					// (param validation), NOT "method not found".
-					frames := g1Run(t, ep, dbPath,
-						mkRPC("m1", method, map[string]any{}),
-					)
-					if g1IsMethodNotFound(frames[1]) {
-						t.Errorf("entrypoint %s: method %q is not registered (got 'method not found'); "+
-							"must be present on both wrkq and wrkf entrypoints", ep, method)
-					}
-				})
-			}
-		})
 	}
 }

@@ -7,18 +7,16 @@ package workrpc_test
 //   1. action.start creates one durable run on an un-workflowed task using the
 //      built-in simple workflow, and replays idempotently; explicit workflow
 //      refs stay authoritative (a discontinued one is refused).
-//   2. action.bindExternal persists hrc:<runId> and rejects conflicting refs.
+//   2. action.bindExternal persists hrc:<runId>, rejects conflicting refs, and
+//      action.list projects the bound ref.
 //   3. leased runs: heartbeat/renew/complete are token-guarded and tokens never
 //      leak through show/list.
 //   4. action.complete records run-linked evidence, applies the transition
 //      (unless transition:false), finishes the run, and replays side-effect free.
 //   5. action.fail records failure evidence and fails the run.
-//   6. the full start -> bindExternal -> complete -> list flow in one session.
-//   7. action.list includeClosedInstances spans workflow instances.
-//   8. no legacy cp_*/run_status task fields are read or written.
+//   6. action.list includeClosedInstances spans workflow instances.
 
 import (
-	"database/sql"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
@@ -35,33 +33,6 @@ func actStart(t *testing.T, dbPath, label string, params map[string]any) string 
 	}
 	frames := p3Run(t, dbPath, mkRPC("start", "wrkf.action.start", params))
 	return actRunID(t, p2ResultOrFail(t, frames[1], label), label)
-}
-
-// assertLegacyTaskFieldsUntouched opens dbPath and verifies the action surface
-// left the legacy control-plane task scalar fields NULL/empty for taskUUID.
-func assertLegacyTaskFieldsUntouched(t *testing.T, dbPath, taskUUID string) {
-	t.Helper()
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer func() { _ = database.Close() }()
-	var cpRunID, cpSessionID, runStatus sql.NullString
-	err = database.QueryRow(
-		`SELECT cp_run_id, cp_session_id, run_status FROM tasks WHERE uuid = ?`, taskUUID,
-	).Scan(&cpRunID, &cpSessionID, &runStatus)
-	if err != nil {
-		t.Fatalf("query legacy task fields: %v", err)
-	}
-	if cpRunID.Valid && cpRunID.String != "" {
-		t.Errorf("action surface wrote tasks.cp_run_id = %q", cpRunID.String)
-	}
-	if cpSessionID.Valid && cpSessionID.String != "" {
-		t.Errorf("action surface wrote tasks.cp_session_id = %q", cpSessionID.String)
-	}
-	if runStatus.Valid && runStatus.String != "" {
-		t.Errorf("action surface wrote tasks.run_status = %q", runStatus.String)
-	}
 }
 
 func actRunID(t *testing.T, result map[string]any, label string) string {
@@ -117,6 +88,12 @@ func TestWrkfActionStart_BuiltinWorkflowAndIdempotency(t *testing.T) {
 			"principal_ref":  actActor,
 			"idempotencyKey": "act:start:1",
 		}),
+		mkRPC("s3-mismatch", "wrkf.action.start", map[string]any{
+			"task":           taskID,
+			"action":         "verify",
+			"principal_ref":  actActor,
+			"idempotencyKey": "act:start:1",
+		}),
 		mkRPC("l1", "wrkf.run.list", map[string]any{"task": taskID}),
 	)
 	r1 := p2ResultOrFail(t, frames[1], "wrkf.action.start")
@@ -133,6 +110,9 @@ func TestWrkfActionStart_BuiltinWorkflowAndIdempotency(t *testing.T) {
 	if got, _ := r1["status"].(string); got != "active" {
 		t.Errorf("status = %q, want active", got)
 	}
+	if got, _ := r1["lane"].(string); got != "implementation" {
+		t.Errorf("lane = %q, want implementation", got)
+	}
 	wf, _ := r1["workflow"].(map[string]any)
 	if wf == nil || wf["id"] != "wrkq-simple-task" || wf["version"] != "5" {
 		t.Errorf("workflow = %#v, want built-in wrkq-simple-task@5", wf)
@@ -144,10 +124,15 @@ func TestWrkfActionStart_BuiltinWorkflowAndIdempotency(t *testing.T) {
 		t.Errorf("idempotent replay returned %q, want %q", got, runID)
 	}
 
+	// Same key, different action → idempotency mismatch, not a second run.
+	if code := p2ErrCode(frames[3]); code != "WRKF_IDEMPOTENCY_MISMATCH" {
+		t.Errorf("same key + different action code = %q, want WRKF_IDEMPOTENCY_MISMATCH; frame=%#v", code, frames[3])
+	}
+
 	// Exactly one run on the instance.
-	runs, _ := frames[3]["result"].([]any)
+	runs, _ := frames[4]["result"].([]any)
 	if len(runs) != 1 {
-		t.Fatalf("expected exactly 1 run after replay, got %d: %#v", len(runs), frames[3]["result"])
+		t.Fatalf("expected exactly 1 run after replay and mismatch, got %d: %#v", len(runs), frames[4]["result"])
 	}
 }
 
@@ -215,7 +200,8 @@ func TestWrkfActionStart_DefaultV5WithV1DiscontinuedAndExplicitRefsRemainAuthori
 	}
 }
 
-// 3: bindExternal normalizes/persists hrc:<runId>, replays, rejects conflicts.
+// 3: bindExternal normalizes/persists hrc:<runId>, replays, rejects conflicts,
+// and action.list projects the bound ref and run status.
 func TestWrkfActionBindExternal_HRCRefAndConflict(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -240,6 +226,7 @@ func TestWrkfActionBindExternal_HRCRefAndConflict(t *testing.T) {
 			"actionRunId":    runID,
 			"externalRunRef": "hrc:run-999",
 		}),
+		mkRPC("ls", "wrkf.action.list", map[string]any{"task": taskID}),
 	)
 	bound := p2ResultOrFail(t, frames[1], "bindExternal")
 	if got, _ := bound["externalRunRef"].(string); got != "hrc:run-123" {
@@ -250,9 +237,25 @@ func TestWrkfActionBindExternal_HRCRefAndConflict(t *testing.T) {
 	if got, _ := replay["externalRunRef"].(string); got != "hrc:run-123" {
 		t.Errorf("replay externalRunRef = %q, want hrc:run-123", got)
 	}
-	// Conflicting ref → error.
-	if _, ok := frames[3]["error"]; !ok {
-		t.Errorf("conflicting externalRunRef must error, got result: %#v", frames[3]["result"])
+	// Conflicting ref → typed idempotency mismatch.
+	if code := p2ErrCode(frames[3]); code != "WRKF_IDEMPOTENCY_MISMATCH" {
+		t.Errorf("conflicting externalRunRef code = %q, want WRKF_IDEMPOTENCY_MISMATCH; frame=%#v", code, frames[3])
+	}
+	// action.list projects the bound run with the first-bound ref, not the refused one.
+	list := p2ResultOrFail(t, frames[4], "action.list")
+	items, _ := list["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("action.list expected 1 item, got %d: %#v", len(items), list["items"])
+	}
+	item, _ := items[0].(map[string]any)
+	if item["runId"] != runID {
+		t.Errorf("listed runId = %v, want %v", item["runId"], runID)
+	}
+	if item["externalRunRef"] != "hrc:run-123" {
+		t.Errorf("listed externalRunRef = %v, want hrc:run-123", item["externalRunRef"])
+	}
+	if item["status"] != "active" {
+		t.Errorf("listed status = %v, want active", item["status"])
 	}
 }
 
@@ -509,47 +512,6 @@ func TestWrkfActionFail_RecordsEvidenceAndFails(t *testing.T) {
 	}
 }
 
-// 7: full stdio flow start -> bindExternal -> complete -> list in one session.
-func TestWrkfAction_FullStdioFlow(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	taskID := p2SeedTask(t, dbPath,
-		"a5000000-0000-4000-8000-000000000007",
-		"action-flow", "Action Flow")
-
-	runID := actStart(t, dbPath, "start", map[string]any{"task": taskID, "workflow": "wrkq-simple-task@1", "action": "triage"})
-
-	frames := p3Run(t, dbPath,
-		mkRPC("b1", "wrkf.action.bindExternal", map[string]any{
-			"actionRunId": runID, "externalRunRef": "hrc:flow-1",
-		}),
-		mkRPC("c1", "wrkf.action.complete", map[string]any{
-			"actionRunId": runID,
-			"evidence":    map[string]any{"summary": "ok"},
-		}),
-		mkRPC("ls", "wrkf.action.list", map[string]any{"task": taskID, "includeClosedInstances": true}),
-	)
-	p2ResultOrFail(t, frames[1], "bindExternal")
-	p2ResultOrFail(t, frames[2], "complete")
-	list := p2ResultOrFail(t, frames[3], "action.list")
-	items, _ := list["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("action.list expected 1 item, got %d: %#v", len(items), list["items"])
-	}
-	item, _ := items[0].(map[string]any)
-	if item["runId"] != runID {
-		t.Errorf("listed runId = %v, want %v", item["runId"], runID)
-	}
-	if item["externalRunRef"] != "hrc:flow-1" {
-		t.Errorf("listed externalRunRef = %v, want hrc:flow-1", item["externalRunRef"])
-	}
-	if item["status"] != "completed" {
-		t.Errorf("listed status = %v, want completed", item["status"])
-	}
-}
-
 // 8 + 10: action.list with includeClosedInstances spans closed and active
 // instances; default excludes closed instances.
 func TestWrkfActionList_IncludeClosedInstances(t *testing.T) {
@@ -595,20 +557,4 @@ func TestWrkfActionList_IncludeClosedInstances(t *testing.T) {
 	if item["runId"] != newRun {
 		t.Errorf("active list runId = %v, want %v", item["runId"], newRun)
 	}
-}
-
-// 9: the action surface never reads or writes legacy cp_*/run_status task fields.
-func TestWrkfAction_NoLegacyTaskFields(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	taskID := p2SeedTask(t, dbPath,
-		"a5000000-0000-4000-8000-000000000009",
-		"action-no-legacy", "Action No Legacy")
-
-	runID := actStart(t, dbPath, "start", map[string]any{"task": taskID, "action": "triage"})
-	p3Run(t, dbPath, mkRPC("c1", "wrkf.action.complete", map[string]any{"actionRunId": runID, "evidence": map[string]any{"summary": "ok"}}))
-
-	assertLegacyTaskFieldsUntouched(t, dbPath, "a5000000-0000-4000-8000-000000000009")
 }

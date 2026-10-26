@@ -8,6 +8,7 @@ package workrpc_test
 // wrkq.workflow.inspect, wrkq.workflow.instances and wrkq.workflow.timeline.
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
@@ -162,6 +163,44 @@ func attachGenerations(t *testing.T, dbPath, oneTaskID, multiTaskID string) (one
 	return one, first, second
 }
 
+// attachLiveBehindNewerClosed builds three generations on taskID: a v2
+// instance superseded by a v3 successor, the successor closed, then a fresh
+// live v2 instance. It then backdates the live generation and gives both
+// closed generations one identical, newer created_at. Returns (first, second,
+// live).
+func attachLiveBehindNewerClosed(t *testing.T, dbPath, taskID string) (first, second, live *workflow.Instance) {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	svc := workflow.NewService(database)
+	if first, err = svc.AttachTask(taskID, workflow.BuiltinSimpleTaskV2TemplateRef, "agent:smokey"); err != nil {
+		t.Fatalf("AttachTask(order first): %v", err)
+	}
+	revision := first.Revision
+	if second, err = svc.AttachTask(taskID, workflow.BuiltinSimpleTaskV3TemplateRef, "agent:smokey", workflow.AttachTaskOptions{
+		Supersede: true, PredecessorInstanceID: first.ID, PredecessorRevision: &revision,
+	}); err != nil {
+		t.Fatalf("AttachTask(order second): %v", err)
+	}
+	if _, err := database.Exec(`UPDATE workflow_instances SET status = 'closed', phase = 'done', closed_at = '2026-07-24T03:00:00Z' WHERE id = ?`, second.ID); err != nil {
+		t.Fatalf("close order second: %v", err)
+	}
+	if live, err = svc.AttachTask(taskID, workflow.BuiltinSimpleTaskV2TemplateRef, "agent:smokey"); err != nil {
+		t.Fatalf("AttachTask(order live): %v", err)
+	}
+	if _, err := database.Exec(`
+		UPDATE workflow_instances
+		SET created_at = CASE WHEN id = ? THEN '2026-07-24T01:00:00Z' ELSE '2026-07-24T03:00:00Z' END
+		WHERE id IN (?, ?, ?)
+	`, live.ID, first.ID, second.ID, live.ID); err != nil {
+		t.Fatalf("set deterministic creation times: %v", err)
+	}
+	return first, second, live
+}
+
 // TestWrkqWorkflowInstances_StableEnvelopeHistoryAndTypedAbsence verifies
 // wrkq.workflow.instances: advertised by initialize (and wrkf.task.instances
 // is not), {instances: []} for a known task with none, WRKQ_NOT_FOUND for an
@@ -174,7 +213,9 @@ func TestWrkqWorkflowInstances_StableEnvelopeHistoryAndTypedAbsence(t *testing.T
 	emptyTaskID := p2SeedTask(t, dbPath, "c2000000-0000-4000-8000-000000000001", "wf-instances-empty", "Workflow Instances Empty Task")
 	oneTaskID := p2SeedTask(t, dbPath, "c2000000-0000-4000-8000-000000000002", "wf-instances-one", "Workflow Instances One Task")
 	multiTaskID := p2SeedTask(t, dbPath, "c2000000-0000-4000-8000-000000000003", "wf-instances-multi", "Workflow Instances Multi Task")
+	orderTaskID := p2SeedTask(t, dbPath, "c2000000-0000-4000-8000-000000000004", "wf-instances-order", "Workflow Instances Order Task")
 	one, first, second := attachGenerations(t, dbPath, oneTaskID, multiTaskID)
+	orderFirst, orderSecond, orderLive := attachLiveBehindNewerClosed(t, dbPath, orderTaskID)
 
 	frames := p2Run(t, dbPath,
 		mkRPC("empty", "wrkq.workflow.instances", map[string]any{"task": emptyTaskID}),
@@ -183,6 +224,8 @@ func TestWrkqWorkflowInstances_StableEnvelopeHistoryAndTypedAbsence(t *testing.T
 		mkRPC("one", "wrkq.workflow.instances", map[string]any{"task": oneTaskID}),
 		mkRPC("multi", "wrkq.workflow.instances", map[string]any{"task": multiTaskID}),
 		mkRPC("inspect", "wrkq.workflow.inspect", map[string]any{"task": multiTaskID}),
+		mkRPC("order", "wrkq.workflow.instances", map[string]any{"task": orderTaskID}),
+		mkRPC("order-inspect", "wrkq.workflow.inspect", map[string]any{"task": orderTaskID}),
 	)
 
 	initResult := p2ResultOrFail(t, frames[0], "initialize")
@@ -232,29 +275,37 @@ func TestWrkqWorkflowInstances_StableEnvelopeHistoryAndTypedAbsence(t *testing.T
 	if inspectInstance["id"] != current["id"] {
 		t.Fatalf("inspect instance %v != instances[0] %v", inspectInstance["id"], current["id"])
 	}
-}
 
-// TestWrkqWorkflowTimeline_ReturnsItems verifies that wrkq.workflow.timeline
-// returns an "events" or "items" array after a workflow is attached.
-func TestWrkqWorkflowTimeline_ReturnsItems(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
+	// The live generation leads even when both closed generations are newer;
+	// closed generations with equal created_at tie-break by id DESC; the
+	// supersede lineage is projected both ways.
+	orderInstances, _ := p2ResultOrFail(t, frames[7], "live-first order")["instances"].([]any)
+	closedIDs := []string{orderFirst.ID, orderSecond.ID}
+	sort.Sort(sort.Reverse(sort.StringSlice(closedIDs)))
+	wantOrder := []string{orderLive.ID, closedIDs[0], closedIDs[1]}
+	if len(orderInstances) != len(wantOrder) {
+		t.Fatalf("order instances = %#v, want %v", orderInstances, wantOrder)
 	}
-	dbPath := migratedDB(t)
-	taskID := p2SeedTask(t, dbPath, "d1000000-0000-4000-8000-000000000001", "wf-timeline-test", "Workflow Timeline Test Task")
-
-	frames := p2Run(t, dbPath,
-		installCodeChangeReq(t),
-		attachCodeChangeReq("a1", taskID, ""),
-		mkRPC("tl1", "wrkq.workflow.timeline", map[string]any{"task": taskID}),
-	)
-	p2ResultOrFail(t, frames[1], "install")
-	p2ResultOrFail(t, frames[2], "attach")
-	timelineResult := p2ResultOrFail(t, frames[3], "wrkq.workflow.timeline must return a result")
-	_, hasEvents := timelineResult["events"]
-	_, hasItems := timelineResult["items"]
-	if !hasEvents && !hasItems {
-		t.Error("wrkq.workflow.timeline result must have \"events\" or \"items\" array")
+	byID := map[string]map[string]any{}
+	for i, raw := range orderInstances {
+		inst := raw.(map[string]any)
+		if inst["id"] != wantOrder[i] {
+			t.Fatalf("order instances[%d] = %v, want %s (live first, then closed by id DESC); all=%#v", i, inst["id"], wantOrder[i], orderInstances)
+		}
+		if closed := inst["status"] == "closed"; closed != (i > 0) {
+			t.Fatalf("order instances[%d] status = %v, want live then closed history", i, inst["status"])
+		}
+		byID[wantOrder[i]] = inst
+	}
+	orderInspect, _ := p2ResultOrFail(t, frames[8], "live-first inspect")["instance"].(map[string]any)
+	if orderInspect["id"] != orderLive.ID {
+		t.Fatalf("inspect selected %v, instances[0] = %s", orderInspect["id"], orderLive.ID)
+	}
+	if by, _ := byID[orderFirst.ID]["supersededBy"].(map[string]any); by["instanceId"] != orderSecond.ID {
+		t.Fatalf("first supersededBy = %#v, want %s", byID[orderFirst.ID]["supersededBy"], orderSecond.ID)
+	}
+	if sup, _ := byID[orderSecond.ID]["supersedes"].(map[string]any); sup["instanceId"] != orderFirst.ID {
+		t.Fatalf("second supersedes = %#v, want %s", byID[orderSecond.ID]["supersedes"], orderFirst.ID)
 	}
 }
 

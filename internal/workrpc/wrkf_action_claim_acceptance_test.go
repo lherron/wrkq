@@ -10,7 +10,10 @@ package workrpc_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/lherron/wrkq/internal/db"
 )
 
 // attachBuiltinSimpleTask installs the built-in wrkq-simple-task@version
@@ -129,10 +132,23 @@ func TestWrkfActionNextV2CandidatesAndSourceBinding(t *testing.T) {
 				},
 			},
 		}),
+		// A newer implement_result with no implement run behind it must not
+		// become the verify source ("latest evidence" inference).
+		mkRPC("unrelated", "wrkf.evidence.add", map[string]any{
+			"task": taskID, "kind": "implement_result", "ref": "manual:latest",
+			"summary": "unrelated latest", "principal_ref": actActor, "role": "implementer",
+			"facts": map[string]any{"result": "done", "commit.sha": "wrong-latest"},
+		}),
 		mkRPC("next-verify", "wrkf.action.next", map[string]any{"task": taskID}),
 	)
-	p2ResultOrFail(t, verifyFrames[1], "complete implement")
-	nextVerify := p2ResultOrFail(t, verifyFrames[2], "action.next verify")
+	implDone := p2ResultOrFail(t, verifyFrames[1], "complete implement")
+	implEvidence, _ := implDone["evidence"].(map[string]any)
+	implEvidenceID, _ := implEvidence["id"].(string)
+	if implEvidenceID == "" {
+		t.Fatalf("implement completion missing evidence id: %#v", implDone)
+	}
+	p2ResultOrFail(t, verifyFrames[2], "add unrelated implement evidence")
+	nextVerify := p2ResultOrFail(t, verifyFrames[3], "action.next verify")
 	verifyCandidates, _ := nextVerify["candidates"].([]any)
 	if len(verifyCandidates) != 1 {
 		t.Fatalf("verify candidates = %#v, want one", nextVerify["candidates"])
@@ -146,6 +162,10 @@ func TestWrkfActionNextV2CandidatesAndSourceBinding(t *testing.T) {
 	// (bindFields.sourceIdentity = change.id), not the dropped commitSha authority.
 	if source == nil || source["sourceRunId"] != implRun || source["sourceIdentity"] != "change-v1:abc123" {
 		t.Fatalf("verify source = %#v, want run %s identity change-v1:abc123", source, implRun)
+	}
+	// The source is the implement run's own evidence, never "latest" evidence.
+	if source["sourceEvidenceId"] != implEvidenceID {
+		t.Fatalf("verify sourceEvidenceId = %#v, want implement evidence %s", source["sourceEvidenceId"], implEvidenceID)
 	}
 	// semanticActionKey identifies the action occurrence by instance revision and
 	// no longer embeds the source run/commit (see semanticActionKey in action_next.go).
@@ -246,6 +266,11 @@ func TestWrkfActionClaimSuspendedRefusalPayload(t *testing.T) {
 	attachBuiltinSimpleTask(t, dbPath, taskID, 5)
 
 	first := actRPCClaim(t, dbPath, taskID, "test")
+	beforeFrames := p3Run(t, dbPath,
+		mkRPC("show-before", "wrkf.instance.show", map[string]any{"task": taskID}),
+	)
+	before := p2ResultOrFail(t, beforeFrames[1], "show instance before park")
+	taskETagBefore := suspendedClaimTaskETag(t, dbPath, taskID)
 	actRPCSettle(t, dbPath, first, map[string]any{"result": "operator_required"}, "parked")
 	showFrames := p3Run(t, dbPath,
 		mkRPC("show", "wrkf.instance.show", map[string]any{"task": taskID}),
@@ -255,6 +280,35 @@ func TestWrkfActionClaimSuspendedRefusalPayload(t *testing.T) {
 	if suspension == nil || suspension["id"] == "" || suspension["reason"] != "operator_required" || suspension["at"] == "" || suspension["causeRef"] == "" {
 		t.Fatalf("active suspension = %#v, want complete record", suspension)
 	}
+	// A suspend outcome parks the instance in place: state unchanged, one
+	// revision bump, the task document untouched, and the cause is the
+	// workflow.suspended event.
+	if before["status"] == nil || instance["status"] != before["status"] || instance["phase"] != before["phase"] {
+		t.Fatalf("suspend outcome changed state: before=%v/%v after=%v/%v", before["status"], before["phase"], instance["status"], instance["phase"])
+	}
+	if beforeRev, _ := before["revision"].(float64); instance["revision"] != beforeRev+1 {
+		t.Fatalf("suspend outcome revision = %v, want %v+1", instance["revision"], before["revision"])
+	}
+	if after := suspendedClaimTaskETag(t, dbPath, taskID); after != taskETagBefore {
+		t.Fatalf("suspend outcome touched task etag: before=%d after=%d", taskETagBefore, after)
+	}
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	var causeType string
+	if err := database.QueryRow(`SELECT type FROM workflow_events WHERE id = ?`, suspension["causeRef"]).Scan(&causeType); err != nil || causeType != "workflow.suspended" {
+		t.Fatalf("suspension causeRef %v event type = %q (err %v), want workflow.suspended", suspension["causeRef"], causeType, err)
+	}
+	countRuns := func() int {
+		var runs int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM workflow_runs WHERE instance_id = ?`, instance["id"]).Scan(&runs); err != nil {
+			t.Fatalf("count runs: %v", err)
+		}
+		return runs
+	}
+	runsBeforeRefusal := countRuns()
 
 	wrong := "run-not-the-predecessor"
 	refusedFrames := p3Run(t, dbPath,
@@ -278,6 +332,9 @@ func TestWrkfActionClaimSuspendedRefusalPayload(t *testing.T) {
 	if _, ok := errData["predecessor"]; ok {
 		t.Fatalf("suspended claim refusal leaked predecessor dossier: %#v", errData)
 	}
+	if runs := countRuns(); runs != runsBeforeRefusal {
+		t.Fatalf("refused suspended claim created runs: before=%d after=%d", runsBeforeRefusal, runs)
+	}
 
 	resumeFrames := p3Run(t, dbPath,
 		mkRPC("resume", "wrkf.suspension.resolve", map[string]any{
@@ -296,6 +353,21 @@ func TestWrkfActionClaimSuspendedRefusalPayload(t *testing.T) {
 	}
 }
 
+// suspendedClaimTaskETag reads the task document etag for a seeded task id.
+func suspendedClaimTaskETag(t *testing.T, dbPath, taskID string) int64 {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	var etag int64
+	if err := database.QueryRow(`SELECT etag FROM tasks WHERE id = ?`, taskID).Scan(&etag); err != nil {
+		t.Fatalf("task etag: %v", err)
+	}
+	return etag
+}
+
 func TestWrkfActionSettleV2ClaimedFlowAndSourceCheck(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -309,7 +381,7 @@ func TestWrkfActionSettleV2ClaimedFlowAndSourceCheck(t *testing.T) {
 	triage := actRPCClaim(t, dbPath, taskID, "triage")
 	actRPCSettle(t, dbPath, triage, map[string]any{"result": "ready"}, "triaged")
 	impl := actRPCClaim(t, dbPath, taskID, "implement")
-	actRPCSettle(t, dbPath, impl, map[string]any{
+	implemented := actRPCSettle(t, dbPath, impl, map[string]any{
 		"result":        "done",
 		"commit.sha":    "abc123",
 		"change.id":     "change-v1:abc123",
@@ -334,30 +406,49 @@ func TestWrkfActionSettleV2ClaimedFlowAndSourceCheck(t *testing.T) {
 		t.Fatalf("verify claim source = %#v, want identity change-v1:abc123", source)
 	}
 	srcEvID, _ := source["sourceEvidenceId"].(string)
-	// The wrong-source verify settle supplies every template-declared fact but echoes
-	// a mismatched source commit; the settle contract's echo check must still reject it.
-	wrong := p3Run(t, dbPath,
-		mkRPC("bad-verify", "wrkf.action.settle", map[string]any{
+	implEvidence, _ := implemented["evidence"].(map[string]any)
+	if implEvidence == nil || srcEvID != implEvidence["id"] {
+		t.Fatalf("verify claim sourceEvidenceId = %q, want implement evidence %#v (not the newer unrelated evidence)", srcEvID, implEvidence)
+	}
+	settleVerify := func(id string, facts map[string]any) map[string]any {
+		return p3Run(t, dbPath, mkRPC(id, "wrkf.action.settle", map[string]any{
 			"runId":           run["id"],
 			"ownerToken":      verify["ownerToken"],
 			"ownerGeneration": verify["ownerGeneration"],
 			"result":          "completed",
-			"evidence": map[string]any{
-				"summary": "verified wrong latest",
-				"facts": map[string]any{
-					"result":              "verified",
-					"context.id":          "context-v1:abc123",
-					"source.evidence_id":  srcEvID,
-					"source.commit.sha":   "wrong-latest",
-					"verified.commit.sha": "wrong-latest",
-					"verified.change.id":  "change-v1:abc123",
-					"git.clean":           true,
-				},
-			},
-		}),
-	)
-	if _, ok := wrong[1]["error"]; !ok {
-		t.Fatalf("wrong-source verify settle must error, got %#v", wrong[1])
+			"evidence":        map[string]any{"summary": id, "facts": facts},
+		}))[1]
+	}
+	// The wrong-source verify settle supplies every template-declared fact but echoes
+	// a mismatched source commit; the settle contract's echo check must still reject it.
+	wrongEcho := settleVerify("bad-verify-echo", map[string]any{
+		"result":              "verified",
+		"context.id":          "context-v1:abc123",
+		"source.evidence_id":  srcEvID,
+		"source.commit.sha":   "wrong-latest",
+		"verified.commit.sha": "wrong-latest",
+		"verified.change.id":  "change-v1:abc123",
+		"git.clean":           true,
+	})
+	if code := p2ErrCode(wrongEcho); code != "WRKF_VALIDATION" {
+		t.Fatalf("wrong-source echo verify settle code = %q, want WRKF_VALIDATION; frame=%#v", code, wrongEcho)
+	}
+	// A correct echo with a verified change identity other than the bound
+	// source identity is refused by the identity check, not the echo check.
+	wrongIdentity := settleVerify("bad-verify-identity", map[string]any{
+		"result":              "verified",
+		"context.id":          "context-v1:abc123",
+		"source.evidence_id":  srcEvID,
+		"source.commit.sha":   "abc123",
+		"verified.commit.sha": "abc123",
+		"verified.change.id":  "change-v1:wrong-latest",
+		"git.clean":           true,
+	})
+	if code := p2ErrCode(wrongIdentity); code != "WRKF_VALIDATION" {
+		t.Fatalf("wrong-identity verify settle code = %q, want WRKF_VALIDATION; frame=%#v", code, wrongIdentity)
+	}
+	if msg, _ := wrongIdentity["error"].(map[string]any)["message"].(string); !strings.Contains(msg, "identity") {
+		t.Fatalf("wrong-identity verify settle message = %q, want source identity refusal", msg)
 	}
 	final := actRPCSettle(t, dbPath, verify, map[string]any{
 		"result":              "verified",
@@ -372,5 +463,8 @@ func TestWrkfActionSettleV2ClaimedFlowAndSourceCheck(t *testing.T) {
 	state, _ := tr["state"].(map[string]any)
 	if state["status"] != "closed" || state["phase"] != "done" {
 		t.Fatalf("final transition state = %#v, want closed/done", state)
+	}
+	if _, taskState, _, _ := taskRow(t, dbPath, "a5000000-0000-4000-8000-000000000035"); taskState != "completed" {
+		t.Fatalf("task state after verified settle = %q, want completed", taskState)
 	}
 }

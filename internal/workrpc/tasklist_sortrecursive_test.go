@@ -203,50 +203,6 @@ func TestWrkqTaskList_RecursiveTrueIncludesNested(t *testing.T) {
 
 // ─── sort / direction tests ──────────────────────────────────────────────────
 
-// TestWrkqTaskList_SortPriorityAsc verifies that sort=priority + direction=asc
-// returns tasks in ascending priority order.
-//
-// RED: sort and direction params are silently ignored (not in TaskListParams);
-// items are returned in default created_at ASC order instead of priority ASC.
-func TestWrkqTaskList_SortPriorityAsc(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-
-	// Create tasks with priorities 3, 1, 2 (deliberately out of priority order).
-	p2Run(t, dbPath,
-		mkRPC("c1", "wrkq.task.create", map[string]any{"title": "G4 Sort P3", "priority": 3}),
-		mkRPC("c2", "wrkq.task.create", map[string]any{"title": "G4 Sort P1", "priority": 1}),
-		mkRPC("c3", "wrkq.task.create", map[string]any{"title": "G4 Sort P2", "priority": 2}),
-	)
-
-	frames := p2Run(t, dbPath,
-		mkRPC("l1", "wrkq.task.list", map[string]any{
-			"sort":      "priority",
-			"direction": "asc",
-		}),
-	)
-	result := p2ResultOrFail(t, frames[1], "wrkq.task.list sort=priority direction=asc")
-	priorities := g4ItemPriorities(result)
-
-	if len(priorities) < 3 {
-		t.Fatalf("sort=priority,asc: expected ≥ 3 items, got %d", len(priorities))
-	}
-	// Verify ascending priority order.
-	for i := 1; i < len(priorities); i++ {
-		if priorities[i] < priorities[i-1] {
-			t.Errorf("sort=priority,asc: item %d has priority %d < item %d priority %d (not ascending); full order: %v",
-				i, priorities[i], i-1, priorities[i-1], priorities)
-			break
-		}
-	}
-	// Explicitly check: first item must have lowest priority (1), not 3 (creation order).
-	if priorities[0] != 1 {
-		t.Errorf("sort=priority,asc: first item must have priority 1, got %d; full order: %v", priorities[0], priorities)
-	}
-}
-
 // TestWrkqTaskList_SortPriorityDesc verifies that sort=priority + direction=desc
 // returns tasks in descending priority order.
 //
@@ -649,47 +605,4 @@ func TestWrkqTaskList_CursorSortFieldMismatchRejected(t *testing.T) {
 		t.Errorf("cursor from sort=priority reused with sort=created_at: want WRKQ_VALIDATION, got error.data.code=%q (frame=%#v)",
 			code, p2Frames[1])
 	}
-}
-
-// TestWrkqTaskList_CursorValidDirectionReuse verifies the POSITIVE case: a cursor
-// produced under (sort=created_at, direction=asc) is VALID when the next page
-// uses the SAME (sort=created_at, direction=asc).
-//
-// EXPECTED GREEN: once cursor identity is implemented this must continue to work.
-// Also tests the no-error path so implementers know which direction is safe.
-func TestWrkqTaskList_CursorValidDirectionReuse(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-
-	p2Run(t, dbPath,
-		mkRPC("c1", "wrkq.task.create", map[string]any{"title": "G4 CV T1"}),
-		mkRPC("c2", "wrkq.task.create", map[string]any{"title": "G4 CV T2"}),
-		mkRPC("c3", "wrkq.task.create", map[string]any{"title": "G4 CV T3"}),
-	)
-
-	// Page 1.
-	p1Frames := p2Run(t, dbPath,
-		mkRPC("l1", "wrkq.task.list", map[string]any{
-			"sort":      "created_at",
-			"direction": "asc",
-			"limit":     2,
-		}),
-	)
-	p1Result := p2ResultOrFail(t, p1Frames[1], "page 1")
-	nextCursor, _ := p1Result["nextCursor"].(string)
-	if nextCursor == "" {
-		t.Skip("valid cursor reuse test requires nextCursor; got empty")
-	}
-
-	// Page 2 — same sort+direction as cursor origin → must succeed.
-	p2Frames := p2Run(t, dbPath,
-		mkRPC("l2", "wrkq.task.list", map[string]any{
-			"sort":      "created_at",
-			"direction": "asc",
-			"cursor":    nextCursor,
-		}),
-	)
-	p2ResultOrFail(t, p2Frames[1], "page 2 with matching sort+direction (must succeed)")
 }

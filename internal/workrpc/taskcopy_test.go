@@ -18,12 +18,13 @@ package workrpc_test
 // same-store attachment-file copy, the task.copied event, and the post-commit
 // created webhook carrying a synthetic source_uuid change (daedalus
 // hrcchat#10196). These tests drive the real JSON-RPC dispatch surface via
-// p2Run / g1Run and assert DTO shape, durable effects, error taxonomy, attachment
+// p2Run and assert DTO shape, durable effects, error taxonomy, attachment
 // modes, the event payload, and idempotency. They reuse the g5* seeding helpers.
 //
 // UUIDs use a gC------ prefix so they never collide with the gap5 move seeds.
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -105,24 +106,6 @@ func gcDestTaskUUID(t *testing.T, dbPath, projectUUID, slug string) string {
 		t.Fatalf("gcDestTaskUUID(%s,%s): %v", projectUUID, slug, err)
 	}
 	return uuid
-}
-
-// ─── catalog: method present on both entrypoints ──────────────────────────────
-
-func TestTaskCopyMethod_PresentOnBothEntrypoints(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	for _, ep := range []string{"wrkq", "wrkf"} {
-		ep := ep
-		t.Run(ep, func(t *testing.T) {
-			dbPath := migratedDB(t)
-			frames := g1Run(t, ep, dbPath, mkRPC("c1", "wrkq.task.copy", map[string]any{}))
-			if g1IsMethodNotFound(frames[1]) {
-				t.Errorf("entrypoint %s: wrkq.task.copy is not registered (got 'method not found')", ep)
-			}
-		})
-	}
 }
 
 // ─── DTO shape + field order + new-copy durable effect ────────────────────────
@@ -305,22 +288,11 @@ func TestTaskCopy_SlugConflict_NoOverwrite_ReturnsConflict(t *testing.T) {
 
 // ─── not-found taxonomy (source / destination) ────────────────────────────────
 
-func TestTaskCopy_SourceNotFound_ReturnsNotFound(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	g5SeedProject(t, dbPath, "gc-nf-dst", "gc000000-5000-4000-8000-000000000002")
-	frames := p2Run(t, dbPath, mkRPC("c1", "wrkq.task.copy", map[string]any{
-		"source":      "T-09999999",
-		"destination": "gc-nf-dst",
-	}))
-	if code := p2ErrCode(frames[1]); code != "WRKQ_NOT_FOUND" {
-		t.Errorf("unknown source: want WRKQ_NOT_FOUND, got %q (frame=%#v)", code, frames[1])
-	}
-}
-
-func TestTaskCopy_DestNotFound_ReturnsNotFound(t *testing.T) {
+// TestTaskCopyUnknownSourceOrDestinationAnswersNotFoundNamingWhich: a copy whose
+// source task or destination container does not resolve answers WRKQ_NOT_FOUND,
+// and error.data names which side missed (kind + the unresolved ref), so a source
+// miss can never stand in for a destination miss or vice versa.
+func TestTaskCopyUnknownSourceOrDestinationAnswersNotFoundNamingWhich(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
@@ -328,13 +300,38 @@ func TestTaskCopy_DestNotFound_ReturnsNotFound(t *testing.T) {
 	srcProj := "gc000000-5100-4000-8000-000000000001"
 	srcTask := "gc000000-5100-4000-8000-000000000010"
 	g5SeedProject(t, dbPath, "gc-nfd-src", srcProj)
+	g5SeedProject(t, dbPath, "gc-nf-dst", "gc000000-5000-4000-8000-000000000002")
 	srcID := gcSeedTaskFull(t, dbPath, "gc-nfd-task", srcTask, srcProj)
-	frames := p2Run(t, dbPath, mkRPC("c1", "wrkq.task.copy", map[string]any{
-		"source":      srcID,
-		"destination": "gc-no-such-container",
-	}))
-	if code := p2ErrCode(frames[1]); code != "WRKQ_NOT_FOUND" {
-		t.Errorf("unknown destination: want WRKQ_NOT_FOUND, got %q (frame=%#v)", code, frames[1])
+
+	rows := []struct {
+		name        string
+		source      string
+		destination string
+		wantKind    string
+		wantRef     string
+	}{
+		{"unknown source", "T-09999999", "gc-nf-dst", "task", "T-09999999"},
+		{"unknown destination", srcID, "gc-no-such-container", "container", "gc-no-such-container"},
+	}
+	var reqs []string
+	for i, r := range rows {
+		reqs = append(reqs, mkRPC(fmt.Sprintf("c%d", i), "wrkq.task.copy", map[string]any{
+			"source":      r.source,
+			"destination": r.destination,
+		}))
+	}
+	frames := p2Run(t, dbPath, reqs...)
+	for i, r := range rows {
+		frame := frames[1+i]
+		if code := p2ErrCode(frame); code != "WRKQ_NOT_FOUND" {
+			t.Errorf("%s: want WRKQ_NOT_FOUND, got %q (frame=%#v)", r.name, code, frame)
+		}
+		if kind := p2ErrDataField(frame, "kind"); kind != r.wantKind {
+			t.Errorf("%s: error.data.kind = %#v, want %q", r.name, kind, r.wantKind)
+		}
+		if ref := p2ErrDataField(frame, "ref"); ref != r.wantRef {
+			t.Errorf("%s: error.data.ref = %#v, want %q", r.name, ref, r.wantRef)
+		}
 	}
 }
 

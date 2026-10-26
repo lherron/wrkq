@@ -97,6 +97,11 @@ func TestHandoffCreate_IdempotentReplayAndMismatch(t *testing.T) {
 // task- or role-qualified ref, an agent-only ref, or an unparsable ref — is a
 // protocol-integrity violation the server proves from params alone: WRKQ_VALIDATION
 // with no handoff row and no handoff.created event (fail fast, no silent normalize).
+//
+// The invalid-token rows cover daedalus's T-05117 #10292 condition: invalid
+// scope-token characters in agentId/projectId build an `expected` string the
+// supplied scopeRef can equal yet which is UNPARSABLE by the scope grammar; the
+// effective canonical ref must be validated before any write OR dry-run projection.
 func TestHandoffCreate_IncoherentScopeRejected(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -104,17 +109,26 @@ func TestHandoffCreate_IncoherentScopeRejected(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		scopeRef string
+		params   map[string]any // when set, sent verbatim instead of hoCreateParams+scopeRef
 	}{
-		{"mismatched-agent-project", "agent:someoneelse:project:otherproj"},
-		{"same-agent-project-task-qualified", "agent:cody:project:wrkq:task:T-05117"},
-		{"same-agent-project-role-qualified", "agent:cody:project:wrkq:role:reviewer"},
-		{"agent-only", "agent:cody"},
-		{"unparsable", "not-a-scope-ref"},
+		{"mismatched-agent-project", "agent:someoneelse:project:otherproj", nil},
+		{"same-agent-project-task-qualified", "agent:cody:project:wrkq:task:T-05117", nil},
+		{"same-agent-project-role-qualified", "agent:cody:project:wrkq:role:reviewer", nil},
+		{"agent-only", "agent:cody", nil},
+		{"unparsable", "not-a-scope-ref", nil},
+		{"invalid-agentId-token-write", "agent:co:dy:project:wrkq",
+			map[string]any{"scopeRef": "agent:co:dy:project:wrkq", "agentId": "co:dy", "projectId": "wrkq", "title": "x", "body": "y"}},
+		// dry-run must also reject — no projected handoff with an invalid scope_ref.
+		{"invalid-agentId-token-dryrun", "agent:co:dy:project:wrkq",
+			map[string]any{"scopeRef": "agent:co:dy:project:wrkq", "agentId": "co:dy", "projectId": "wrkq", "title": "x", "body": "y", "dryRun": true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dbPath := migratedDB(t)
-			bad := hoCreateParams("evil", "evil body", nil)
-			bad["scopeRef"] = tc.scopeRef
+			bad := tc.params
+			if bad == nil {
+				bad = hoCreateParams("evil", "evil body", nil)
+				bad["scopeRef"] = tc.scopeRef
+			}
 			frames := p2Run(t, dbPath,
 				mkRPC("c1", "wrkq.handoff.create", bad),
 			)
@@ -126,42 +140,6 @@ func TestHandoffCreate_IncoherentScopeRejected(t *testing.T) {
 			}
 			if n := countAllHandoffEvents(t, dbPath, "handoff.created"); n != 0 {
 				t.Errorf("rejected create must write no handoff.created event, found %d", n)
-			}
-		})
-	}
-}
-
-// TestHandoffCreate_InvalidScopeTokenRejected covers daedalus's T-05117 #10292
-// condition: invalid scope-token characters in agentId/projectId build an `expected`
-// string that the supplied scopeRef can equal yet which is UNPARSABLE by the scope
-// grammar. The effective canonical ref must be validated as a well-formed project
-// scope before any write OR dry-run projection, else WRKQ_VALIDATION.
-func TestHandoffCreate_InvalidScopeTokenRejected(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	for _, tc := range []struct {
-		name   string
-		params map[string]any
-	}{
-		{
-			"invalid-agentId-token-write",
-			map[string]any{"scopeRef": "agent:co:dy:project:wrkq", "agentId": "co:dy", "projectId": "wrkq", "title": "x", "body": "y"},
-		},
-		{
-			// dry-run must also reject — no projected handoff with an invalid scope_ref.
-			"invalid-agentId-token-dryrun",
-			map[string]any{"scopeRef": "agent:co:dy:project:wrkq", "agentId": "co:dy", "projectId": "wrkq", "title": "x", "body": "y", "dryRun": true},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dbPath := migratedDB(t)
-			frames := p2Run(t, dbPath, mkRPC("c1", "wrkq.handoff.create", tc.params))
-			if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
-				t.Errorf("invalid scope token want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames[1])
-			}
-			if n := countAllHandoffs(t, dbPath); n != 0 {
-				t.Errorf("rejected create must write no handoff row, found %d", n)
 			}
 		})
 	}

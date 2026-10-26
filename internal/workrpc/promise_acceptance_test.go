@@ -47,6 +47,18 @@ func TestPromiseRPCOnBehalfNormalizationReadsAndOwnerBoundary(t *testing.T) {
 		mkRPC("invalid", "wrkq.promise.add", map[string]any{
 			"subject": "invalid time", "reviewAt": "tomorrow", "principalRef": "agent:cody",
 		}),
+		mkRPC("invalid-relative", "wrkq.promise.add", map[string]any{
+			"subject": "invalid relative", "reviewIn": "seven days", "principalRef": "agent:cody",
+		}),
+		mkRPC("invalid-both", "wrkq.promise.add", map[string]any{
+			"subject": "both review forms", "reviewAt": "2099-01-01T00:00:00Z", "reviewIn": "7d", "principalRef": "agent:cody",
+		}),
+		// No owner: the caller owns it, and the caller's unscoped list is
+		// their own queue (not lance's on-behalf promise).
+		mkRPC("self", "wrkq.promise.add", map[string]any{
+			"subject": "Agent-owned rollout check", "reviewIn": "7d", "principalRef": "agent:cody",
+		}),
+		mkRPC("self-list", "wrkq.promise.list", map[string]any{"principalRef": "agent:cody"}),
 	)
 	shown := p2ResultOrFail(t, frames[1], "promise.show")
 	if shown["uuid"] != uuid {
@@ -76,6 +88,19 @@ func TestPromiseRPCOnBehalfNormalizationReadsAndOwnerBoundary(t *testing.T) {
 	if code := p2ErrCode(frames[7]); code != "WRKQ_VALIDATION" {
 		t.Fatalf("invalid reviewAt code = %q, frame=%#v", code, frames[7])
 	}
+	if code := p2ErrCode(frames[8]); code != "WRKQ_VALIDATION" {
+		t.Fatalf("invalid reviewIn code = %q, frame=%#v", code, frames[8])
+	}
+	if code := p2ErrCode(frames[9]); code != "WRKQ_VALIDATION" {
+		t.Fatalf("reviewAt+reviewIn code = %q, frame=%#v", code, frames[9])
+	}
+	self := p2ResultOrFail(t, frames[10], "self-owned promise.add")
+	p2AssertFieldEq(t, self, "ownerPrincipalRef", "agent:cody")
+	p2AssertFieldEq(t, self, "createdByPrincipalRef", "agent:cody")
+	selfItems, _ := p2ResultOrFail(t, frames[11], "caller promise.list")["items"].([]any)
+	if len(selfItems) != 1 || selfItems[0].(map[string]any)["uuid"] != self["uuid"] {
+		t.Fatalf("caller list items = %#v, want only the self-owned promise %v", selfItems, self["uuid"])
+	}
 
 	database, err := db.Open(dbPath)
 	if err != nil {
@@ -87,7 +112,8 @@ func TestPromiseRPCOnBehalfNormalizationReadsAndOwnerBoundary(t *testing.T) {
 	if err := database.QueryRow("SELECT COUNT(*), MAX(etag) FROM promises").Scan(&count, &etag); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 || etag != 1 {
+	// Two accepted adds (on-behalf + self); every rejected write wrote nothing.
+	if count != 2 || etag != 1 {
 		t.Fatalf("rejected writes changed promises: count=%d etag=%d", count, etag)
 	}
 	var payload sql.NullString

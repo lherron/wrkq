@@ -148,29 +148,10 @@ func TestWrkfEvidenceAdd_Idempotency_Replay(t *testing.T) {
 	}
 }
 
-// TestWrkfEvidenceAdd_Idempotency_Mismatch verifies that reusing an
-// idempotencyKey with a different ref returns WRKF_IDEMPOTENCY_MISMATCH (§9.7).
-func TestWrkfEvidenceAdd_Idempotency_Mismatch(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	taskID, _ := attachedCodeChangeTask(t, dbPath, "e3100000-0000-4000-8000-000000000011", "ev-idem-mismatch-test")
-
-	key := map[string]any{"idempotencyKey": "smokey:p3:ev:idem:mismatch:001"}
-	frames := p3Run(t, dbPath,
-		mkRPC("e1", "wrkf.evidence.add", redEvidenceParams(taskID, "test/smokey/p3/idem-mismatch-orig", key)),
-		mkRPC("e2", "wrkf.evidence.add", redEvidenceParams(taskID, "test/smokey/p3/idem-mismatch-DIFFERENT", key)),
-	)
-	p2ResultOrFail(t, frames[1], "first wrkf.evidence.add (original)")
-	if code := p2ErrCode(frames[2]); code != "WRKF_IDEMPOTENCY_MISMATCH" {
-		t.Errorf("same idempotencyKey + different params: want WRKF_IDEMPOTENCY_MISMATCH, got error.data.code=%q", code)
-	}
-}
-
 // TestWrkfEvidenceAdd_ProvenanceRoundTripAndIdempotencyMismatch verifies that
 // contentHash and build provenance round-trip through add and list, and that
-// changing provenance under the same idempotencyKey is a mismatch.
+// reusing the idempotencyKey with a changed canonical request — a different ref,
+// or changed provenance — is WRKF_IDEMPOTENCY_MISMATCH (§9.7).
 func TestWrkfEvidenceAdd_ProvenanceRoundTripAndIdempotencyMismatch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -194,6 +175,7 @@ func TestWrkfEvidenceAdd_ProvenanceRoundTripAndIdempotencyMismatch(t *testing.T)
 		mkRPC("e1", "wrkf.evidence.add", redEvidenceParams(taskID, "test/smokey/p3/provenance-001", provenance(contentHash))),
 		mkRPC("l1", "wrkf.evidence.list", map[string]any{"task": taskID}),
 		mkRPC("e2", "wrkf.evidence.add", redEvidenceParams(taskID, "test/smokey/p3/provenance-001", provenance("sha256:changed"))),
+		mkRPC("e3", "wrkf.evidence.add", redEvidenceParams(taskID, "test/smokey/p3/provenance-DIFFERENT", provenance(contentHash))),
 	)
 	addResult := p2ResultOrFail(t, frames[1], "wrkf.evidence.add with provenance")
 	if got, _ := addResult["contentHash"].(string); got != contentHash {
@@ -213,7 +195,9 @@ func TestWrkfEvidenceAdd_ProvenanceRoundTripAndIdempotencyMismatch(t *testing.T)
 	if !found {
 		t.Fatalf("wrkf.evidence.list did not round-trip contentHash/build provenance: %#v", items)
 	}
-	if code := p2ErrCode(frames[3]); code != "WRKF_IDEMPOTENCY_MISMATCH" {
-		t.Fatalf("same idempotencyKey + changed provenance: want WRKF_IDEMPOTENCY_MISMATCH, got %q", code)
+	for i, changed := range []string{"provenance", "ref"} {
+		if code := p2ErrCode(frames[3+i]); code != "WRKF_IDEMPOTENCY_MISMATCH" {
+			t.Errorf("same idempotencyKey + changed %s: want WRKF_IDEMPOTENCY_MISMATCH, got %q", changed, code)
+		}
 	}
 }

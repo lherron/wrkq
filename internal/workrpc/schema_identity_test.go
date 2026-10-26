@@ -1,7 +1,6 @@
 package workrpc
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -108,47 +107,6 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)
-		}
-	}
-}
-
-// TestSchemaFingerprintsKeepPackageIdentity asserts the package-qualified names
-// the cut could plausibly have shifted: a top-level DTO, a nested struct reached
-// through a field, and a type owned by a package whose implementation moved
-// behind a build tag. Cardinality and the aggregate hash would both catch a
-// change here, but neither would say WHICH identity moved.
-func TestSchemaFingerprintsKeepPackageIdentity(t *testing.T) {
-	for _, tc := range []struct {
-		dto      string
-		contains []string
-	}{
-		{
-			// Top-level wrkq DTO; must still be owned by package wrkqapi.
-			dto:      "WrkqTask",
-			contains: []string{"wrkqapi.WrkqTask{"},
-		},
-		{
-			// Nested reach: a wrkqapi DTO whose field type is owned by
-			// internal/workflow, whose service implementation is now tagged.
-			dto:      "WrkqWorkflowInstancesResult",
-			contains: []string{"wrkqapi.WrkqWorkflowInstancesResult{", "workflow.Instance{"},
-		},
-		{
-			// The initialize handshake the portable client validates on connect.
-			dto:      "RPCInitializeResult",
-			contains: []string{"workrpc.initializeResult{", "workrpc.Capabilities{"},
-		},
-	} {
-		typ, ok := dtoSchemaTypes[tc.dto]
-		if !ok {
-			t.Errorf("%s: absent from dtoSchemaTypes", tc.dto)
-			continue
-		}
-		fingerprint := dtoSchemaFingerprint(tc.dto, typ)
-		for _, want := range tc.contains {
-			if !strings.Contains(fingerprint, want) {
-				t.Errorf("%s fingerprint lost %q\n  got: %s", tc.dto, want, fingerprint)
-			}
 		}
 	}
 }

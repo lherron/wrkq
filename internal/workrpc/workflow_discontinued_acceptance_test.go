@@ -4,8 +4,6 @@ package workrpc_test
 
 import (
 	"testing"
-
-	"github.com/lherron/wrkq/internal/workrpc"
 )
 
 func TestWorkflowDiscontinueRPCAndAttachOverrideContract(t *testing.T) {
@@ -30,6 +28,13 @@ func TestWorkflowDiscontinueRPCAndAttachOverrideContract(t *testing.T) {
 			"task": taskID, "workflow": "wrkq-code-change@1", "attachDiscontinued": true,
 		}),
 		mkRPC("reinstate", "wrkf.workflow.reinstate", map[string]any{"ref": "wrkq-code-change@1"}),
+		// Attachment is owned by wrkq.workflow.attach alone; no wrkf.* alias splits it.
+		mkRPC("wrkf-workflow-attach", "wrkf.workflow.attach", map[string]any{
+			"task": taskID, "workflow": "wrkq-code-change@1",
+		}),
+		mkRPC("wrkf-task-attach", "wrkf.task.attach", map[string]any{
+			"task": taskID, "workflow": "wrkq-code-change@1",
+		}),
 	)
 
 	discontinued := p2ResultOrFail(t, frames[2], "wrkf.workflow.discontinue")
@@ -63,21 +68,9 @@ func TestWorkflowDiscontinueRPCAndAttachOverrideContract(t *testing.T) {
 	if _, ok := reinstated["discontinuedBy"]; ok {
 		t.Fatalf("reinstate result retained discontinuedBy: %#v", reinstated)
 	}
-}
-
-func TestWorkflowDiscontinueMethodsAreInRegistry(t *testing.T) {
-	registered := map[string]bool{}
-	for _, method := range workrpc.NewRegistry(nil, workrpc.RegistryOptions{}).RegisteredMethods() {
-		registered[method] = true
-	}
-	for _, method := range []string{"wrkf.workflow.discontinue", "wrkf.workflow.reinstate"} {
-		if !registered[method] {
-			t.Errorf("registry missing %s", method)
-		}
-	}
-	for _, forbidden := range []string{"wrkf.workflow.attach", "wrkf.task.attach"} {
-		if registered[forbidden] {
-			t.Errorf("registry must not split attach ownership with %s", forbidden)
+	for i, method := range []string{"wrkf.workflow.attach", "wrkf.task.attach"} {
+		if frame := frames[8+i]; !g1IsMethodNotFound(frame) {
+			t.Errorf("%s must answer method not found (attach ownership is not split); frame=%#v", method, frame)
 		}
 	}
 }

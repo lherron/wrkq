@@ -5,7 +5,12 @@ package workrpc_test
 // wrkqapi_task_lifecycle_acceptance_test.go — wrkq.task.delete, wrkq.task.restore
 // and wrkq.task.acknowledge over the real JSON-RPC stdio surface (T-04448).
 
-import "testing"
+import (
+	"database/sql"
+	"testing"
+
+	"github.com/lherron/wrkq/internal/db"
+)
 
 // seedTaskIn inserts a task already in a lifecycle state the RPC surface would
 // need several calls to reach, with the matching timestamp column set.
@@ -15,23 +20,6 @@ func seedTaskIn(t *testing.T, dbPath, state, stampColumn, uuid, slug string) str
 }
 
 // ─── task.delete ─────────────────────────────────────────────────────────────
-
-// TestWrkqTaskDelete_SetsDeletedState deletes a live task: state=deleted,
-// deletedAt non-empty, archivedAt not set.
-func TestWrkqTaskDelete_SetsDeletedState(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	taskID, _ := createTaskRPC(t, dbPath, "Delete Me")
-
-	df := p2Run(t, dbPath, mkRPC("d1", "wrkq.task.delete", map[string]any{"task": taskID}))
-	result := p2ResultOrFail(t, df[1], "wrkq.task.delete must return result")
-
-	p2AssertFieldEq(t, result, "state", "deleted")
-	p2AssertStr(t, result, "deletedAt")
-	assertBlankOrAbsent(t, result, "archivedAt", "wrkq.task.delete")
-}
 
 // TestWrkqTaskDelete_CascadesSubtasks deletes a parent and asserts its subtask
 // is also marked deleted.
@@ -54,18 +42,52 @@ func TestWrkqTaskDelete_CascadesSubtasks(t *testing.T) {
 	p2AssertFieldEq(t, childResult, "state", "deleted")
 }
 
-// TestWrkqTaskDelete_Redelete_NoOp deletes an already-deleted task: it succeeds
-// and stays deleted.
+// taskStampAndEtag reads a task's durable timestamp column and etag.
+func taskStampAndEtag(t *testing.T, dbPath, uuid, column string) (stamp string, etag int64) {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("taskStampAndEtag: db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	var ns sql.NullString
+	if err := database.QueryRow("SELECT "+column+", etag FROM tasks WHERE uuid = ?", uuid).Scan(&ns, &etag); err != nil {
+		t.Fatalf("taskStampAndEtag(%s): %v", column, err)
+	}
+	return ns.String, etag
+}
+
+// assertNoOpKeptStampAndEtag fails unless a no-op lifecycle call left the task's
+// timestamp column and etag exactly as seeded, in the DB and in the returned DTO.
+func assertNoOpKeptStampAndEtag(t *testing.T, dbPath, uuid, column string, beforeStamp string, beforeEtag int64, result map[string]any, label string) {
+	t.Helper()
+	afterStamp, afterEtag := taskStampAndEtag(t, dbPath, uuid, column)
+	if afterStamp != beforeStamp {
+		t.Errorf("%s: %s re-stamped %q -> %q; a no-op must not write", label, column, beforeStamp, afterStamp)
+	}
+	if afterEtag != beforeEtag {
+		t.Errorf("%s: etag bumped %d -> %d; a no-op must not write", label, beforeEtag, afterEtag)
+	}
+	if got, _ := result["etag"].(float64); int64(got) != beforeEtag {
+		t.Errorf("%s: DTO etag = %v, want unchanged %d", label, result["etag"], beforeEtag)
+	}
+}
+
+// TestWrkqTaskDelete_Redelete_NoOp deletes an already-deleted task: it succeeds,
+// stays deleted, and writes nothing — deleted_at and etag are unchanged.
 func TestWrkqTaskDelete_Redelete_NoOp(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
 	dbPath := migratedDB(t)
-	taskID := seedTaskIn(t, dbPath, "deleted", "deleted_at", "f0000002-0000-4000-8000-000000000001", "redelete-noop")
+	const uuid = "f0000002-0000-4000-8000-000000000001"
+	taskID := seedTaskIn(t, dbPath, "deleted", "deleted_at", uuid, "redelete-noop")
+	beforeStamp, beforeEtag := taskStampAndEtag(t, dbPath, uuid, "deleted_at")
 
 	df := p2Run(t, dbPath, mkRPC("d1", "wrkq.task.delete", map[string]any{"task": taskID}))
 	result := p2ResultOrFail(t, df[1], "wrkq.task.delete on already-deleted task")
 	p2AssertFieldEq(t, result, "state", "deleted")
+	assertNoOpKeptStampAndEtag(t, dbPath, uuid, "deleted_at", beforeStamp, beforeEtag, result, "re-delete")
 }
 
 // ─── task.restore ────────────────────────────────────────────────────────────
@@ -184,7 +206,8 @@ func TestWrkqTaskRestore_Rejections(t *testing.T) {
 // ─── task.acknowledge ────────────────────────────────────────────────────────
 
 // TestWrkqTaskAcknowledge_Succeeds acknowledges a task that is completed,
-// cancelled, or still open with force=true; each result carries acknowledgedAt.
+// cancelled, or still open with force=true; each result carries acknowledgedAt,
+// and a following wrkq.task.show reads the same acknowledgedAt back.
 func TestWrkqTaskAcknowledge_Succeeds(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -211,9 +234,15 @@ func TestWrkqTaskAcknowledge_Succeeds(t *testing.T) {
 			if tc.force {
 				params["force"] = true
 			}
-			af := p2Run(t, dbPath, mkRPC("a1", "wrkq.task.acknowledge", params))
+			af := p2Run(t, dbPath,
+				mkRPC("a1", "wrkq.task.acknowledge", params),
+				mkRPC("s1", "wrkq.task.show", map[string]any{"task": taskID}),
+			)
 			result := p2ResultOrFail(t, af[1], "wrkq.task.acknowledge "+tc.name)
 			p2AssertStr(t, result, "acknowledgedAt")
+			// The acknowledgement is durable: a later task.show carries the same stamp.
+			show := p2ResultOrFail(t, af[2], "wrkq.task.show after acknowledge "+tc.name)
+			p2AssertFieldEq(t, show, "acknowledgedAt", result["acknowledgedAt"])
 		})
 	}
 }
@@ -232,32 +261,19 @@ func TestWrkqTaskAcknowledge_Open_NoForce_Fails(t *testing.T) {
 }
 
 // TestWrkqTaskAcknowledge_AlreadyAcked_NoOp re-acknowledges an acknowledged
-// task: a result (not an error) that keeps acknowledgedAt.
+// task: a result (not an error) that writes nothing — acknowledged_at and etag
+// are unchanged.
 func TestWrkqTaskAcknowledge_AlreadyAcked_NoOp(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
 	dbPath := migratedDB(t)
-	taskID := seedTaskIn(t, dbPath, "completed", "acknowledged_at", "f0000006-0000-4000-8000-000000000001", "already-acked")
+	const uuid = "f0000006-0000-4000-8000-000000000001"
+	taskID := seedTaskIn(t, dbPath, "completed", "acknowledged_at", uuid, "already-acked")
+	beforeStamp, beforeEtag := taskStampAndEtag(t, dbPath, uuid, "acknowledged_at")
 
 	af := p2Run(t, dbPath, mkRPC("a1", "wrkq.task.acknowledge", map[string]any{"task": taskID}))
 	result := p2ResultOrFail(t, af[1], "wrkq.task.acknowledge already-acked task must succeed (no-op)")
 	p2AssertStr(t, result, "acknowledgedAt")
-}
-
-// TestWrkqTaskDTO_AcknowledgedAtField force-acknowledges a task and asserts
-// wrkq.task.show then carries a non-empty acknowledgedAt.
-func TestWrkqTaskDTO_AcknowledgedAtField(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	taskID, _ := createTaskRPC(t, dbPath, "DTO Ack Field")
-
-	af := p2Run(t, dbPath, mkRPC("a1", "wrkq.task.acknowledge", map[string]any{"task": taskID, "force": true}))
-	p2ResultOrFail(t, af[1], "wrkq.task.acknowledge with force")
-
-	sf := p2Run(t, dbPath, mkRPC("s1", "wrkq.task.show", map[string]any{"task": taskID}))
-	showResult := p2ResultOrFail(t, sf[1], "wrkq.task.show after acknowledge")
-	p2AssertStr(t, showResult, "acknowledgedAt")
+	assertNoOpKeptStampAndEtag(t, dbPath, uuid, "acknowledged_at", beforeStamp, beforeEtag, result, "re-acknowledge")
 }

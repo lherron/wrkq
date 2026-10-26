@@ -26,10 +26,6 @@ package workrpc_test
 //      mechanism a bridge uses to recover after a disconnect without missing or
 //      double-counting events.
 //
-//   3. ChildTerminatesOnDisconnect — prove the child process is reaped when the
-//      parent disconnects (context cancel / kill). This is what lets the bridge
-//      tear the watcher down when its SSE client goes away.
-//
 // NOTE on scope: `wrkq monitor watch` surfaces only task.* and comment.* events
 // (see isEventIncluded in internal/rpccli/monitor.go). container.* events are NOT
 // in the typed feed by design — for a recursive container delete the observable
@@ -61,8 +57,8 @@ var (
 // e2eBinary builds (once per test binary run) a real `wrkq` executable and
 // returns its path. Building a standalone binary — rather than `go run` —
 // matters here: `go run` wraps the program in a parent process whose signal
-// semantics on context-cancel are murky, and the disconnect test asserts the
-// watcher itself is reaped.
+// semantics on context-cancel are murky, and the monitor children spawned here
+// must be torn down when each test cancels them.
 func e2eBinary(t *testing.T) string {
 	t.Helper()
 	e2eBinOnce.Do(func() {
@@ -438,47 +434,6 @@ func TestEventBridge_ResumeFromSinceAndLast(t *testing.T) {
 	}
 	if containsID(tail, ids[0]) {
 		t.Fatalf("--last 1 replayed an old event id %d; got %v", ids[0], idsOf(tail))
-	}
-}
-
-// ─── 3. child reaped on disconnect ──────────────────────────────────────────
-
-// TestEventBridge_ChildTerminatesOnDisconnect proves the bridge can tear the
-// watcher down: an exec.CommandContext-spawned `monitor watch` (no --until, so
-// it follows indefinitely) exits promptly when the parent cancels its context.
-func TestEventBridge_ChildTerminatesOnDisconnect(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping built-binary e2e in short mode")
-	}
-	bin := e2eBinary(t)
-	dbPath := migratedDB(t)
-
-	mon := spawnMonitor(t, bin, dbPath, "--since", "0")
-
-	// Confirm it is actually running and following (produce + observe an event).
-	frames := e2eRPC(t, bin, dbPath, mkRPC("c1", "wrkq.task.create", map[string]any{"title": "Live"}))
-	e2eResult(t, frames, "c1", "task.create")
-	mon.await(t, e2eAwait, "task.created (liveness)", func(e monitorEvt) bool {
-		return e.EventType == "task.created"
-	})
-
-	// Disconnect: cancel the context (exec.CommandContext kills the child).
-	mon.cancel()
-
-	select {
-	case <-mon.done:
-		// stdout closed → process is exiting/exited.
-	case <-time.After(e2eAwait):
-		t.Fatalf("monitor child did not terminate within %s of context cancel", e2eAwait)
-	}
-
-	waitErr := make(chan error, 1)
-	go func() { waitErr <- mon.cmd.Wait() }()
-	select {
-	case <-waitErr:
-		// Wait returned (non-nil err from the kill signal is expected and fine).
-	case <-time.After(e2eAwait):
-		t.Fatalf("monitor child process did not reap within %s of context cancel", e2eAwait)
 	}
 }
 

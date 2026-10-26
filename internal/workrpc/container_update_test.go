@@ -21,6 +21,7 @@ package workrpc_test
 // container_mutations_test.go. Seeding uses direct DB SQL.
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -97,45 +98,6 @@ func g1LatestEvent(t *testing.T, dbPath, eventType, resourceUUID string) (payloa
 
 // ─── wrkq.container.update ───────────────────────────────────────────────────
 
-// TestWrkqContainerUpdate_EmptyPatchValidation: an empty patch object → WRKQ_VALIDATION.
-func TestWrkqContainerUpdate_EmptyPatchValidation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	projUUID := "g1000000-5100-4000-8000-000000000001"
-	g1SeedProject(t, dbPath, "g1-upd-empty", projUUID)
-
-	frames := p2Run(t, dbPath,
-		mkRPC("u1", "wrkq.container.update", map[string]any{
-			"container": "g1-upd-empty",
-			"patch":     map[string]any{},
-		}),
-	)
-	if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
-		t.Errorf("empty patch: want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames[1])
-	}
-}
-
-// TestWrkqContainerUpdate_MissingPatchValidation: an absent/null patch → WRKQ_VALIDATION.
-func TestWrkqContainerUpdate_MissingPatchValidation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	projUUID := "g1000000-5150-4000-8000-000000000001"
-	g1SeedProject(t, dbPath, "g1-upd-nopatch", projUUID)
-
-	frames := p2Run(t, dbPath,
-		mkRPC("u1", "wrkq.container.update", map[string]any{
-			"container": "g1-upd-nopatch",
-		}),
-	)
-	if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
-		t.Errorf("missing patch: want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames[1])
-	}
-}
-
 // TestWrkqContainerUpdate_SlugNormalized: the server normalizes the slug
 // (e.g. "New_Proj Name" → "new-proj-name") and the returned DTO + DB reflect it.
 func TestWrkqContainerUpdate_SlugNormalized(t *testing.T) {
@@ -158,31 +120,6 @@ func TestWrkqContainerUpdate_SlugNormalized(t *testing.T) {
 	}
 	if got := g1ContainerField(t, dbPath, projUUID, "slug"); got != "new-proj-name" {
 		t.Errorf("DB slug after normalize: want %q, got %q", "new-proj-name", got)
-	}
-}
-
-// TestWrkqContainerUpdate_InvalidSlugValidation: a slug that cannot normalize to a
-// valid slug → WRKQ_VALIDATION (not a raw store error).
-func TestWrkqContainerUpdate_InvalidSlugValidation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	projUUID := "g1000000-5250-4000-8000-000000000001"
-	g1SeedProject(t, dbPath, "g1-upd-badslug", projUUID)
-
-	frames := p2Run(t, dbPath,
-		mkRPC("u1", "wrkq.container.update", map[string]any{
-			"container": "g1-upd-badslug",
-			"patch":     map[string]any{"slug": "!!!"},
-		}),
-	)
-	if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
-		t.Errorf("invalid slug: want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames[1])
-	}
-	// Unchanged in the DB.
-	if got := g1ContainerField(t, dbPath, projUUID, "slug"); got != "g1-upd-badslug" {
-		t.Errorf("slug must be unchanged after invalid-slug rejection, got %q", got)
 	}
 }
 
@@ -211,26 +148,61 @@ func TestWrkqContainerUpdate_TitlePatch(t *testing.T) {
 	}
 }
 
-// TestWrkqContainerUpdate_UnknownPatchFieldRejected: any patch key other than
-// slug/title (the overbroad-mutation-sink guard) → WRKQ_VALIDATION.
-func TestWrkqContainerUpdate_UnknownPatchFieldRejected(t *testing.T) {
+// TestContainerUpdateRefusesMalformedPatchNamingTheField: every malformed patch —
+// absent, empty, an unknown/immutable key (the overbroad-mutation-sink guard), or
+// a slug that cannot normalize — is refused with WRKQ_VALIDATION whose
+// error.data.field names the offending field, and the container is unchanged.
+func TestContainerUpdateRefusesMalformedPatchNamingTheField(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
 	dbPath := migratedDB(t)
 	projUUID := "g1000000-5400-4000-8000-000000000001"
 	g1SeedProject(t, dbPath, "g1-upd-unknown", projUUID)
+	beforeEtag := g1EtagOf(t, dbPath, projUUID)
 
-	for _, field := range []string{"kind", "parentUuid", "webhookUrls", "archivedAt", "bogus"} {
-		frames := p2Run(t, dbPath,
-			mkRPC("u1", "wrkq.container.update", map[string]any{
-				"container": "g1-upd-unknown",
-				"patch":     map[string]any{field: "x"},
-			}),
-		)
-		if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
-			t.Errorf("unknown patch field %q: want WRKQ_VALIDATION, got %q (frame=%#v)", field, code, frames[1])
+	type row struct {
+		name      string
+		params    map[string]any // merged over {"container": "g1-upd-unknown"}
+		wantField string
+		wantMsg   string // required substring of error.message
+	}
+	rows := []row{
+		{name: "patch absent", params: map[string]any{}, wantField: "patch", wantMsg: "patch is required"},
+		{name: "patch empty", params: map[string]any{"patch": map[string]any{}}, wantField: "patch", wantMsg: "at least one field"},
+		{name: "invalid slug", params: map[string]any{"patch": map[string]any{"slug": "!!!"}}, wantField: "slug"},
+	}
+	for _, key := range []string{"kind", "parentUuid", "webhookUrls", "archivedAt", "bogus"} {
+		rows = append(rows, row{name: "unknown key " + key, params: map[string]any{"patch": map[string]any{key: "x"}},
+			wantField: key, wantMsg: "unknown or immutable patch field"})
+	}
+	var reqs []string
+	for i, r := range rows {
+		params := map[string]any{"container": "g1-upd-unknown"}
+		for k, v := range r.params {
+			params[k] = v
 		}
+		reqs = append(reqs, mkRPC(fmt.Sprintf("u%d", i), "wrkq.container.update", params))
+	}
+	frames := p2Run(t, dbPath, reqs...)
+
+	for i, r := range rows {
+		frame := frames[1+i]
+		if code := p2ErrCode(frame); code != "WRKQ_VALIDATION" {
+			t.Errorf("%s: want WRKQ_VALIDATION, got %q (frame=%#v)", r.name, code, frame)
+		}
+		if field := p2ErrDataField(frame, "field"); field != r.wantField {
+			t.Errorf("%s: error.data.field = %#v, want %q", r.name, field, r.wantField)
+		}
+		if r.wantMsg != "" && !strings.Contains(g1ErrMessage(frame), r.wantMsg) {
+			t.Errorf("%s: error.message = %q, want it to contain %q", r.name, g1ErrMessage(frame), r.wantMsg)
+		}
+	}
+	if got := g1ContainerField(t, dbPath, projUUID, "slug"); got != "g1-upd-unknown" {
+		t.Errorf("slug must be unchanged after refused patches, got %q", got)
+	}
+	if got := g1EtagOf(t, dbPath, projUUID); got != beforeEtag {
+		t.Errorf("etag must be unchanged after refused patches: want %d, got %d", beforeEtag, got)
 	}
 }
 
@@ -316,14 +288,19 @@ func TestWrkqContainerUpdate_SlugConflictTyped(t *testing.T) {
 }
 
 // TestWrkqContainerUpdate_IdentityRetained: the rename preserves the container's
-// UUID + friendly ID (it is an in-place UPDATE, never delete+recreate).
+// UUID + friendly ID (it is an in-place UPDATE, never delete+recreate), and its
+// child containers and tasks stay parented to it.
 func TestWrkqContainerUpdate_IdentityRetained(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
 	dbPath := migratedDB(t)
 	projUUID := "g1000000-5700-4000-8000-000000000001"
+	childUUID := "g1000000-5700-4000-8000-000000000002"
+	taskUUID := "g1000000-5700-4000-8000-000000000003"
 	g1SeedProject(t, dbPath, "g1-upd-identity", projUUID)
+	g1SeedDirectory(t, dbPath, "g1-child-dir", childUUID, projUUID)
+	g1SeedTask(t, dbPath, "g1-child-task", taskUUID, projUUID)
 	beforeID := g1ContainerField(t, dbPath, projUUID, "id")
 
 	frames := p2Run(t, dbPath,
@@ -343,30 +320,7 @@ func TestWrkqContainerUpdate_IdentityRetained(t *testing.T) {
 	if !g1RowExists(t, dbPath, "containers", "uuid = ?", projUUID) {
 		t.Error("container UUID row must still exist after rename")
 	}
-}
-
-// TestWrkqContainerUpdate_ChildrenStillAttached: tasks + child containers stay
-// parented to the renamed container (identity-preserving rename).
-func TestWrkqContainerUpdate_ChildrenStillAttached(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	projUUID := "g1000000-5800-4000-8000-000000000001"
-	childUUID := "g1000000-5800-4000-8000-000000000002"
-	taskUUID := "g1000000-5800-4000-8000-000000000003"
-	g1SeedProject(t, dbPath, "g1-upd-children", projUUID)
-	g1SeedDirectory(t, dbPath, "g1-child-dir", childUUID, projUUID)
-	g1SeedTask(t, dbPath, "g1-child-task", taskUUID, projUUID)
-
-	frames := p2Run(t, dbPath,
-		mkRPC("u1", "wrkq.container.update", map[string]any{
-			"container": "g1-upd-children",
-			"patch":     map[string]any{"slug": "g1-upd-children-new"},
-		}),
-	)
-	p2ResultOrFail(t, frames[1], "container.update children")
-
+	// Children stay parented to the renamed container.
 	if !g1RowExists(t, dbPath, "containers", "uuid = ? AND parent_uuid = ?", childUUID, projUUID) {
 		t.Error("child container must remain attached to the renamed parent")
 	}

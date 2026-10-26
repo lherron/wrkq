@@ -18,6 +18,7 @@ package workrpc_test
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
@@ -77,156 +78,76 @@ func commentRow(t *testing.T, dbPath, uuid string) (exists bool, deletedAt strin
 	return true, dl.String, etag
 }
 
-// createCommentRPC creates a task + comment via RPC and returns the comment uuid.
-// The host task title is derived from body so distinct comments don't collide on
-// the project_uuid+slug uniqueness constraint.
-func createCommentRPC(t *testing.T, dbPath, body string) (commentUUID string) {
-	t.Helper()
-	_, taskUUID := createTaskRPC(t, dbPath, "comment-host: "+body)
-	frames := p2Run(t, dbPath,
-		mkRPC("ca", "wrkq.comment.add", map[string]any{"task": taskUUID, "body": body}),
-	)
-	result := p2ResultOrFail(t, frames[1], "wrkq.comment.add")
-	commentUUID, _ = result["uuid"].(string)
-	if commentUUID == "" {
-		t.Fatalf("createCommentRPC: empty uuid: %#v", result)
-	}
-	return commentUUID
-}
-
-// TestCommentDelete_SoftDefault proves absent/"soft" mode soft-deletes (sets
-// deleted_at + bumps etag) and PRESERVES the row.
-func TestCommentDelete_SoftDefault(t *testing.T) {
+// TestCommentDeleteDispositionFromParams proves each caller-supplied
+// disposition param takes its own branch: mode:"soft" and a current ifMatch
+// soft-delete (row kept, deleted_at set, etag 1→2); an unknown mode refuses with
+// WRKQ_VALIDATION naming the mode field; a stale ifMatch refuses with
+// WRKQ_CONFLICT naming both etags. Refusals leave the row untouched (etag 1).
+// (Absent mode and purge are covered by the event-parity tests below.)
+func TestCommentDeleteDispositionFromParams(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
 	}
+	type row struct {
+		name     string
+		params   map[string]any // merged over {"id": <comment uuid>}
+		wantCode string         // "" = success
+		wantData map[string]any // error.data fields the refusal must carry
+		wantSoft bool
+	}
+	rows := []row{
+		{name: "mode soft", params: map[string]any{"mode": "soft"}, wantSoft: true},
+		{name: "mode unknown", params: map[string]any{"mode": "incinerate"}, wantCode: "WRKQ_VALIDATION",
+			wantData: map[string]any{"field": "mode"}},
+		{name: "ifMatch stale", params: map[string]any{"ifMatch": 999}, wantCode: "WRKQ_CONFLICT",
+			wantData: map[string]any{"currentEtag": float64(1), "expectedEtag": float64(999)}},
+		{name: "ifMatch current", params: map[string]any{"ifMatch": 1}, wantSoft: true},
+	}
+
 	dbPath := migratedDB(t)
-	uuid := createCommentRPC(t, dbPath, "soft me")
-
-	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": uuid}))
-	p2ResultOrFail(t, frames[1], "wrkq.comment.delete (soft default)")
-
-	exists, deletedAt, etag := commentRow(t, dbPath, uuid)
-	if !exists {
-		t.Fatal("soft-delete must NOT purge the row")
+	_, taskUUID := createTaskRPC(t, dbPath, "comment disposition host")
+	var adds []string
+	for i, r := range rows {
+		adds = append(adds, mkRPC(fmt.Sprintf("ca%d", i), "wrkq.comment.add", map[string]any{"task": taskUUID, "body": r.name}))
 	}
-	if deletedAt == "" {
-		t.Error("soft-delete must set deleted_at")
+	addFrames := p2Run(t, dbPath, adds...)
+	uuids := make([]string, len(rows))
+	var deletes []string
+	for i, r := range rows {
+		res := p2ResultOrFail(t, addFrames[1+i], "wrkq.comment.add "+r.name)
+		uuids[i], _ = res["uuid"].(string)
+		if uuids[i] == "" {
+			t.Fatalf("%s: comment.add returned no uuid: %#v", r.name, res)
+		}
+		params := map[string]any{"id": uuids[i]}
+		for k, v := range r.params {
+			params[k] = v
+		}
+		deletes = append(deletes, mkRPC(fmt.Sprintf("d%d", i), "wrkq.comment.delete", params))
 	}
-	if etag != 2 {
-		t.Errorf("soft-delete must bump etag 1→2, got %d", etag)
-	}
-}
+	frames := p2Run(t, dbPath, deletes...)
 
-// TestCommentDelete_SoftExplicit proves mode:"soft" behaves identically to absent.
-func TestCommentDelete_SoftExplicit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	uuid := createCommentRPC(t, dbPath, "soft explicit")
-
-	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": uuid, "mode": "soft"}))
-	p2ResultOrFail(t, frames[1], "wrkq.comment.delete (mode soft)")
-
-	exists, deletedAt, _ := commentRow(t, dbPath, uuid)
-	if !exists || deletedAt == "" {
-		t.Errorf("mode:soft must soft-delete; exists=%v deletedAt=%q", exists, deletedAt)
-	}
-}
-
-// TestCommentDelete_PurgeMode proves mode:purge hard-deletes the comment row.
-func TestCommentDelete_PurgeMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	uuid := createCommentRPC(t, dbPath, "purge me")
-
-	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": uuid, "mode": "purge"}))
-	p2ResultOrFail(t, frames[1], "wrkq.comment.delete (purge)")
-
-	if exists, _, _ := commentRow(t, dbPath, uuid); exists {
-		t.Error("purge must hard-delete the comment row")
-	}
-}
-
-// TestCommentDelete_InvalidMode proves an unknown mode → WRKQ_VALIDATION and
-// leaves the comment untouched.
-func TestCommentDelete_InvalidMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	uuid := createCommentRPC(t, dbPath, "keep me")
-
-	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": uuid, "mode": "incinerate"}))
-	if code := p2ErrCode(frames[1]); code != "WRKQ_VALIDATION" {
-		t.Errorf("invalid mode: want WRKQ_VALIDATION, got %q (frame=%#v)", code, frames[1])
-	}
-	if exists, deletedAt, _ := commentRow(t, dbPath, uuid); !exists || deletedAt != "" {
-		t.Errorf("invalid mode must not mutate; exists=%v deletedAt=%q", exists, deletedAt)
-	}
-}
-
-// TestCommentDelete_IfMatchMismatch proves a stale ifMatch → WRKQ_CONFLICT with no
-// mutation (a machine-checkable CAS, never a prompt).
-func TestCommentDelete_IfMatchMismatch(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	uuid := createCommentRPC(t, dbPath, "cas me") // fresh etag = 1
-
-	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": uuid, "ifMatch": 999}))
-	if code := p2ErrCode(frames[1]); code != "WRKQ_CONFLICT" {
-		t.Errorf("ifMatch mismatch: want WRKQ_CONFLICT, got %q (frame=%#v)", code, frames[1])
-	}
-	if exists, deletedAt, etag := commentRow(t, dbPath, uuid); !exists || deletedAt != "" || etag != 1 {
-		t.Errorf("ifMatch mismatch must not mutate; exists=%v deletedAt=%q etag=%d", exists, deletedAt, etag)
-	}
-}
-
-// TestCommentDelete_IfMatchMatch proves a matching ifMatch lets the soft-delete
-// proceed.
-func TestCommentDelete_IfMatchMatch(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	uuid := createCommentRPC(t, dbPath, "match me") // fresh etag = 1
-
-	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.comment.delete", map[string]any{"id": uuid, "ifMatch": 1}))
-	p2ResultOrFail(t, frames[1], "wrkq.comment.delete (ifMatch match)")
-
-	if exists, deletedAt, _ := commentRow(t, dbPath, uuid); !exists || deletedAt == "" {
-		t.Errorf("ifMatch match must soft-delete; exists=%v deletedAt=%q", exists, deletedAt)
-	}
-}
-
-// TestCommentDelete_NonInteractive_FromParamsAlone proves the server resolves a
-// soft-delete then a purge purely from framed JSON-RPC params with NO prompt — if
-// it tried to read a confirmation it would block until the subprocess timeout.
-func TestCommentDelete_NonInteractive_FromParamsAlone(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	soft := createCommentRPC(t, dbPath, "soft non-interactive")
-	purge := createCommentRPC(t, dbPath, "purge non-interactive")
-
-	frames := p2Run(t, dbPath,
-		mkRPC("a1", "wrkq.comment.delete", map[string]any{"id": soft, "mode": "soft"}),
-		mkRPC("p1", "wrkq.comment.delete", map[string]any{"id": purge, "mode": "purge"}),
-	)
-	p2ResultOrFail(t, frames[1], "soft from params alone")
-	p2ResultOrFail(t, frames[2], "purge from params alone")
-
-	if exists, deletedAt, _ := commentRow(t, dbPath, soft); !exists || deletedAt == "" {
-		t.Errorf("soft from params: exists=%v deletedAt=%q", exists, deletedAt)
-	}
-	if exists, _, _ := commentRow(t, dbPath, purge); exists {
-		t.Error("purge from params alone must hard-delete the row")
+	for i, r := range rows {
+		frame := frames[1+i]
+		exists, deletedAt, etag := commentRow(t, dbPath, uuids[i])
+		if r.wantCode == "" {
+			p2ResultOrFail(t, frame, "wrkq.comment.delete "+r.name)
+			if !exists || deletedAt == "" || etag != 2 {
+				t.Errorf("%s: want soft-deleted row (deleted_at set, etag 2); exists=%v deletedAt=%q etag=%d", r.name, exists, deletedAt, etag)
+			}
+			continue
+		}
+		if code := p2ErrCode(frame); code != r.wantCode {
+			t.Errorf("%s: want %s, got %q (frame=%#v)", r.name, r.wantCode, code, frame)
+		}
+		for k, want := range r.wantData {
+			if got := p2ErrDataField(frame, k); got != want {
+				t.Errorf("%s: error.data.%s = %#v, want %#v (frame=%#v)", r.name, k, got, want, frame)
+			}
+		}
+		if !exists || deletedAt != "" || etag != 1 {
+			t.Errorf("%s: refusal must not mutate; exists=%v deletedAt=%q etag=%d", r.name, exists, deletedAt, etag)
+		}
 	}
 }
 

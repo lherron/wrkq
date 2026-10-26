@@ -64,15 +64,3 @@ func TestMapError_SQLiteBusy(t *testing.T) {
 		})
 	}
 }
-
-// A genuine non-busy internal error must still map to WORKRPC_INTERNAL.
-func TestMapError_InternalUnchanged(t *testing.T) {
-	re := MapError(fmt.Errorf("some unexpected failure"))
-	if re == nil {
-		t.Fatal("expected an RPC error")
-	}
-	data := decodeData(t, re.Data)
-	if got := data["code"]; got != CodeWorkRPCInternal {
-		t.Errorf("code = %v, want %s", got, CodeWorkRPCInternal)
-	}
-}

@@ -2,36 +2,17 @@
 
 package workrpc_test
 
-// registry_contract_test.go — RED gate for the unified wrkq/wrkf RPC method registry.
+// registry_contract_test.go — the agent-loop readiness bar for the unified
+// wrkq/wrkf RPC method registry (protocol version 2026-06-30), read the way a
+// caller reads it: from the `methods` list rpc.initialize advertises.
 //
-// These tests define the method-registration contract for protocol version 2026-06-30.
-// They run against the unified registry implemented in internal/workrpc.
-//
-// Ownership invariant (§2 of docs/wrkq-wrkf-rpc.md):
-//   wrkq.* owns task records and all direct task mutation.
-//   wrkf.* must never expose direct task mutation or workflow attachment.
+// Retired and cross-owner names (wrkf.* task mutation / workflow attachment, the
+// deprecated wrkf.initialize) are pinned as method-not-found in
+// server_contract_test.go TestRetiredAndCrossOwnerMethodsAnswerMethodNotFound.
 
 import (
 	"testing"
-
-	"github.com/lherron/wrkq/internal/workrpc"
 )
-
-// forbiddenMethods are method names that MUST NOT appear in the unified RPC
-// registry. Each one violates the wrkq/wrkf ownership boundary (§2) or uses
-// the deprecated wrkf.* lifecycle prefix.
-var forbiddenMethods = []string{
-	// Task mutation under wrkf.* — ownership boundary violation (§2.1).
-	"wrkf.task.attach",
-	"wrkf.task.inspect",
-	"wrkf.task.timeline",
-	"wrkf.task.refresh",
-	"wrkf.task.syncMeta",
-	// Workflow attachment belongs to wrkq.* (§2.2).
-	"wrkf.workflow.attach",
-	// Deprecated lifecycle prefix; unified protocol uses rpc.initialize (§5.4).
-	"wrkf.initialize",
-}
 
 // requiredMethods are method names that MUST be present in the unified RPC
 // registry to meet the agent-loop readiness bar (§11 P0, §13, §14).
@@ -55,55 +36,29 @@ var requiredMethods = []string{
 	"wrkf.role.set",
 }
 
-// buildCurrentRegistry constructs the method set exposed by the unified registry.
-func buildCurrentRegistry(t *testing.T) map[string]bool {
-	t.Helper()
-	srv := workrpc.NewRegistry(nil, workrpc.RegistryOptions{})
-	set := make(map[string]bool)
-	for _, m := range srv.RegisteredMethods() {
-		set[m] = true
+// TestInitializeAdvertisesAgentLoopRequiredMethods: rpc.initialize over the real
+// `wrkq rpc --stdio` boundary advertises every method the agent-loop readiness
+// bar requires in its `methods` list.
+func TestInitializeAdvertisesAgentLoopRequiredMethods(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping subprocess in short mode")
 	}
-	return set
-}
-
-// TestForbiddenMethodsAreAbsent asserts that none of the forbidden methods
-// appear in the unified registry.
-func TestForbiddenMethodsAreAbsent(t *testing.T) {
-	registered := buildCurrentRegistry(t)
-	for _, method := range forbiddenMethods {
-		if registered[method] {
-			t.Errorf(
-				"FORBIDDEN method %q is registered; it must not appear in the "+
-					"unified RPC registry (protocol 2026-06-30, §2 ownership boundary)",
-				method,
-			)
+	frames := p2Run(t, migratedDB(t))
+	initResult := p2ResultOrFail(t, frames[0], "rpc.initialize")
+	advertised := map[string]bool{}
+	methods, _ := initResult["methods"].([]any)
+	for _, m := range methods {
+		if name, ok := m.(string); ok {
+			advertised[name] = true
 		}
 	}
-}
-
-// TestRequiredMethodsArePresent asserts that all required methods appear in
-// the unified registry.
-func TestRequiredMethodsArePresent(t *testing.T) {
-	registered := buildCurrentRegistry(t)
 	for _, method := range requiredMethods {
-		if !registered[method] {
+		if !advertised[method] {
 			t.Errorf(
-				"REQUIRED method %q is not registered; it must be present in the "+
+				"REQUIRED method %q is not advertised by rpc.initialize; it must be present in the "+
 					"unified RPC registry (protocol 2026-06-30, §11 P0)",
 				method,
 			)
 		}
-	}
-}
-
-// TestProtocolVersionContract asserts that the current registry reports the
-// unified protocol version.
-func TestProtocolVersionContract(t *testing.T) {
-	const want = "2026-06-30"
-	if workrpc.ProtocolVersion != want {
-		t.Errorf(
-			"workrpc.ProtocolVersion = %q; unified protocol requires %q (§5.1)",
-			workrpc.ProtocolVersion, want,
-		)
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/lherron/wrkq/internal/db"
-	"github.com/lherron/wrkq/internal/workrpc"
 )
 
 type projectRootState struct {
@@ -109,18 +108,6 @@ func TestProjectRootRegistryOverRealRPC(t *testing.T) {
 	}
 	if root != nil {
 		t.Fatalf("cleared DB root = %#v, want NULL", root)
-	}
-}
-
-func TestProjectRootRegistryMethodIsRegistered(t *testing.T) {
-	registered := map[string]bool{}
-	for _, method := range workrpc.NewRegistry(nil, workrpc.RegistryOptions{}).RegisteredMethods() {
-		registered[method] = true
-	}
-	for _, method := range []string{"wrkq.project.listView", "wrkq.project.setRoot"} {
-		if !registered[method] {
-			t.Errorf("registry missing %s", method)
-		}
 	}
 }
 

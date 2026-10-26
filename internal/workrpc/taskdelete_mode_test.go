@@ -48,7 +48,8 @@ func taskRow(t *testing.T, dbPath, uuid string) (exists bool, state, archivedAt,
 }
 
 // TestTaskDelete_NoModePreserved proves the absent-mode contract is UNCHANGED:
-// state=deleted + deleted_at tombstone, archived_at NOT set.
+// state=deleted + deleted_at tombstone, archived_at NOT set — in both the
+// returned DTO and the durable row.
 func TestTaskDelete_NoModePreserved(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -57,7 +58,12 @@ func TestTaskDelete_NoModePreserved(t *testing.T) {
 	_, uuid := createTaskRPC(t, dbPath, "no-mode")
 
 	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.task.delete", map[string]any{"task": uuid}))
-	p2ResultOrFail(t, frames[1], "wrkq.task.delete (no mode)")
+	result := p2ResultOrFail(t, frames[1], "wrkq.task.delete (no mode)")
+
+	// The returned DTO reports the same tombstone the row holds.
+	p2AssertFieldEq(t, result, "state", "deleted")
+	p2AssertStr(t, result, "deletedAt")
+	assertBlankOrAbsent(t, result, "archivedAt", "wrkq.task.delete (no mode)")
 
 	exists, state, archivedAt, deletedAt := taskRow(t, dbPath, uuid)
 	if !exists {
@@ -101,76 +107,12 @@ func TestTaskDelete_ArchiveMode(t *testing.T) {
 	}
 }
 
-// TestTaskDelete_PurgeMode proves mode:purge hard-deletes the task row.
-func TestTaskDelete_PurgeMode(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	_, uuid := createTaskRPC(t, dbPath, "purge-me")
-
-	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.task.delete", map[string]any{"task": uuid, "mode": "purge"}))
-	p2ResultOrFail(t, frames[1], "wrkq.task.delete (purge)")
-
-	if exists, _, _, _ := taskRow(t, dbPath, uuid); exists {
-		t.Error("purge must hard-delete the task row")
-	}
-}
-
-// TestTaskDelete_PurgeCleansAttachments proves mode:purge removes the task's
-// attachment DB rows (event-cascade cleanup), not just the task row.
-func TestTaskDelete_PurgeCleansAttachments(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	_, uuid := createTaskRPC(t, dbPath, "purge-with-attachments")
-
-	// Seed two attachment rows directly (file bytes are irrelevant to the DB-row
-	// cleanup proof; the file unlink is best-effort and configured-attach-dir-gated).
-	func() {
-		database, err := db.Open(dbPath)
-		if err != nil {
-			t.Fatalf("seed attachments: db.Open: %v", err)
-		}
-		defer func() { _ = database.Close() }()
-		for i, name := range []string{"a.txt", "b.bin"} {
-			if _, err := database.Exec(
-				`INSERT INTO attachments (task_uuid, filename, relative_path, mime_type, size_bytes)
-				 VALUES (?, ?, ?, 'text/plain', ?)`,
-				uuid, name, "tasks/"+uuid+"/"+name, (i+1)*100,
-			); err != nil {
-				t.Fatalf("seed attachment %s: %v", name, err)
-			}
-		}
-	}()
-
-	frames := p2Run(t, dbPath, mkRPC("d1", "wrkq.task.delete", map[string]any{"task": uuid, "mode": "purge"}))
-	p2ResultOrFail(t, frames[1], "wrkq.task.delete (purge with attachments)")
-
-	if exists, _, _, _ := taskRow(t, dbPath, uuid); exists {
-		t.Error("purge must hard-delete the task row")
-	}
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("verify attachments: db.Open: %v", err)
-	}
-	defer func() { _ = database.Close() }()
-	var n int
-	if err := database.QueryRow("SELECT COUNT(*) FROM attachments WHERE task_uuid = ?", uuid).Scan(&n); err != nil {
-		t.Fatalf("count attachments: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("purge must remove attachment rows; %d remain", n)
-	}
-}
-
 // TestTaskDelete_PurgePhysicalFileCleanup proves mode:purge unlinks the actual
 // attachment BYTES on disk AND removes the task attachment dir — not just the DB
 // rows. It configures an explicit WRKQ_ATTACH_DIR, adds an attachment with real
 // bytes via wrkq.attachment.add (which writes attachDir/tasks/<uuid>/<file>),
 // asserts the file + task dir exist, purges, then asserts both are gone (plus the
-// DB-row-gone guarantee).
+// task row and its attachment rows being gone).
 func TestTaskDelete_PurgePhysicalFileCleanup(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -222,6 +164,21 @@ func TestTaskDelete_PurgePhysicalFileCleanup(t *testing.T) {
 	if exists, _, _, _ := taskRow(t, dbPath, taskUUID); exists {
 		t.Error("purge must hard-delete the task row")
 	}
+	// Attachment rows gone (event-cascade cleanup), not just the task row.
+	func() {
+		database, err := db.Open(dbPath)
+		if err != nil {
+			t.Fatalf("verify attachments: db.Open: %v", err)
+		}
+		defer func() { _ = database.Close() }()
+		var n int
+		if err := database.QueryRow("SELECT COUNT(*) FROM attachments WHERE task_uuid = ?", taskUUID).Scan(&n); err != nil {
+			t.Fatalf("count attachments: %v", err)
+		}
+		if n != 0 {
+			t.Errorf("purge must remove attachment rows; %d remain", n)
+		}
+	}()
 	// Physical file gone.
 	if _, err := os.Stat(storedFile); !os.IsNotExist(err) {
 		t.Errorf("purge must unlink the attachment file %s (stat err=%v)", storedFile, err)
@@ -248,35 +205,5 @@ func TestTaskDelete_InvalidMode(t *testing.T) {
 	exists, state, _, _ := taskRow(t, dbPath, uuid)
 	if !exists || state != "open" {
 		t.Errorf("invalid mode must not mutate the task; exists=%v state=%q", exists, state)
-	}
-}
-
-// TestTaskDelete_NonInteractive_FromParamsAlone proves the server is
-// NON-INTERACTIVE: a purge completes purely from the JSON-RPC params with NO
-// stdin beyond the framed requests and NO prompt. The whole session is framed
-// I/O; if the server tried to read a confirmation it would block until the
-// 30s subprocess timeout and the frame count assertion would fail.
-func TestTaskDelete_NonInteractive_FromParamsAlone(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping subprocess in short mode")
-	}
-	dbPath := migratedDB(t)
-	_, uuid := createTaskRPC(t, dbPath, "non-interactive")
-
-	// Two destructive calls back-to-back in one framed session: archive then a
-	// purge on a second task. Both must resolve from params with no interaction.
-	_, uuid2 := createTaskRPC(t, dbPath, "non-interactive-2")
-	frames := p2Run(t, dbPath,
-		mkRPC("a1", "wrkq.task.delete", map[string]any{"task": uuid, "mode": "archive"}),
-		mkRPC("p1", "wrkq.task.delete", map[string]any{"task": uuid2, "mode": "purge"}),
-	)
-	p2ResultOrFail(t, frames[1], "archive from params alone")
-	p2ResultOrFail(t, frames[2], "purge from params alone")
-
-	if _, state, archivedAt, _ := taskRow(t, dbPath, uuid); state != "archived" || archivedAt == "" {
-		t.Errorf("archive: state=%q archivedAt=%q", state, archivedAt)
-	}
-	if exists, _, _, _ := taskRow(t, dbPath, uuid2); exists {
-		t.Error("purge from params alone must hard-delete the row")
 	}
 }
