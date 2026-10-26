@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -41,6 +40,10 @@ func TestCLISurfaceManifestMatchesCobraTree(t *testing.T) {
 	}
 }
 
+// The root help grid lists exactly the manifest's visible, available root
+// commands — compared as whitespace tokens, so a command whose name is a
+// substring of other help text (agent/agent-context, check/check-inbox, rm/rmdir,
+// ls) cannot pass while missing.
 func TestCLISurfaceManifestRootHelpVisibility(t *testing.T) {
 	var manifest CLISurfaceManifest
 	if err := json.Unmarshal(EmbeddedCLISurfaceManifestJSON, &manifest); err != nil {
@@ -57,12 +60,14 @@ func TestCLISurfaceManifestRootHelpVisibility(t *testing.T) {
 	}
 	output := stdout.String()
 
+	var want []string
 	for _, command := range manifest.Root.Commands {
-		if command.Hidden || !command.Available {
+		// cobra's built-in help is never "available" yet always listed.
+		if command.Hidden || (!command.Available && command.Name != "help") {
 			continue
 		}
-		if !strings.Contains(output, command.Name) {
-			t.Fatalf("root help missing manifest command %q:\n%s", command.Name, output)
-		}
+		want = append(want, command.Name)
 	}
+	got, _ := rootHelpCommandGrid(t, output)
+	assertSameCommandSet(t, got, want, output)
 }

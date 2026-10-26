@@ -156,11 +156,16 @@ func TestCampaignLifecycleCLICancelAndNudgeAreEventsNotComments(t *testing.T) {
 	t.Run("cancel bypasses disposition", func(t *testing.T) {
 		f := newCampaignCLIFixture(t)
 		f.mustRun(t, "set", f.enrolledID, "--campaign", f.campaignAUUID)
-		f.mustRun(t, "campaign", "close", f.campaignAUUID, "--state", "cancelled")
-		for _, taskUUID := range []string{f.residentUUID, f.enrolledUUID} {
-			if n := f.count(t, "SELECT COUNT(*) FROM tasks WHERE uuid = ? AND state = 'open'", taskUUID); n != 1 {
-				t.Fatalf("cancelled close changed task %s out of open", taskUUID)
-			}
+		// A completed member without an outcome would be a missing-outcome
+		// diagnostic on a completed close; a cancelled close reports none.
+		f.mustRun(t, "set", f.residentID, "--state", "completed")
+		var result campaignTransitionResult
+		decodeCLIJSON(t, f.mustRun(t, "campaign", "close", f.campaignAUUID, "--state", "cancelled"), &result)
+		if result.CampaignState != "cancelled" || len(result.MissingOutcomes) != 0 {
+			t.Fatalf("cancelled close result = %#v, want cancelled with no missing outcomes", result)
+		}
+		if n := f.count(t, "SELECT COUNT(*) FROM tasks WHERE uuid = ? AND state = 'open'", f.enrolledUUID); n != 1 {
+			t.Fatalf("cancelled close changed open member %s out of open", f.enrolledUUID)
 		}
 	})
 

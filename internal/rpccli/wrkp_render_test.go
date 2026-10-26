@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/style"
@@ -140,48 +139,5 @@ func TestStyledTimelineEntriesGivesEachKindItsWeight(t *testing.T) {
 	// A row with no task floats; the renderer reads that from an empty TaskID.
 	if styled[4].TaskID != "" {
 		t.Fatalf("an untasked fact must float: %+v", styled[4])
-	}
-}
-
-// The CLI projection must not drop principalRef: the server sends it on every
-// entry and it is the field a reader asks for first.
-func TestTimelineEntryCarriesPrincipalRefThroughNDJSON(t *testing.T) {
-	var entry timelineEntry
-	if err := json.Unmarshal([]byte(`{"type":"comment","principalRef":"agent:chief"}`), &entry); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if entry.PrincipalRef != "agent:chief" {
-		t.Fatalf("principalRef was dropped on decode: %+v", entry)
-	}
-	encoded, err := json.Marshal(entry)
-	if err != nil {
-		t.Fatalf("encode: %v", err)
-	}
-	if !strings.Contains(string(encoded), `"principalRef":"agent:chief"`) {
-		t.Fatalf("principalRef was dropped on encode: %s", encoded)
-	}
-}
-
-// wrkpPageLimit is the T-08328 clamp. --limit is the caller's DELIVERED budget
-// and the paging loop stitches pages to reach it, so a budget above the server's
-// per-page cap must be satisfied by more pages rather than refused. Before the
-// clamp the whole budget went to the server verbatim, which returned
-// WRKQ_VALIDATION and no rows at all.
-func TestWrkpPageLimitClampsTheRequestNotTheRead(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		remaining int
-		want      int
-	}{
-		{name: "the default budget fits in one page", remaining: wrkpDefaultLimit, want: wrkpDefaultLimit},
-		{name: "the cap itself is not clamped", remaining: wrkpMaxPageLimit, want: wrkpMaxPageLimit},
-		{name: "one over the cap becomes a full page", remaining: wrkpMaxPageLimit + 1, want: wrkpMaxPageLimit},
-		{name: "a large budget becomes a full page", remaining: 5000, want: wrkpMaxPageLimit},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := wrkpPageLimit(tc.remaining); got != tc.want {
-				t.Fatalf("wrkpPageLimit(%d) = %d, want %d", tc.remaining, got, tc.want)
-			}
-		})
 	}
 }

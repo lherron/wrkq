@@ -20,58 +20,55 @@ import (
 	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 )
 
-func TestParseLabelValue(t *testing.T) {
-	t.Parallel()
+// The --labels value is comma shorthand unless it starts with '[' (a lossless
+// JSON string array). Whitespace-only clears; JSON-looking scalars and objects
+// stay literal shorthand labels; a malformed array is refused naming both
+// accepted forms. Rows not already driven through touch/set/restore/campaign in
+// TestLabelWriteSurfacesLocalAndAuthenticatedRPC, read back via `set --dry-run`.
+func TestLabelsFlagTreatsNonArrayAsShorthandAndRefusesMalformedJSON(t *testing.T) {
+	dbPath := newLabelWriteDB(t)
+	mustRunLabelWriteCLI(t, dbPath, "touch", "task", "-t", "Task", "--labels", "keep")
 
-	tests := []struct {
+	for _, tc := range []struct {
 		name    string
 		raw     string
 		want    []string
 		wantErr bool
 	}{
-		{name: "single shorthand", raw: "overnight-ok", want: []string{"overnight-ok"}},
-		{name: "shorthand trims drops empties", raw: "a, b,,a", want: []string{"a", "b", "a"}},
-		{name: "empty clears", raw: "", want: []string{}},
 		{name: "whitespace clears", raw: " \t ", want: []string{}},
-		{name: "empty JSON clears", raw: "[]", want: []string{}},
-		{
-			name: "JSON is lossless",
-			raw:  `  [" a ","a,b","a","a",""]  `,
-			want: []string{" a ", "a,b", "a", "a", ""},
-		},
-		{name: "numeric JSON-looking shorthand", raw: "123", want: []string{"123"}},
-		{name: "boolean JSON-looking shorthand", raw: "true", want: []string{"true"}},
-		{name: "null JSON-looking shorthand", raw: "null", want: []string{"null"}},
-		{name: "quoted JSON-looking shorthand", raw: `"a"`, want: []string{`"a"`}},
-		{name: "object-like shorthand", raw: `{x}`, want: []string{`{x}`}},
-		{name: "valid object JSON-looking shorthand", raw: `{"label":"a"}`, want: []string{`{"label":"a"}`}},
-		{name: "malformed JSON", raw: `["a"`, wantErr: true},
-		{name: "non-string element", raw: `["a",1]`, wantErr: true},
-		{name: "null element", raw: `["a",null]`, wantErr: true},
-	}
-
-	for _, tc := range tests {
-		tc := tc
+		{name: "JSON-looking scalar stays a literal label", raw: "123", want: []string{"123"}},
+		{name: "JSON object stays a literal label", raw: `{"label":"a"}`, want: []string{`{"label":"a"}`}},
+		{name: "malformed JSON array is refused", raw: `["a"`, wantErr: true},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got, err := parseLabelValue(tc.raw)
+			out, err := runLabelWriteCLI(t, dbPath, "set", "task", "--labels", tc.raw, "--dry-run")
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("parseLabelValue(%q) succeeded: %#v", tc.raw, got)
+					t.Fatalf("set --labels %q succeeded:\n%s", tc.raw, out)
 				}
-				if !strings.Contains(err.Error(), labelValueForms) {
-					t.Fatalf("error %q does not name both accepted forms", err)
+				if !strings.Contains(err.Error()+out, labelValueForms) {
+					t.Fatalf("refusal %v does not name both accepted forms:\n%s", err, out)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("parseLabelValue(%q): %v", tc.raw, err)
+				t.Fatalf("set --labels %q --dry-run: %v\n%s", tc.raw, err, out)
 			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("parseLabelValue(%q) = %#v, want %#v", tc.raw, got, tc.want)
+			var preview struct {
+				DryRun bool `json:"dry_run"`
+				Fields struct {
+					Labels []string `json:"labels"`
+				} `json:"fields"`
+			}
+			if err := json.Unmarshal([]byte(out), &preview); err != nil {
+				t.Fatalf("decode --dry-run: %v\n%s", err, out)
+			}
+			if !preview.DryRun || !reflect.DeepEqual(preview.Fields.Labels, tc.want) {
+				t.Fatalf("set --labels %q --dry-run labels = %#v (dry_run=%v), want %#v", tc.raw, preview.Fields.Labels, preview.DryRun, tc.want)
 			}
 		})
 	}
+	assertTaskLabels(t, dbPath, "task", []string{"keep"})
 }
 
 func TestLabelWriteSurfacesLocalAndAuthenticatedRPC(t *testing.T) {

@@ -160,16 +160,30 @@ func TestCampaignTreeRollupCountsEnrolledMembers(t *testing.T) {
 	group := createDirectory(t, database, "group", f.projectAUUID)
 	campaign := createActiveCampaign(t, database, "wave-open", group)
 	createCampaignFixtureTask(t, database, "resident-done", "Resident done", campaign, "completed")
+	// Positive control: a sibling campaign holding only completed residents
+	// MUST render "(All done)", so the absence checks below cannot pass merely
+	// because the label stopped rendering.
+	doneCampaign := createActiveCampaign(t, database, "wave-done", group)
+	createCampaignFixtureTask(t, database, "only-done", "Only done", doneCampaign, "completed")
 	_ = database.Close()
 	f.enroll(t, campaign, f.enrolledUUID)
 
-	out := f.mustRun(t, "--project", "campaign-cli-a", "tree", "--pretty")
+	// --all keeps the all-completed campaign on screen (it is otherwise folded
+	// into "empty containers not displayed").
+	out := f.mustRun(t, "--project", "campaign-cli-a", "tree", "--pretty", "--all")
 	if !strings.Contains(out, "enrolled-member") {
 		t.Fatalf("open enrolled member missing from tree: %q", out)
 	}
+	sawDone := false
 	for _, line := range strings.Split(out, "\n") {
 		if (strings.Contains(line, "wave-open/") || strings.Contains(line, "group/")) && strings.Contains(line, "(All done)") {
 			t.Errorf("container holding an open enrolled member rendered as done: %q\nfull tree: %q", line, out)
 		}
+		if strings.Contains(line, "wave-done/") {
+			sawDone = strings.Contains(line, "(All done)")
+		}
+	}
+	if !sawDone {
+		t.Errorf("campaign holding only completed residents did not render (All done):\n%s", out)
 	}
 }

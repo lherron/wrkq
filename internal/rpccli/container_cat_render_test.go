@@ -3,55 +3,41 @@
 package rpccli
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"strings"
+	"regexp"
 	"testing"
 
-	"github.com/lherron/wrkq/internal/style"
+	"github.com/lherron/wrkq/internal/db"
 )
 
-// TestContainerCatMarkdownRender proves the markdown (front matter + body) and the
-// "raw" (--no-frontmatter, body-only) render modes byte-for-byte against the legacy
-// runContainerCat format. The pipe-based parity harness cannot drive a TTY, so the
-// front-matter markdown branch (which legacy only takes on a TTY) is proven here by
-// pulling the REAL wrkq.container.catView projection over the in-process transport
-// and rendering it through the same renderContainerMarkdown the CLI uses. UUIDs and
-// timestamps are normalized; the field set, order, and YAML framing are pinned.
-func TestContainerCatMarkdownRender(t *testing.T) {
+// `wrkq cat <P-id> --output raw` renders a container as a YAML front-matter
+// card — fixed field set and order, top-level parent_path omitted, actor slugs
+// for created_by/updated_by — followed by the description after a blank line;
+// --no-frontmatter prints the description alone (nothing for none). UUIDs and
+// timestamps are normalized; everything else is byte-exact.
+func TestCatContainerRawPrintsFrontMatterCardInFixedFieldOrderThenDescription(t *testing.T) {
 	t.Setenv("TZ", "UTC")
 	dbPath, _ := migratedDBWithTask(t)
-	tr := inProcessTransport(t, dbPath)
-	defer func() { _ = tr.Close() }()
-
-	raw, err := tr.Call(context.Background(), "wrkq.container.catView",
-		map[string]string{"container": "rpccli-test-proj"})
+	database, err := db.Open(dbPath)
 	if err != nil {
-		t.Fatalf("container.catView: %v", err)
+		t.Fatalf("db.Open: %v", err)
 	}
-	var c containerCatModel
-	if err := json.Unmarshal(raw, &c); err != nil {
-		t.Fatalf("decode catView: %v", err)
+	var projectID string
+	if err := database.QueryRow(`SELECT id FROM containers WHERE uuid = ?`, seedProject).Scan(&projectID); err != nil {
+		t.Fatalf("read project id: %v", err)
 	}
+	_ = database.Close()
 
-	norm := func(s string) string {
-		s = uuidRe.ReplaceAllString(s, "<UUID>")
-		return s
+	cat := func(t *testing.T, extra ...string) string {
+		t.Helper()
+		result := runCatOneTestCLI(t, dbPath, append([]string{"cat", projectID, "--output", "raw"}, extra...))
+		if result.errText != "" {
+			t.Fatalf("cat %s: %s\n%s", projectID, result.errText, result.stderr)
+		}
+		out := uuidRe.ReplaceAllString(result.stdout, "<UUID>")
+		return containerCardTimestampRe.ReplaceAllString(out, "$1: <TS>")
 	}
-
-	// Full markdown (the TTY default): YAML front matter then body. This fixture's
-	// container is top-level under the synthetic root (so parent_id/parent_uuid are
-	// emitted but parent_path is omitted — the path has no '/'), has no webhook_urls,
-	// no archived_at, and no description (body omitted). created_by/updated_by are
-	// resolved actor slugs. This pins the field set and order exactly against legacy
-	// runContainerCat.
-	var md bytes.Buffer
-	if err := renderContainerMarkdown(&md, &c, false); err != nil {
-		t.Fatal(err)
-	}
-	wantMarkdown := "---\n" +
-		"id: " + c.ID + "\n" +
+	card := "---\n" +
+		"id: " + projectID + "\n" +
 		"uuid: <UUID>\n" +
 		"slug: rpccli-test-proj\n" +
 		"title: rpccli Test Project\n" +
@@ -61,40 +47,33 @@ func TestContainerCatMarkdownRender(t *testing.T) {
 		"parent_uuid: <UUID>\n" +
 		"sort_index: 0\n" +
 		"etag: 1\n" +
-		"created_at: " + style.FormatLocalTimestamp(c.CreatedAt) + "\n" +
-		"updated_at: " + style.FormatLocalTimestamp(c.UpdatedAt) + "\n" +
+		"created_at: <TS>\n" +
+		"updated_at: <TS>\n" +
 		"created_by: wrkq-system\n" +
 		"updated_by: wrkq-system\n" +
 		"---\n\n"
-	if got := norm(md.String()); got != wantMarkdown {
-		t.Errorf("markdown render mismatch:\n got: %q\n want: %q", got, wantMarkdown)
+
+	if got, want := cat(t), card; got != want {
+		t.Errorf("description-less card:\n got: %q\nwant: %q", got, want)
+	}
+	if got := cat(t, "--no-frontmatter"); got != "" {
+		t.Errorf("--no-frontmatter without a description = %q, want empty", got)
 	}
 
-	// --no-frontmatter ("raw"): body only. No description on this fixture → empty.
-	var rawOut bytes.Buffer
-	if err := renderContainerMarkdown(&rawOut, &c, true); err != nil {
-		t.Fatal(err)
+	database, err = db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
 	}
-	if rawOut.Len() != 0 {
-		t.Errorf("no-frontmatter render should be empty for description-less container, got %q", rawOut.String())
+	if _, err := database.Exec(`UPDATE containers SET description = 'a project description' WHERE uuid = ?`, seedProject); err != nil {
+		t.Fatalf("seed description: %v", err)
 	}
-
-	// With a description, the body is the description line (raw mode), and the full
-	// markdown appends the same body after a blank line.
-	withDesc := c
-	withDesc.Description = "a project description"
-	var rawDesc bytes.Buffer
-	if err := renderContainerMarkdown(&rawDesc, &withDesc, true); err != nil {
-		t.Fatal(err)
+	_ = database.Close()
+	if got, want := cat(t), card+"a project description\n"; got != want {
+		t.Errorf("card with description:\n got: %q\nwant: %q", got, want)
 	}
-	if got, want := rawDesc.String(), "a project description\n"; got != want {
-		t.Errorf("raw body render mismatch:\n got: %q\n want: %q", got, want)
-	}
-	var mdDesc bytes.Buffer
-	if err := renderContainerMarkdown(&mdDesc, &withDesc, false); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasSuffix(mdDesc.String(), "---\n\na project description\n") {
-		t.Errorf("markdown-with-body should end with framed body, got %q", mdDesc.String())
+	if got, want := cat(t, "--no-frontmatter"), "a project description\n"; got != want {
+		t.Errorf("--no-frontmatter with a description = %q, want %q", got, want)
 	}
 }
+
+var containerCardTimestampRe = regexp.MustCompile(`(?m)^(created_at|updated_at): .+$`)

@@ -256,17 +256,30 @@ func wrkpAttributeKeyOrder(t *testing.T, raw json.RawMessage) []string {
 	return keys
 }
 
-func TestWrkpPostAttributeOrderAndDuplicates(t *testing.T) {
-	pairs := appendWrkpAttribute(nil, "zebra", "1")
-	pairs = appendWrkpAttribute(pairs, "middle", "2")
-	pairs = appendWrkpAttribute(pairs, "alpha", "3")
-	pairs = appendWrkpAttribute(pairs, "zebra", "9")
-	raw := encodeWrkpAttributes(pairs)
-	if got := string(raw); got != `{"zebra":"9","middle":"2","alpha":"3"}` {
-		t.Fatalf("encoded = %s", got)
+// `wrkp post --attr k=v` keeps attributes in first-seen key order, and a
+// repeated key takes its last value without moving — as stored and as read back
+// by `wrkp log`.
+func TestWrkpPostAttributesKeepFirstSeenOrderAndLastValueWins(t *testing.T) {
+	dbPath, _ := migratedDBWithTask(t)
+	run := func(args ...string) string {
+		t.Helper()
+		cmd := NewWrkpRootCmd()
+		cmd.SetArgs(append([]string{"--db", dbPath, "--as", "agent:wrkp-test"}, args...))
+		var out, stderr bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&stderr)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v (%s)", args, err, stderr.String())
+		}
+		return out.String()
 	}
-	if keys := wrkpAttributeKeyOrder(t, raw); strings.Join(keys, ",") != "zebra,middle,alpha" {
-		t.Fatalf("key order = %v", keys)
+	run("post", "rpccli-test-proj", "--type", "attr.order", "-m", "attrs",
+		"--attr", "zebra=1", "--attr", "middle=2", "--attr", "alpha=3", "--attr", "zebra=9")
+
+	out := run("log", "rpccli-test-proj", "--type", "attr.order", "--ndjson")
+	const want = `"attributes":{"zebra":"9","middle":"2","alpha":"3"}`
+	if !strings.Contains(out, want) {
+		t.Fatalf("wrkp log attributes lost post order or the last value:\nwant %s\n got %s", want, out)
 	}
 }
 

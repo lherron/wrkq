@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/config"
@@ -148,5 +151,94 @@ func TestServeRemoteStdioPreservesRemoteAuthenticationFailure(t *testing.T) {
 	}
 	if strings.Contains(out.String(), secret) {
 		t.Fatal("authentication error leaked credential")
+	}
+}
+
+// `wrkq rpc --stdio` in remote mode forwards the launch principal resolved from
+// AGENT_SCOPE_REF on every proxied request (T-10328), so wrkqd attributes the
+// session to that agent.
+func TestRemoteRPCStdioForwardsTheAgentScopeRefPrincipal(t *testing.T) {
+	clearActorFlagEnv(t)
+	t.Setenv("AGENT_SCOPE_REF", "agent:cody:project:wrkq:task:T-05423")
+	t.Setenv("WRKQD_TOKEN", "")
+	t.Setenv("WRKQD_TOKEN_FILE", "")
+	dbPath, taskID := migratedDBWithTask(t)
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	api, opts, err := bootstrap.Server(database, &config.Config{DBPath: dbPath, AttachmentsMaxMB: 50})
+	if err != nil {
+		t.Fatalf("bootstrap.Server: %v", err)
+	}
+	rpcServer := workrpc.NewServer(nil)
+	workrpc.RegisterAPI(rpcServer, api, opts)
+	var mu sync.Mutex
+	var principals []string
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		principals = append(principals, r.Header.Get("X-Wrkq-Principal-Ref"))
+		mu.Unlock()
+		var req workrpc.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp, _ := rpcServer.HandleRequest(r.Context(), req)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer httpServer.Close()
+
+	frames := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":"init","method":"rpc.initialize","params":{"protocolVersion":"` + workrpc.ProtocolVersion + `"}}`,
+		`{"jsonrpc":"2.0","id":"show","method":"wrkq.task.show","params":{"task":"` + taskID + `"}}`,
+		`{"jsonrpc":"2.0","method":"rpc.exit"}`,
+		"",
+	}, "\n")
+	dir := t.TempDir()
+	stdin, err := os.Create(filepath.Join(dir, "stdin"))
+	if err != nil {
+		t.Fatalf("create stdin: %v", err)
+	}
+	if _, err := stdin.WriteString(frames); err != nil {
+		t.Fatalf("write stdin: %v", err)
+	}
+	if _, err := stdin.Seek(0, 0); err != nil {
+		t.Fatalf("rewind stdin: %v", err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout"))
+	if err != nil {
+		t.Fatalf("create stdout: %v", err)
+	}
+	origIn, origOut := os.Stdin, os.Stdout
+	os.Stdin, os.Stdout = stdin, stdout
+	cmd := NewRootCmdFor("wrkq")
+	cmd.SetArgs([]string{"--db", "rpc://" + strings.TrimPrefix(httpServer.URL, "http://"), "rpc", "--stdio"})
+	runErr := cmd.Execute()
+	os.Stdin, os.Stdout = origIn, origOut
+	_ = stdin.Close()
+	_ = stdout.Close()
+	if runErr != nil {
+		t.Fatalf("wrkq rpc --stdio: %v", runErr)
+	}
+	written, err := os.ReadFile(filepath.Join(dir, "stdout"))
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if !strings.Contains(string(written), seedTaskSlug) {
+		t.Fatalf("proxied task.show did not answer:\n%s", written)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(principals) == 0 {
+		t.Fatal("remote received no forwarded requests")
+	}
+	for i, got := range principals {
+		if got != "agent:cody" {
+			t.Fatalf("forwarded request %d carried X-Wrkq-Principal-Ref %q, want agent:cody (all: %q)", i, got, principals)
+		}
 	}
 }

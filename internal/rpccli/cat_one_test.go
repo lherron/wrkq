@@ -5,6 +5,7 @@ package rpccli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,44 +17,91 @@ import (
 	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 )
 
-func TestCatJSONLegacyArrayBytesAndOneObjectBytes(t *testing.T) {
-	one := json.RawMessage(`{"id":"T-00001","title":"A \u003c B"}`)
-	two := json.RawMessage(`{"id":"T-00002","title":"Two"}`)
+// `cat --json` stdout is a two-space-indented array (one element per task,
+// even for one task) with a trailing newline; --one prints the bare object the
+// same way, and --porcelain compacts it to one line. HTML-sensitive characters
+// stay \u-escaped, as encoding/json writes them.
+func TestCatJSONStdoutIsIndentedArrayAndOneIsBareObjectCompactUnderPorcelain(t *testing.T) {
+	dbPath, _ := migratedDBWithTask(t)
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	for i, title := range []string{"A < B", "Two"} {
+		if _, err := database.Exec(
+			`INSERT INTO tasks (uuid, slug, title, project_uuid, state, priority, kind,
+				created_by_principal_ref, updated_by_principal_ref)
+			 VALUES (?, ?, ?, ?, 'open', 3, 'task', ?, ?)`,
+			fmt.Sprintf("00000000-3333-4000-8000-00000000000%d", i+1), fmt.Sprintf("bytes-%d", i+1), title,
+			seedProject, seedActor, seedActor,
+		); err != nil {
+			t.Fatalf("seed task %q: %v", title, err)
+		}
+	}
+	var first, second string
+	if err := database.QueryRow(`SELECT id FROM tasks WHERE slug = 'bytes-1'`).Scan(&first); err != nil {
+		t.Fatalf("read first id: %v", err)
+	}
+	if err := database.QueryRow(`SELECT id FROM tasks WHERE slug = 'bytes-2'`).Scan(&second); err != nil {
+		t.Fatalf("read second id: %v", err)
+	}
+	_ = database.Close()
 
-	var got bytes.Buffer
-	if err := writeCatJSON(&got, []json.RawMessage{one}, false); err != nil {
-		t.Fatalf("write legacy one-array JSON: %v", err)
+	indented := func(t *testing.T, out string) {
+		t.Helper()
+		var compact, want bytes.Buffer
+		if err := json.Compact(&compact, []byte(out)); err != nil {
+			t.Fatalf("stdout is not JSON: %v\n%q", err, out)
+		}
+		if err := json.Indent(&want, compact.Bytes(), "", "  "); err != nil {
+			t.Fatalf("indent: %v", err)
+		}
+		if out != want.String()+"\n" {
+			t.Fatalf("stdout is not two-space indented with one trailing newline:\n got: %q\nwant: %q", out, want.String()+"\n")
+		}
 	}
-	const wantLegacyOne = "[\n  {\n    \"id\": \"T-00001\",\n    \"title\": \"A \\u003c B\"\n  }\n]\n"
-	if got.String() != wantLegacyOne {
-		t.Fatalf("legacy one-array bytes changed:\n got: %q\nwant: %q", got.String(), wantLegacyOne)
-	}
-
-	got.Reset()
-	if err := writeCatJSON(&got, []json.RawMessage{one, two}, false); err != nil {
-		t.Fatalf("write legacy many-array JSON: %v", err)
-	}
-	const wantLegacyMany = "[\n  {\n    \"id\": \"T-00001\",\n    \"title\": \"A \\u003c B\"\n  },\n  {\n    \"id\": \"T-00002\",\n    \"title\": \"Two\"\n  }\n]\n"
-	if got.String() != wantLegacyMany {
-		t.Fatalf("legacy many-array bytes changed:\n got: %q\nwant: %q", got.String(), wantLegacyMany)
-	}
-
-	got.Reset()
-	if err := writeCatOneJSON(&got, one, false); err != nil {
-		t.Fatalf("write one object JSON: %v", err)
-	}
-	const wantOne = "{\n  \"id\": \"T-00001\",\n  \"title\": \"A \\u003c B\"\n}\n"
-	if got.String() != wantOne {
-		t.Fatalf("one-object bytes:\n got: %q\nwant: %q", got.String(), wantOne)
-	}
-
-	got.Reset()
-	if err := writeCatOneJSON(&got, one, true); err != nil {
-		t.Fatalf("write compact one object JSON: %v", err)
-	}
-	const wantCompactOne = "{\"id\":\"T-00001\",\"title\":\"A \\u003c B\"}\n"
-	if got.String() != wantCompactOne {
-		t.Fatalf("compact one-object bytes:\n got: %q\nwant: %q", got.String(), wantCompactOne)
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		prefix string
+		check  func(*testing.T, string)
+		count  int
+	}{
+		{name: "one task is still an array", args: []string{"cat", first, "--json"}, prefix: "[\n  {\n", check: indented, count: 1},
+		{name: "two tasks", args: []string{"cat", first, second, "--json"}, prefix: "[\n  {\n", check: indented, count: 2},
+		{name: "--one is the bare object", args: []string{"cat", first, "--json", "--one"}, prefix: "{\n  \"", check: indented},
+		{name: "--one --porcelain is one compact line", args: []string{"cat", first, "--json", "--one", "--porcelain"}, prefix: "{\"",
+			check: func(t *testing.T, out string) {
+				t.Helper()
+				var compact bytes.Buffer
+				if err := json.Compact(&compact, []byte(out)); err != nil {
+					t.Fatalf("stdout is not JSON: %v\n%q", err, out)
+				}
+				if out != compact.String()+"\n" {
+					t.Fatalf("--porcelain stdout is not compact with one trailing newline: %q", out)
+				}
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := runCatOneTestCLI(t, dbPath, tc.args)
+			if result.errText != "" {
+				t.Fatalf("%v: %s\n%s", tc.args, result.errText, result.stderr)
+			}
+			out := result.stdout
+			if !strings.HasPrefix(out, tc.prefix) {
+				t.Fatalf("stdout starts %q, want prefix %q", out[:min(len(out), 20)], tc.prefix)
+			}
+			tc.check(t, out)
+			if !strings.Contains(out, `"A \u003c B"`) {
+				t.Fatalf("title is not \\u003c-escaped:\n%s", out)
+			}
+			if tc.count > 0 {
+				var items []json.RawMessage
+				if err := json.Unmarshal([]byte(out), &items); err != nil || len(items) != tc.count {
+					t.Fatalf("array has %d items (err %v), want %d", len(items), err, tc.count)
+				}
+			}
+		})
 	}
 }
 

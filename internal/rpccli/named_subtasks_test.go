@@ -1,38 +1,27 @@
 package rpccli
 
-import (
-	"reflect"
-	"strings"
-	"testing"
-)
+import "testing"
 
-func TestNamedSubtaskAttributionMatchers(t *testing.T) {
-	for _, tt := range []struct{ token, want string }{
-		{"T-12345.render-preview", "T-12345.render-preview"},
-		{"T-12345.a", "T-12345.a"},
-		{"T-12345", "T-12345"},
-		{"T-12345.", "T-12345"},
-		{"T-12345.Next", "T-12345"},
-		{"T-12345." + strings.Repeat("a", 57), ""},
+// A `wrkp just` fact is attributed to the task named in the runtime scope ref:
+// a named subtask keeps its suffix, a lane suffix (/reviewer) is stripped, and
+// a scope with no task — or a token that is not a wrkq task id (XT-, six
+// digits) — attributes to none. The task-token grammar itself is
+// id.TestFindTaskIDs's; these rows are the scope parsing only.
+//
+// Held at the inner seam: `wrkp just` has no surface harness yet (it shells out
+// to just). Rewrite through `wrkp just <recipe>` + `wrkp log --json` once one
+// exists.
+func TestWrkpJustAttributesTheScopeRefTaskStrippingTheLane(t *testing.T) {
+	for _, tt := range []struct{ scope, want string }{
+		{"agent:cody:project:wrkq:task:T-12345.render-preview", "T-12345.render-preview"},
+		{"agent:cody:project:wrkq:task:T-12345.render-preview/reviewer", "T-12345.render-preview"},
+		{"agent:cody:project:wrkq:task:T-12345/reviewer", "T-12345"},
+		{"agent:cody:project:wrkq", ""},
+		{"agent:cody:project:wrkq:task:XT-12345", ""},
+		{"agent:cody:project:wrkq:task:T-123456", ""},
 	} {
-		t.Run(tt.token, func(t *testing.T) {
-			want := []string{}
-			if tt.want != "" {
-				want = append(want, tt.want)
-			}
-			if got := wrkpGitTaskIDs("fix: " + tt.token + "\n\n" + tt.token); !reflect.DeepEqual(got, want) {
-				t.Errorf("commit tasks = %v, want %v", got, want)
-			}
-			for _, suffix := range []string{"", "/reviewer"} {
-				if got := wrkpJustTaskID("agent:cody:project:wrkq:task:" + tt.token + suffix); got != tt.want {
-					t.Errorf("scope task = %q, want %q", got, tt.want)
-				}
-			}
-		})
-	}
-	for _, scope := range []string{"agent:cody:project:wrkq", "agent:cody:project:wrkq:task:XT-12345", "agent:cody:project:wrkq:task:T-123456"} {
-		if got := wrkpJustTaskID(scope); got != "" {
-			t.Errorf("scope %q yielded %q", scope, got)
+		if got := wrkpJustTaskID(tt.scope); got != tt.want {
+			t.Errorf("wrkpJustTaskID(%q) = %q, want %q", tt.scope, got, tt.want)
 		}
 	}
 }

@@ -10,48 +10,63 @@ import (
 
 const maxHelpLines = 40
 
-func TestHelpPagesRenderUnderLineLimit(t *testing.T) {
-	discoveryRoot := NewRootCmdFor("wrkq")
-	paths := collectHelpPaths(discoveryRoot, nil)
-	if len(paths) == 0 {
-		t.Fatal("expected at least root help path")
-	}
-
-	for _, path := range paths {
-		path := append([]string(nil), path...)
-		name := "wrkq"
-		if len(path) > 0 {
-			name += " " + strings.Join(path, " ")
+// Every visible help page, on both the wrkq and wrkc roots, renders without a
+// template error, carries a Usage section, and stays within maxHelpLines —
+// except the pages named in that root's oversized allowlist, which must still
+// render.
+func TestEveryHelpPageRendersWithUsageWithinFortyLines(t *testing.T) {
+	for _, root := range []struct {
+		name      string
+		newRoot   func() *cobra.Command
+		oversized map[string]bool
+	}{
+		{name: "wrkq", newRoot: func() *cobra.Command { return NewRootCmdFor("wrkq") }},
+		{name: "wrkc", newRoot: NewWrkcRootCmd, oversized: oversizedWrkcHelp},
+	} {
+		paths := collectHelpPaths(root.newRoot(), nil)
+		if len(paths) < 2 {
+			t.Fatalf("%s: expected the root page plus subcommand pages, got %d", root.name, len(paths))
 		}
-		t.Run(name, func(t *testing.T) {
-			root := NewRootCmdFor("wrkq")
-			var stdout, stderr bytes.Buffer
-			args := append(append([]string(nil), path...), "--help")
-			root.SetArgs(args)
-			root.SetOut(&stdout)
-			root.SetErr(&stderr)
-
-			if err := root.Execute(); err != nil {
-				t.Fatalf("%s --help returned error: %v\nstderr:\n%s", name, err, stderr.String())
-			}
-			output := stdout.String() + stderr.String()
-			if strings.TrimSpace(output) == "" {
-				t.Fatalf("%s --help produced no output", name)
-			}
-			if strings.Contains(output, "template:") {
-				t.Fatalf("%s --help produced template error:\n%s", name, output)
-			}
-			if !strings.Contains(output, "Usage:") {
-				t.Fatalf("%s --help missing Usage section:\n%s", name, output)
-			}
-			if lines := countHelpLines(output); lines > maxHelpLines {
-				t.Fatalf("%s --help = %d lines, want <= %d:\n%s", name, lines, maxHelpLines, output)
-			}
-		})
+		for _, path := range paths {
+			path := append([]string(nil), path...)
+			name := strings.TrimSpace(root.name + " " + strings.Join(path, " "))
+			t.Run(name, func(t *testing.T) {
+				cmd := root.newRoot()
+				var stdout, stderr bytes.Buffer
+				cmd.SetArgs(append(append([]string(nil), path...), "--help"))
+				cmd.SetOut(&stdout)
+				cmd.SetErr(&stderr)
+				if err := cmd.Execute(); err != nil {
+					t.Fatalf("%s --help returned error: %v\nstderr:\n%s", name, err, stderr.String())
+				}
+				output := stdout.String() + stderr.String()
+				if strings.Contains(output, "template:") {
+					t.Fatalf("%s --help produced template error:\n%s", name, output)
+				}
+				if !strings.Contains(output, "Usage:") {
+					t.Fatalf("%s --help missing Usage section:\n%s", name, output)
+				}
+				lines := countHelpLines(output)
+				if root.oversized[strings.Join(path, " ")] {
+					// Pre-existing debt, not licence to grow: the page still has to
+					// render, and every other page stays under the limit.
+					t.Logf("%s --help = %d lines (known over the %d-line limit)", name, lines, maxHelpLines)
+					return
+				}
+				if lines > maxHelpLines {
+					t.Fatalf("%s --help = %d lines, want <= %d:\n%s", name, lines, maxHelpLines, output)
+				}
+			})
+		}
 	}
 }
 
-func TestRootHelpListsEveryVisibleCommand(t *testing.T) {
+// The wrkq root lists its visible commands as a bare-name column grid: the
+// whitespace tokens between "Commands:" and "Flags:" are exactly the visible
+// command names (a description list would add description words; a dropped
+// command is missing from the set even when its name is a substring of
+// another, like rm/rmdir or ls/details), at most four per row.
+func TestWrkqRootHelpListsEveryVisibleCommandInColumnGrid(t *testing.T) {
 	root := NewRootCmdFor("wrkq")
 	var stdout bytes.Buffer
 	root.SetArgs([]string{"--help"})
@@ -59,15 +74,63 @@ func TestRootHelpListsEveryVisibleCommand(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("root help returned error: %v", err)
 	}
-	output := stdout.String()
 
+	var want []string
 	for _, cmd := range root.Commands() {
-		if !isVisibleHelpCommand(cmd) {
+		if isVisibleHelpCommand(cmd) {
+			want = append(want, cmd.Name())
+		}
+	}
+	got, rows := rootHelpCommandGrid(t, stdout.String())
+	assertSameCommandSet(t, got, want, stdout.String())
+	for _, row := range rows {
+		if n := len(strings.Fields(row)); n > 4 {
+			t.Fatalf("grid row has %d names, want <= 4: %q", n, row)
+		}
+	}
+}
+
+// rootHelpCommandGrid returns the whitespace tokens of the root help's
+// Commands: section (and its raw rows).
+func rootHelpCommandGrid(t *testing.T, output string) (tokens, rows []string) {
+	t.Helper()
+	in := false
+	for _, line := range strings.Split(output, "\n") {
+		switch {
+		case strings.TrimSpace(line) == "Commands:":
+			in = true
 			continue
+		case strings.TrimSpace(line) == "Flags:":
+			in = false
 		}
-		if !strings.Contains(output, cmd.Name()) {
-			t.Fatalf("root help missing command %q:\n%s", cmd.Name(), output)
+		if in && strings.TrimSpace(line) != "" {
+			rows = append(rows, line)
+			tokens = append(tokens, strings.Fields(line)...)
 		}
+	}
+	if len(rows) == 0 {
+		t.Fatalf("root help has no Commands: grid:\n%s", output)
+	}
+	return tokens, rows
+}
+
+func assertSameCommandSet(t *testing.T, got, want []string, output string) {
+	t.Helper()
+	gotSet := map[string]int{}
+	for _, name := range got {
+		gotSet[name]++
+	}
+	for _, name := range want {
+		if gotSet[name] == 0 {
+			t.Fatalf("root help grid missing command %q:\n%s", name, output)
+		}
+		delete(gotSet, name)
+	}
+	for name := range gotSet {
+		t.Fatalf("root help grid lists %q, which is not a visible command:\n%s", name, output)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("root help grid lists %d names, want %d visible commands:\n%s", len(got), len(want), output)
 	}
 }
 
@@ -98,41 +161,6 @@ func countHelpLines(output string) int {
 		lines++
 	}
 	return lines
-}
-
-func TestWrkcHelpPagesRenderUnderLineLimit(t *testing.T) {
-	for _, path := range collectHelpPaths(NewWrkcRootCmd(), nil) {
-		path := append([]string(nil), path...)
-		name := strings.TrimSpace("wrkc " + strings.Join(path, " "))
-		t.Run(name, func(t *testing.T) {
-			root := NewWrkcRootCmd()
-			var stdout, stderr bytes.Buffer
-			root.SetArgs(append(append([]string(nil), path...), "--help"))
-			root.SetOut(&stdout)
-			root.SetErr(&stderr)
-
-			if err := root.Execute(); err != nil {
-				t.Fatalf("%s --help returned error: %v\nstderr:\n%s", name, err, stderr.String())
-			}
-			output := stdout.String() + stderr.String()
-			if strings.Contains(output, "template:") {
-				t.Fatalf("%s --help produced template error:\n%s", name, output)
-			}
-			if !strings.Contains(output, "Usage:") {
-				t.Fatalf("%s --help missing Usage section:\n%s", name, output)
-			}
-			lines := countHelpLines(output)
-			if oversizedWrkcHelp[strings.Join(path, " ")] {
-				// Pre-existing debt, not licence to grow: the page still has to
-				// render, and every other page stays under the limit.
-				t.Logf("%s --help = %d lines (known over the %d-line limit)", name, lines, maxHelpLines)
-				return
-			}
-			if lines > maxHelpLines {
-				t.Fatalf("%s --help = %d lines, want <= %d:\n%s", name, lines, maxHelpLines, output)
-			}
-		})
-	}
 }
 
 // oversizedWrkcHelp names the help pages that were already over maxHelpLines
@@ -166,27 +194,6 @@ func TestWrkcRootHelpDescribesEveryVisibleCommand(t *testing.T) {
 		if !strings.Contains(output, cmd.Short) {
 			t.Fatalf("root help missing description for %q (%q):\n%s", cmd.Name(), cmd.Short, output)
 		}
-	}
-}
-
-// The wrkq root keeps its four-column name grid: a description list at 46
-// commands would blow the line limit and stop being scannable.
-func TestWrkqRootHelpKeepsColumnGrid(t *testing.T) {
-	root := NewRootCmdFor("wrkq")
-	var stdout bytes.Buffer
-	root.SetArgs([]string{"--help"})
-	root.SetOut(&stdout)
-	if err := root.Execute(); err != nil {
-		t.Fatalf("root help returned error: %v", err)
-	}
-
-	for _, line := range strings.Split(stdout.String(), "\n") {
-		if strings.HasPrefix(line, "  ls ") || strings.HasPrefix(line, "  ls\t") {
-			t.Fatalf("wrkq root help switched to a description list:\n%s", stdout.String())
-		}
-	}
-	if !strings.Contains(stdout.String(), "Commands:") {
-		t.Fatalf("wrkq root help missing Commands section:\n%s", stdout.String())
 	}
 }
 

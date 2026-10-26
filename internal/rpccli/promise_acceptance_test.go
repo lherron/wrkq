@@ -3,13 +3,10 @@
 package rpccli
 
 import (
-	"bytes"
 	"encoding/json"
-	"reflect"
+	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/lherron/wrkq/internal/render"
 )
 
 func TestPromiseCLICommandsAndRootSelectors(t *testing.T) {
@@ -47,13 +44,14 @@ func TestPromiseCLICommandsAndRootSelectors(t *testing.T) {
 	}
 
 	editOut, err := runCampaignCLIInput(t, f.dbPath, "Updated question from stdin\n",
-		"promise", "edit", created.ID, "--question", "-", "--etag", "1", "--json")
+		"promise", "edit", created.ID, "--question", "-", "--review-at", "2099-01-02T01:00:00+01:00", "--etag", "1", "--json")
 	if err != nil {
 		t.Fatalf("promise edit: %v\n%s", err, editOut)
 	}
 	var edited promiseWire
-	if err := json.Unmarshal([]byte(editOut), &edited); err != nil || edited.ETag != 2 || edited.ReviewQuestion == nil || !strings.Contains(*edited.ReviewQuestion, "stdin") {
-		t.Fatalf("edited = %#v, err=%v", edited, err)
+	if err := json.Unmarshal([]byte(editOut), &edited); err != nil || edited.ETag != 2 || edited.ReviewQuestion == nil || !strings.Contains(*edited.ReviewQuestion, "stdin") ||
+		edited.ReviewAt != "2099-01-02T00:00:00Z" {
+		t.Fatalf("edited = %#v, err=%v; want etag 2, stdin question, reviewAt normalized to UTC", edited, err)
 	}
 
 	renewOut, err := runCampaignCLI(t, f.dbPath, "promise", "renew", created.ID, "--in", "7d", "--note", "Reviewed", "--if-match", "2", "--json")
@@ -65,11 +63,6 @@ func TestPromiseCLICommandsAndRootSelectors(t *testing.T) {
 		t.Fatalf("renewed = %#v, err=%v", renewed, err)
 	}
 
-	logOut, err := runCampaignCLI(t, f.dbPath, "log", created.ID, "--json")
-	if err != nil || !strings.Contains(logOut, "promise.renewed") {
-		t.Fatalf("promise log: %v\n%s", err, logOut)
-	}
-
 	resolvedOut, err := runCampaignCLI(t, f.dbPath, "promise", "resolve", created.ID, "--note", "Satisfied", "--etag", "3", "--json")
 	if err != nil {
 		t.Fatalf("promise resolve: %v\n%s", err, resolvedOut)
@@ -77,6 +70,26 @@ func TestPromiseCLICommandsAndRootSelectors(t *testing.T) {
 	var resolved promiseWire
 	if err := json.Unmarshal([]byte(resolvedOut), &resolved); err != nil || resolved.State != "resolved" || resolved.ETag != 4 {
 		t.Fatalf("resolved = %#v, err=%v", resolved, err)
+	}
+	// A closed promise refuses further lifecycle verbs, even with a current etag.
+	if out, err := runCampaignCLI(t, f.dbPath, "promise", "abandon", created.ID, "--etag", "4", "--json"); err == nil ||
+		!strings.Contains(err.Error(), "WRKQ_WRONG_STATE") {
+		t.Fatalf("abandon of resolved promise = %v\n%s, want wrong-state refusal", err, out)
+	}
+
+	logOut, err := runCampaignCLI(t, f.dbPath, "log", created.ID, "--json")
+	if err != nil {
+		t.Fatalf("promise log: %v\n%s", err, logOut)
+	}
+	var history []logEvent
+	decodeCLIJSON(t, logOut, &history)
+	var gotTypes []string
+	for _, event := range history {
+		gotTypes = append(gotTypes, event.EventType)
+	}
+	wantTypes := []string{"promise.resolved", "promise.renewed", "promise.updated", "promise.created"}
+	if strings.Join(gotTypes, ",") != strings.Join(wantTypes, ",") {
+		t.Fatalf("promise history = %v, want newest-first %v (refused abandon writes nothing)", gotTypes, wantTypes)
 	}
 
 	standaloneOut, err := runCampaignCLIInput(t, f.dbPath, "Standalone subject from stdin\n",
@@ -154,6 +167,10 @@ func TestPromiseAttentionSurfacesAndTreeRenderers(t *testing.T) {
 	if err != nil || !strings.Contains(projectOnlyOut, ready.ID) || strings.Contains(projectOnlyOut, standaloneReady.ID) || strings.Contains(projectOnlyOut, otherProjectReady.ID) {
 		t.Fatalf("project-only ready queue: %v\n%s", err, projectOnlyOut)
 	}
+	globalOnlyOut, err := runCampaignCLI(t, f.dbPath, "promise", "ready", "--for", "mable", "--include-global", "--porcelain")
+	if err != nil || !strings.Contains(globalOnlyOut, standaloneReady.ID) || strings.Contains(globalOnlyOut, ready.ID) || strings.Contains(globalOnlyOut, otherProjectReady.ID) {
+		t.Fatalf("global-only ready queue (no project): %v\n%s, want only the standalone promise", err, globalOnlyOut)
+	}
 	checkOut, err := runCampaignCLI(t, f.dbPath, "check", "--for", "mable", "--json")
 	if err != nil || !strings.Contains(checkOut, ready.ID) {
 		t.Fatalf("check ready section: %v\n%s", err, checkOut)
@@ -190,30 +207,34 @@ func TestPromiseAttentionSurfacesAndTreeRenderers(t *testing.T) {
 	}
 }
 
+// TestPromiseOutputFingerprint pins the promise wire shape a caller reads:
+// `promise add --json --porcelain` prints one compact object whose key order is
+// the promiseWire order (uuid, id, ownerPrincipalRef, subject, reviewQuestion,
+// subjectRef, reviewAt, ready, readyFor, state, …) with unset omitempty keys
+// absent. Volatile values are normalized; everything else is byte-exact.
 func TestPromiseOutputFingerprint(t *testing.T) {
-	question, readyFor := "What next?", "2 days"
-	promise := promiseWire{
-		UUID: "uuid", ID: "PR-00001", OwnerPrincipalRef: "agent:cody", Subject: "Subject",
-		ReviewQuestion: &question, SubjectRef: nil, ReviewAt: "2026-08-21T00:00:00Z",
-		Ready: true, ReadyFor: &readyFor, State: "open", Meta: map[string]any{}, ETag: 1,
-		CreatedAt: "2026-08-20T00:00:00Z", UpdatedAt: "2026-08-20T00:00:00Z",
-		CreatedByPrincipalRef: "agent:cody", UpdatedByPrincipalRef: "agent:cody",
+	f := newCampaignCLIFixture(t)
+	out, err := runCampaignCLI(t, f.dbPath,
+		"promise", "add", "--task", f.residentID,
+		"--review-at", "2026-08-21T00:00:00Z",
+		"--question", "What next?", "--json", "--porcelain")
+	if err != nil {
+		t.Fatalf("promise add: %v\n%s", err, out)
 	}
-	gotType := reflect.TypeOf(promise)
-	var tags []string
-	for i := 0; i < gotType.NumField(); i++ {
-		tags = append(tags, gotType.Field(i).Tag.Get("json"))
-	}
-	const wantTags = "uuid,id,ownerPrincipalRef,subject,reviewQuestion,omitempty,subjectRef,reviewAt,ready,readyFor,omitempty,state,closedAt,omitempty,lastReviewedAt,omitempty,lastReviewNote,omitempty,meta,etag,createdAt,updatedAt,createdByPrincipalRef,updatedByPrincipalRef"
-	if strings.Join(tags, ",") != wantTags {
-		t.Fatalf("promise output tags = %s, want %s", strings.Join(tags, ","), wantTags)
-	}
-	var compact bytes.Buffer
-	if err := render.NewRenderer(&compact, render.Options{Porcelain: true}).RenderJSON(promise); err != nil {
-		t.Fatal(err)
-	}
-	const wantPrefix = `{"uuid":"uuid","id":"PR-00001","ownerPrincipalRef":"agent:cody","subject":"Subject"`
-	if !strings.HasPrefix(compact.String(), wantPrefix) || !strings.Contains(compact.String(), `"readyFor":"2 days"`) {
-		t.Fatalf("compact promise fingerprint = %s", compact.String())
+	got := uuidRe.ReplaceAllString(out, "<UUID>")
+	got = promiseVolatileRe.ReplaceAllString(got, `"$1":"<${1}>"`)
+	if got != wantPromiseAddPorcelain {
+		t.Fatalf("promise add --json --porcelain =\n%s\nwant\n%s", got, wantPromiseAddPorcelain)
 	}
 }
+
+// createdAt/updatedAt are wall-clock; readyFor is the age of the (past)
+// review-at relative to now.
+var promiseVolatileRe = regexp.MustCompile(`"(createdAt|updatedAt|readyFor)":"[^"]+"`)
+
+const wantPromiseAddPorcelain = `{"uuid":"<UUID>","id":"PR-00001","ownerPrincipalRef":"agent:campaign-test",` +
+	`"subject":"Resident member","reviewQuestion":"What next?",` +
+	`"subjectRef":{"type":"task","uuid":"<UUID>","id":"T-00001","path":"campaign-cli-a/wave-a/resident-member"},` +
+	`"reviewAt":"2026-08-21T00:00:00Z","ready":true,"readyFor":"<readyFor>","state":"open","meta":{},"etag":1,` +
+	`"createdAt":"<createdAt>","updatedAt":"<updatedAt>",` +
+	`"createdByPrincipalRef":"agent:campaign-test","updatedByPrincipalRef":"agent:campaign-test"}` + "\n"

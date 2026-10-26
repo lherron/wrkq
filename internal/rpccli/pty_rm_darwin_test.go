@@ -10,17 +10,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/lherron/wrkq/internal/db"
 )
 
 // runCLIPromptTTY runs a CLI with stdin+stdout+stderr attached to a real
-// pseudo-terminal (so isStdoutTTY reports true and the legacy purge prompt
-// engages its interactive path), writes `input` to the terminal master after a
-// brief settle, and returns the captured terminal output + exit code.
+// pseudo-terminal (so isStdoutTTY reports true and the purge prompt engages its
+// interactive path), writes `input` to the terminal master, and returns the
+// captured terminal output + exit code.
 //
-// This is the prompt-ownership oracle for the caller-owned-confirmation seam: it
-// proves the MIRROR (not the RPC server) renders the legacy purge warning + the
-// "Type 'yes' to confirm:" line and honors the typed answer, byte-for-byte with
-// legacy `wrkq rm --purge`.
+// This is the prompt-ownership harness for the caller-owned-confirmation seam:
+// the CLI (not the RPC server) renders each command's confirmation and honors
+// the typed answer.
 func runCLIPromptTTY(t *testing.T, bin, dir string, args []string, input string) (out string, exit int) {
 	t.Helper()
 	master, slaveName := openPTY(t)
@@ -48,8 +49,6 @@ func runCLIPromptTTY(t *testing.T, bin, dir string, args []string, input string)
 		_ = slave.Close()
 		t.Fatalf("start %s on tty: %v", bin, err)
 	}
-	// Feed the typed answer. The prompt reads a single line; the terminal echoes
-	// it (ONLCR), which is identical for both binaries so byte parity holds.
 	if input != "" {
 		_, _ = master.WriteString(input)
 	}
@@ -69,136 +68,138 @@ func runCLIPromptTTY(t *testing.T, bin, dir string, args []string, input string)
 	return string(buf), exit
 }
 
-// TestRmPurgePromptOwnership proves the mirror owns the legacy `rm --purge`
-// confirmation prompt on a real TTY: the warning block + "Type 'yes' to
-// confirm:" line, the accept ("yes" → delete, exit 0) and abort ("no" → aborted,
-// exit 1) branches, and the --yes skip (no prompt). For each case the mirror's
-// terminal output + exit code byte-match legacy `wrkq rm --purge`.
+// ptyRowCount reads durable state straight from the fixture DB after the
+// prompted command has exited, so each row asserts what the answer DID, not
+// what it printed.
+func ptyRowCount(t *testing.T, dir, query string, args ...any) int {
+	t.Helper()
+	database, err := db.Open(filepath.Join(dir, "wrkq.db"))
+	if err != nil {
+		t.Fatalf("row-state open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	var n int
+	if err := database.QueryRow(query, args...).Scan(&n); err != nil {
+		t.Fatalf("row-state query %q: %v", query, err)
+	}
+	return n
+}
+
+// promptCase is one typed answer at one command's confirmation: the exit code
+// it must produce, prompt text that must (and must not) appear on the terminal,
+// and the durable row state it must leave behind.
+type promptCase struct {
+	name     string
+	args     []string
+	input    string
+	wantExit int
+	wantText []string
+	notText  []string
+	wantRows func(t *testing.T, dir string)
+}
+
+func runPromptCases(t *testing.T, bins binaries, setup [][]string, cases []promptCase) {
+	t.Helper()
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := seedFixture(t, bins, setup)
+			out, exit := runCLIPromptTTY(t, bins.wrkq, dir, tc.args, tc.input)
+			if exit != tc.wantExit {
+				t.Errorf("exit = %d, want %d; terminal:\n%q", exit, tc.wantExit, out)
+			}
+			for _, want := range tc.wantText {
+				if !strings.Contains(out, want) {
+					t.Errorf("terminal missing %q; got %q", want, out)
+				}
+			}
+			for _, not := range tc.notText {
+				if strings.Contains(out, not) {
+					t.Errorf("terminal must not contain %q; got %q", not, out)
+				}
+			}
+			tc.wantRows(t, dir)
+		})
+	}
+}
+
+// TestRmPurgePromptOwnership: on a real TTY, `rm --purge` renders the WARNING
+// block + "Type 'yes' to confirm:", purges the task only on "yes" (exit 0),
+// leaves it in place on "no" (exit 1), and --yes skips the prompt and purges.
 func TestRmPurgePromptOwnership(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds binaries + drives a real pty")
 	}
 	bins := buildProductionBinaries(t)
 
-	cases := []struct {
-		name  string
-		args  []string
-		input string
-	}{
-		{name: "accept", args: []string{"rm", "inbox/aaa", "--purge"}, input: "yes\n"},
-		{name: "abort", args: []string{"rm", "inbox/aaa", "--purge"}, input: "no\n"},
-		{name: "yes-flag-skips-prompt", args: []string{"rm", "inbox/aaa", "--purge", "--yes"}, input: ""},
+	prompt := []string{"WARNING: This will permanently delete", "Type 'yes' to confirm:"}
+	taskRows := func(want int) func(*testing.T, string) {
+		return func(t *testing.T, dir string) {
+			t.Helper()
+			if got := ptyRowCount(t, dir, `SELECT COUNT(*) FROM tasks WHERE slug = 'aaa'`); got != want {
+				t.Errorf("tasks with slug aaa = %d, want %d", got, want)
+			}
+		}
 	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			setup := [][]string{{"touch", "inbox/aaa", "-t", "Alpha"}}
-			base := seedFixture(t, bins, setup)
-			oldDir := copyFixture(t, base)
-			newDir := copyFixture(t, base)
-
-			oldOut, oldExit := runCLIPromptTTY(t, bins.wrkq, oldDir, tc.args, tc.input)
-			newOut, newExit := runCLIPromptTTY(t, bins.wrkq, newDir, tc.args, tc.input)
-
-			if oldExit != newExit {
-				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
-			}
-			if normalize(newOut) != normalize(oldOut) {
-				t.Errorf("prompt tty output mismatch:\n old: %q\n new: %q", oldOut, newOut)
-			}
-
-			// Guard against a false "both produced nothing" parity: the prompting
-			// cases MUST render the legacy warning + confirm line on the legacy oracle.
-			if tc.name != "yes-flag-skips-prompt" {
-				for _, want := range []string{"WARNING: This will permanently delete", "Type 'yes' to confirm:"} {
-					if !strings.Contains(oldOut, want) {
-						t.Fatalf("legacy purge prompt missing %q (got %q)", want, oldOut)
-					}
-				}
-			}
-			// Snapshot parity: accept + --yes delete the row; abort leaves it.
-			if got, want := snapshot(t, newDir), snapshot(t, oldDir); got != want {
-				t.Errorf("durable snapshot mismatch:\n old:\n%s\n new:\n%s", want, got)
-			}
-		})
-	}
+	runPromptCases(t, bins, [][]string{{"touch", "inbox/aaa", "-t", "Alpha"}}, []promptCase{
+		{name: "yes purges", args: []string{"rm", "inbox/aaa", "--purge"}, input: "yes\n",
+			wantExit: 0, wantText: prompt, wantRows: taskRows(0)},
+		{name: "no aborts and keeps the task", args: []string{"rm", "inbox/aaa", "--purge"}, input: "no\n",
+			wantExit: 1, wantText: prompt, wantRows: taskRows(1)},
+		{name: "--yes skips the prompt and purges", args: []string{"rm", "inbox/aaa", "--purge", "--yes"},
+			wantExit: 0, notText: prompt, wantRows: taskRows(0)},
+	})
 }
 
-// TestCommentRmPromptOwnership proves the mirror owns the legacy `comment rm`
-// confirmation on a real TTY: the inline "[y/N]: " line (NO warning block; rm's
-// "yes" shape is deliberately NOT reused — daedalus #10190), prompting EVEN for
-// soft-delete, accepting EXACTLY "y"/"Y", the abort branch ("n" → per-comment
-// skip), and --yes (no prompt). The mirror's terminal output + exit code + the
-// durable comment snapshot byte-match legacy `wrkq comment rm`.
+// TestCommentRmPromptOwnership: on a real TTY, `comment rm` prompts with an
+// inline "[y/N]:" line (never rm's "Type 'yes'" shape) EVEN for soft-delete,
+// accepts exactly y/Y (soft-deletes, or purges under --purge), treats "n" as a
+// per-comment skip that leaves the comment live, and --yes skips the prompt.
 func TestCommentRmPromptOwnership(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds binaries + drives a real pty")
 	}
 	bins := buildProductionBinaries(t)
 
-	cases := []struct {
-		name  string
-		args  []string
-		input string
-	}{
-		{name: "accept-y", args: []string{"comment", "rm", "C-00001"}, input: "y\n"},
-		{name: "accept-Y", args: []string{"comment", "rm", "C-00001"}, input: "Y\n"},
-		{name: "abort-n", args: []string{"comment", "rm", "C-00001"}, input: "n\n"},
-		{name: "purge-prompts-too", args: []string{"comment", "rm", "C-00001", "--purge"}, input: "y\n"},
-		{name: "yes-flag-skips-prompt", args: []string{"comment", "rm", "C-00001", "--yes"}, input: ""},
+	prompt := []string{"comment C-00001 (task T-00001)? [y/N]:"}
+	rmShape := []string{"Type 'yes' to confirm"}
+	commentState := func(wantRows, wantDeleted int) func(*testing.T, string) {
+		return func(t *testing.T, dir string) {
+			t.Helper()
+			if got := ptyRowCount(t, dir, `SELECT COUNT(*) FROM comments WHERE id = 'C-00001'`); got != wantRows {
+				t.Errorf("comment C-00001 rows = %d, want %d", got, wantRows)
+			}
+			if got := ptyRowCount(t, dir, `SELECT COUNT(*) FROM comments WHERE id = 'C-00001' AND deleted_at IS NOT NULL`); got != wantDeleted {
+				t.Errorf("comment C-00001 soft-deleted rows = %d, want %d", got, wantDeleted)
+			}
+		}
 	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			setup := [][]string{{"touch", "inbox/cm", "-t", "CM"}, {"comment", "add", "inbox/cm", "a comment body"}}
-			base := seedFixture(t, bins, setup)
-			oldDir := copyFixture(t, base)
-			newDir := copyFixture(t, base)
-
-			oldOut, oldExit := runCLIPromptTTY(t, bins.wrkq, oldDir, tc.args, tc.input)
-			newOut, newExit := runCLIPromptTTY(t, bins.wrkq, newDir, tc.args, tc.input)
-
-			if oldExit != newExit {
-				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
-			}
-			if normalize(newOut) != normalize(oldOut) {
-				t.Errorf("prompt tty output mismatch:\n old: %q\n new: %q", oldOut, newOut)
-			}
-
-			// The prompting cases MUST render the legacy "[y/N]:" line (and NO
-			// "Type 'yes' to confirm" — that is rm's distinct shape).
-			if tc.name != "yes-flag-skips-prompt" {
-				if !strings.Contains(oldOut, "[y/N]:") {
-					t.Fatalf("legacy comment-rm prompt missing %q (got %q)", "[y/N]:", oldOut)
-				}
-				if strings.Contains(oldOut, "Type 'yes' to confirm") {
-					t.Fatalf("comment-rm must NOT reuse rm's confirm shape (got %q)", oldOut)
-				}
-			}
-			if got, want := snapshot(t, newDir), snapshot(t, oldDir); got != want {
-				t.Errorf("durable snapshot mismatch:\n old:\n%s\n new:\n%s", want, got)
-			}
-		})
-	}
+	setup := [][]string{{"touch", "inbox/cm", "-t", "CM"}, {"comment", "add", "inbox/cm", "a comment body"}}
+	runPromptCases(t, bins, setup, []promptCase{
+		{name: "y soft-deletes", args: []string{"comment", "rm", "C-00001"}, input: "y\n",
+			wantExit: 0, wantText: prompt, notText: rmShape, wantRows: commentState(1, 1)},
+		{name: "Y soft-deletes", args: []string{"comment", "rm", "C-00001"}, input: "Y\n",
+			wantExit: 0, wantText: prompt, notText: rmShape, wantRows: commentState(1, 1)},
+		{name: "n skips and keeps the comment live", args: []string{"comment", "rm", "C-00001"}, input: "n\n",
+			wantExit: 0, wantText: prompt, notText: rmShape, wantRows: commentState(1, 0)},
+		{name: "--purge prompts too and y purges", args: []string{"comment", "rm", "C-00001", "--purge"}, input: "y\n",
+			wantExit: 0, wantText: prompt, notText: rmShape, wantRows: commentState(0, 0)},
+		{name: "--yes skips the prompt and soft-deletes", args: []string{"comment", "rm", "C-00001", "--yes"},
+			wantExit: 0, notText: append(append([]string{}, prompt...), rmShape...), wantRows: commentState(1, 1)},
+	})
 }
 
-// TestCpPromptOwnership proves the mirror owns the legacy `cp` >5-source
-// confirmation on a real TTY: the inline "Copy <n> tasks? [y/N] " line on stderr
-// (no warning block; distinct from rm's "yes"-token shape), accepting a
-// y-prefixed answer, the abort branch ("n" → aborted, exit 1), and --yes (no
-// prompt). The prompt only engages for >5 sources; the terminal output + exit
-// code + the durable snapshot byte-match legacy `wrkq cp`.
+// TestCpPromptOwnership: on a real TTY, `cp` of more than five sources prompts
+// "Copy 6 tasks? [y/N]" (never rm's "Type 'yes'" shape), copies all six into the
+// destination on "y" (exit 0), copies nothing on "n" (exit 1), and --yes skips
+// the prompt and copies.
 func TestCpPromptOwnership(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds binaries + drives a real pty")
 	}
 	bins := buildProductionBinaries(t)
 
-	// Six sources so the >5 prompt engages; a destination container to copy into.
 	setup := [][]string{
 		{"mkdir", "dest"},
 		{"touch", "inbox/c1", "-t", "C1"}, {"touch", "inbox/c2", "-t", "C2"},
@@ -209,101 +210,60 @@ func TestCpPromptOwnership(t *testing.T) {
 	cpArgs := func(extra ...string) []string {
 		return append(append([]string{"cp"}, srcs...), append([]string{"dest"}, extra...)...)
 	}
-
-	cases := []struct {
-		name  string
-		args  []string
-		input string
-	}{
-		{name: "accept-y", args: cpArgs(), input: "y\n"},
-		{name: "abort-n", args: cpArgs(), input: "n\n"},
-		{name: "yes-flag-skips-prompt", args: cpArgs("--yes"), input: ""},
+	prompt := []string{"Copy 6 tasks? [y/N]"}
+	destTasks := func(want int) func(*testing.T, string) {
+		return func(t *testing.T, dir string) {
+			t.Helper()
+			got := ptyRowCount(t, dir, `SELECT COUNT(*) FROM tasks WHERE project_uuid = (SELECT uuid FROM containers WHERE slug = 'dest')`)
+			if got != want {
+				t.Errorf("tasks under dest = %d, want %d", got, want)
+			}
+		}
 	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			base := seedFixture(t, bins, setup)
-			oldDir := copyFixture(t, base)
-			newDir := copyFixture(t, base)
-
-			oldOut, oldExit := runCLIPromptTTY(t, bins.wrkq, oldDir, tc.args, tc.input)
-			newOut, newExit := runCLIPromptTTY(t, bins.wrkq, newDir, tc.args, tc.input)
-
-			if oldExit != newExit {
-				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
-			}
-			if normalize(newOut) != normalize(oldOut) {
-				t.Errorf("prompt tty output mismatch:\n old: %q\n new: %q", oldOut, newOut)
-			}
-
-			// The prompting cases MUST render the legacy "Copy N tasks? [y/N]" line
-			// (and NOT rm's "Type 'yes' to confirm" shape).
-			if tc.name != "yes-flag-skips-prompt" {
-				if !strings.Contains(oldOut, "Copy 6 tasks? [y/N]") {
-					t.Fatalf("legacy cp prompt missing %q (got %q)", "Copy 6 tasks? [y/N]", oldOut)
-				}
-				if strings.Contains(oldOut, "Type 'yes' to confirm") {
-					t.Fatalf("cp must NOT reuse rm's confirm shape (got %q)", oldOut)
-				}
-			}
-			if got, want := snapshot(t, newDir), snapshot(t, oldDir); got != want {
-				t.Errorf("durable snapshot mismatch:\n old:\n%s\n new:\n%s", want, got)
-			}
-		})
-	}
+	runPromptCases(t, bins, setup, []promptCase{
+		{name: "y copies all six", args: cpArgs(), input: "y\n",
+			wantExit: 0, wantText: prompt, notText: []string{"Type 'yes' to confirm"}, wantRows: destTasks(6)},
+		{name: "n aborts and copies nothing", args: cpArgs(), input: "n\n",
+			wantExit: 1, wantText: prompt, wantRows: destTasks(0)},
+		{name: "--yes skips the prompt and copies", args: cpArgs("--yes"),
+			wantExit: 0, notText: prompt, wantRows: destTasks(6)},
+	})
 }
 
-// TestRmdirForcePromptOwnership proves the mirror owns the legacy `rmdir --force`
-// confirmation on a real TTY: the destructive WARNING block (with the rendered
-// counts) + "Are you sure? (yes/no): " requiring EXACTLY "yes", the accept/abort
-// branches, and the project safety exception where --yes still requires typed
-// confirmation. The terminal output + exit code + durable snapshot byte-match.
+// TestRmdirForcePromptOwnership: on a real TTY, `rmdir --force` of a non-empty
+// project renders the WARNING block + "Are you sure? (yes/no):", deletes the
+// container and its tasks only on exactly "yes", keeps both on "no" and on "y"
+// (nonzero exit), and --yes does NOT bypass the typed confirmation for a
+// project.
 func TestRmdirForcePromptOwnership(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds binaries + drives a real pty")
 	}
 	bins := buildProductionBinaries(t)
 
-	cases := []struct {
-		name  string
-		args  []string
-		input string
-	}{
-		{name: "accept", args: []string{"rmdir", "doomed", "--force"}, input: "yes\n"},
-		{name: "abort-no", args: []string{"rmdir", "doomed", "--force"}, input: "no\n"},
-		{name: "abort-y-not-yes", args: []string{"rmdir", "doomed", "--force"}, input: "y\n"},
-		{name: "yes-flag-project-still-prompts", args: []string{"rmdir", "doomed", "--force", "--yes"}, input: "yes\n"},
+	prompt := []string{"WARNING: This will permanently delete", "Are you sure? (yes/no):"}
+	doomed := func(wantContainers, wantTasks int) func(*testing.T, string) {
+		return func(t *testing.T, dir string) {
+			t.Helper()
+			if got := ptyRowCount(t, dir, `SELECT COUNT(*) FROM containers WHERE slug = 'doomed'`); got != wantContainers {
+				t.Errorf("containers named doomed = %d, want %d", got, wantContainers)
+			}
+			if got := ptyRowCount(t, dir, `SELECT COUNT(*) FROM tasks WHERE slug IN ('t1', 't2')`); got != wantTasks {
+				t.Errorf("doomed tasks = %d, want %d", got, wantTasks)
+			}
+		}
 	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			setup := [][]string{{"mkdir", "doomed"}, {"touch", "doomed/t1", "-t", "One"}, {"touch", "doomed/t2", "-t", "Two"}}
-			base := seedFixture(t, bins, setup)
-			oldDir := copyFixture(t, base)
-			newDir := copyFixture(t, base)
-
-			oldOut, oldExit := runCLIPromptTTY(t, bins.wrkq, oldDir, tc.args, tc.input)
-			newOut, newExit := runCLIPromptTTY(t, bins.wrkq, newDir, tc.args, tc.input)
-
-			if oldExit != newExit {
-				t.Errorf("exit code: old=%d new=%d\n old: %q\n new: %q", oldExit, newExit, oldOut, newOut)
-			}
-			if normalize(newOut) != normalize(oldOut) {
-				t.Errorf("prompt tty output mismatch:\n old: %q\n new: %q", oldOut, newOut)
-			}
-
-			for _, want := range []string{"WARNING: This will permanently delete", "Are you sure? (yes/no):"} {
-				if !strings.Contains(oldOut, want) {
-					t.Fatalf("rmdir --force prompt missing %q (got %q)", want, oldOut)
-				}
-			}
-			if got, want := snapshot(t, newDir), snapshot(t, oldDir); got != want {
-				t.Errorf("durable snapshot mismatch:\n old:\n%s\n new:\n%s", want, got)
-			}
-		})
-	}
+	setup := [][]string{{"mkdir", "doomed"}, {"touch", "doomed/t1", "-t", "One"}, {"touch", "doomed/t2", "-t", "Two"}}
+	runPromptCases(t, bins, setup, []promptCase{
+		{name: "yes deletes container and tasks", args: []string{"rmdir", "doomed", "--force"}, input: "yes\n",
+			wantExit: 0, wantText: prompt, wantRows: doomed(0, 0)},
+		{name: "no aborts and keeps everything", args: []string{"rmdir", "doomed", "--force"}, input: "no\n",
+			wantExit: 1, wantText: prompt, wantRows: doomed(1, 2)},
+		{name: "y is not yes and keeps everything", args: []string{"rmdir", "doomed", "--force"}, input: "y\n",
+			wantExit: 1, wantText: prompt, wantRows: doomed(1, 2)},
+		{name: "--yes on a project still prompts and honors yes", args: []string{"rmdir", "doomed", "--force", "--yes"}, input: "yes\n",
+			wantExit: 0, wantText: prompt, wantRows: doomed(0, 0)},
+		{name: "--yes on a project still refuses no", args: []string{"rmdir", "doomed", "--force", "--yes"}, input: "no\n",
+			wantExit: 1, wantText: prompt, wantRows: doomed(1, 2)},
+	})
 }

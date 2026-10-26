@@ -10,8 +10,17 @@ package rpccli
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/lherron/wrkq/internal/config"
+	"github.com/lherron/wrkq/internal/db"
+	"github.com/lherron/wrkq/internal/workrpc"
+	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 )
 
 const handoffReadScope = "cody@rpccli-test-proj"
@@ -272,14 +281,216 @@ func TestHandoffCreateToSuccessorIsConsumedBySuccessor(t *testing.T) {
 // another agent, and a same-author listing keeps its original columns.
 func TestHandoffCreateScopeStillRefusesAnotherAgent(t *testing.T) {
 	dbPath := newHandoffReadFixture(t)
-	refused := runHandoffCreateCLI(t, dbPath, "",
+	remote, requests := newCountingHandoffRemote(t, dbPath)
+	refused := runHandoffCreateCLI(t, remote, "",
 		"handoff", "create", "--scope", "clod@rpccli-test-proj", "--title", "x", "--body", "y", "--json")
 	if refused.err == nil || !strings.Contains(refused.stderr, "self_scope_violation") {
 		t.Fatalf("cross-agent --scope: err=%v stderr=%s", refused.err, refused.stderr)
 	}
-	createHandoffForRead(t, dbPath, "own")
+	// The self-scope gate is caller-side: the refusal never reaches the server.
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("cross-agent --scope refusal sent %d RPC requests, want 0", got)
+	}
+	createHandoffForRead(t, remote, "own")
+	if requests.Load() == 0 {
+		t.Fatal("request counter never moved: the zero-request check above proves nothing")
+	}
 	list := runHandoffCreateCLI(t, dbPath, "", "handoff", "list", "--scope", handoffReadScope, "--human")
 	if list.err != nil || strings.Contains(list.stdout, "From") {
 		t.Fatalf("self-authored listing: %v\n%s", list.err, list.stdout)
+	}
+}
+
+// newCountingHandoffRemote serves the real RPC registry over HTTP and counts
+// every request, so a test can prove a refusal happened before the CLI opened
+// the transport.
+func newCountingHandoffRemote(t *testing.T, dbPath string) (string, *atomic.Int64) {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	api, opts, err := bootstrap.Server(database, &config.Config{DBPath: dbPath, AttachmentsMaxMB: 50})
+	if err != nil {
+		t.Fatalf("bootstrap.Server: %v", err)
+	}
+	rpcServer := workrpc.NewServer(nil)
+	workrpc.RegisterAPI(rpcServer, api, opts)
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		var req workrpc.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp, _ := rpcServer.HandleRequest(r.Context(), req)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("WRKQD_TOKEN", "")
+	return "rpc://" + strings.TrimPrefix(server.URL, "http://"), &requests
+}
+
+func clearHandoffScopeEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"AGENT_SCOPE_REF", "ASP_SCOPE_REF", "ASP_HANDLE", "ASP_AGENT_ID", "ASP_PROJECT"} {
+		t.Setenv(key, "")
+	}
+}
+
+func getHandoff(t *testing.T, locator, id string) handoffJSON {
+	t.Helper()
+	result := runHandoffCreateCLI(t, locator, "", "handoff", "get", id, "--json")
+	if result.err != nil {
+		t.Fatalf("handoff get %s: %v\nstderr:\n%s", id, result.err, result.stderr)
+	}
+	var h handoffJSON
+	if err := json.Unmarshal([]byte(result.stdout), &h); err != nil {
+		t.Fatalf("decode handoff get: %v\n%s", err, result.stdout)
+	}
+	return h
+}
+
+func TestHandoffCreateDryRunWritesNothingIdempotencyKeyDedupesAndMetaRoundTrips(t *testing.T) {
+	dbPath := newHandoffReadFixture(t)
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+
+	dry := runHandoffCreateCLI(t, dbPath, "",
+		"handoff", "create", "--scope", handoffReadScope, "--title", "dry", "--body", "b", "--dry-run", "--json")
+	var dryOut handoffCreateOutput
+	if dry.err != nil || json.Unmarshal([]byte(dry.stdout), &dryOut) != nil || !dryOut.DryRun || dryOut.Handoff.Title != "dry" {
+		t.Fatalf("dry-run create: err=%v stdout=%s stderr=%s", dry.err, dry.stdout, dry.stderr)
+	}
+	if got := handoffRowCount(t, database); got != 0 {
+		t.Fatalf("--dry-run wrote %d handoff rows, want 0", got)
+	}
+
+	create := func() handoffCreateOutput {
+		t.Helper()
+		result := runHandoffCreateCLI(t, dbPath, "",
+			"handoff", "create", "--scope", handoffReadScope, "--title", "keyed", "--body", "b",
+			"--idempotency-key", "k-1", "--meta", `{"k":"v"}`, "--json")
+		var out handoffCreateOutput
+		if result.err != nil || json.Unmarshal([]byte(result.stdout), &out) != nil {
+			t.Fatalf("keyed create: err=%v stdout=%s stderr=%s", result.err, result.stdout, result.stderr)
+		}
+		return out
+	}
+	first, replay := create(), create()
+	if first.IdempotentReplay || !replay.IdempotentReplay || replay.Handoff.ID != first.Handoff.ID {
+		t.Fatalf("idempotency key did not dedupe: first=%s replay=%s replayed=%v", first.Handoff.ID, replay.Handoff.ID, replay.IdempotentReplay)
+	}
+	if got := handoffRowCount(t, database); got != 1 {
+		t.Fatalf("same --idempotency-key twice wrote %d rows, want 1", got)
+	}
+	readBack := getHandoff(t, dbPath, first.Handoff.ID)
+	if readBack.Meta == nil || *readBack.Meta != `{"k":"v"}` {
+		t.Fatalf("--meta read back as %v, want {\"k\":\"v\"}", readBack.Meta)
+	}
+	if readBack.IdempotencyKey == nil || *readBack.IdempotencyKey != "k-1" {
+		t.Fatalf("--idempotency-key read back as %v, want k-1", readBack.IdempotencyKey)
+	}
+}
+
+func TestHandoffAcknowledgeStaleIfMatchAndDryRunLeaveItPending(t *testing.T) {
+	dbPath := newHandoffReadFixture(t)
+	created := createHandoffForRead(t, dbPath, "guarded")
+
+	stale := runHandoffCreateCLI(t, dbPath, "", "--as", "agent:cody",
+		"handoff", "acknowledge", created.ID, "--if-match", "999", "--json")
+	if stale.err == nil || !strings.Contains(stale.stderr, "etag") {
+		t.Fatalf("stale --if-match: err=%v stdout=%s stderr=%s", stale.err, stale.stdout, stale.stderr)
+	}
+	if got := getHandoff(t, dbPath, created.ID); got.Status != "pending" {
+		t.Fatalf("after stale --if-match status = %q, want pending", got.Status)
+	}
+
+	dry := runHandoffCreateCLI(t, dbPath, "", "--as", "agent:cody",
+		"handoff", "acknowledge", created.ID, "--dry-run", "--json")
+	var dryOut handoffAckOutput
+	if dry.err != nil || json.Unmarshal([]byte(dry.stdout), &dryOut) != nil || !dryOut.DryRun {
+		t.Fatalf("dry-run acknowledge: err=%v stdout=%s stderr=%s", dry.err, dry.stdout, dry.stderr)
+	}
+	if got := getHandoff(t, dbPath, created.ID); got.Status != "pending" {
+		t.Fatalf("after --dry-run status = %q, want pending", got.Status)
+	}
+
+	current := runHandoffCreateCLI(t, dbPath, "", "--as", "agent:cody",
+		"handoff", "acknowledge", created.ID, "--if-match", strconv.FormatInt(created.ETag, 10), "--json")
+	if current.err != nil {
+		t.Fatalf("current --if-match: %v\nstderr:\n%s", current.err, current.stderr)
+	}
+	if got := getHandoff(t, dbPath, created.ID); got.Status != "acknowledged" {
+		t.Fatalf("after current --if-match status = %q, want acknowledged", got.Status)
+	}
+}
+
+// With no runtime identity in the environment, `handoff acknowledge` takes the
+// actor from the handoff row itself; an explicit --as must name the same agent
+// and be a canonical agent: principal.
+func TestHandoffAcknowledgeIdentityComesFromRowUnlessAsConflicts(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		as      []string
+		wantErr []string
+	}{
+		{name: "no --as acknowledges as the row agent"},
+		{name: "--as the row agent acknowledges in the row project", as: []string{"--as", "agent:curly"}},
+		{name: "--as another agent is ambiguous", as: []string{"--as", "agent:cody"}, wantErr: []string{"ambiguous actor", "cody", "curly"}},
+		{name: "bare slug --as is refused", as: []string{"--as", "curly"}, wantErr: []string{"invalid --as"}},
+		{name: "non-agent --as is refused", as: []string{"--as", "system:scheduler"}, wantErr: []string{"invalid --as"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dbPath := newHandoffReadFixture(t)
+			clearHandoffScopeEnv(t)
+			t.Setenv("ASP_AGENT_ID", "curly")
+			created := decodeCreatedHandoff(t, runHandoffCreateCLI(t, dbPath, "",
+				"handoff", "create", "--scope", "curly@rpccli-test-proj", "--title", "for curly", "--body", "b", "--json"))
+			t.Setenv("ASP_AGENT_ID", "")
+
+			args := append(append([]string{}, tc.as...), "handoff", "acknowledge", created.ID, "--json")
+			ack := runHandoffCreateCLI(t, dbPath, "", args...)
+			got := getHandoff(t, dbPath, created.ID)
+			if len(tc.wantErr) > 0 {
+				if ack.err == nil {
+					t.Fatalf("acknowledge succeeded: %s", ack.stdout)
+				}
+				for _, want := range tc.wantErr {
+					if !strings.Contains(ack.err.Error()+ack.stderr, want) {
+						t.Fatalf("refusal missing %q: err=%v stderr=%s", want, ack.err, ack.stderr)
+					}
+				}
+				if got.Status != "pending" {
+					t.Fatalf("refused acknowledge left status %q, want pending", got.Status)
+				}
+				return
+			}
+			if ack.err != nil {
+				t.Fatalf("acknowledge: %v\nstderr:\n%s", ack.err, ack.stderr)
+			}
+			if got.Status != "acknowledged" || got.AcknowledgedByAgentID == nil || *got.AcknowledgedByAgentID != "curly" ||
+				got.AcknowledgedByPrincipalRef == nil || *got.AcknowledgedByPrincipalRef != "agent:curly" {
+				t.Fatalf("acknowledged = status %q by %v / %v, want curly / agent:curly", got.Status, got.AcknowledgedByAgentID, got.AcknowledgedByPrincipalRef)
+			}
+		})
+	}
+}
+
+func TestHandoffCreateWithoutScopeFilesUnderTheEnvScopeRef(t *testing.T) {
+	dbPath := newHandoffReadFixture(t)
+	clearHandoffScopeEnv(t)
+	t.Setenv("ASP_SCOPE_REF", "agent:cody:project:rpccli-test-proj")
+
+	created := decodeCreatedHandoff(t, runHandoffCreateCLI(t, dbPath, "",
+		"handoff", "create", "--title", "env scoped", "--body", "b", "--json"))
+	if created.ScopeRef != "agent:cody:project:rpccli-test-proj" || created.AgentID != "cody" || created.ProjectID != "rpccli-test-proj" {
+		t.Fatalf("env-scoped create = scope %q agent %q project %q", created.ScopeRef, created.AgentID, created.ProjectID)
 	}
 }

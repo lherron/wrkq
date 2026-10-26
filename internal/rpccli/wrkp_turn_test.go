@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -75,6 +76,15 @@ func TestWrkpLogTurnTypesE2E(t *testing.T) {
 						if line == "" {
 							continue
 						}
+						// Every NDJSON line carries the poster's principalRef — the
+						// field a reader asks for first.
+						var raw map[string]any
+						if err := json.Unmarshal([]byte(line), &raw); err != nil {
+							t.Fatal(err)
+						}
+						if raw["principalRef"] != "agent:wrkp-test" {
+							t.Fatalf("%v: ndjson line principalRef = %v, want agent:wrkp-test: %s", args, raw["principalRef"], line)
+						}
 						var entry timelineEntry
 						if err := json.Unmarshal([]byte(line), &entry); err != nil {
 							t.Fatal(err)
@@ -98,6 +108,15 @@ func TestWrkpLogTurnTypesE2E(t *testing.T) {
 				}
 			}
 		}
+	}
+	// --limit is the delivered budget: one above the server's per-page cap is
+	// met by paging, not refused with WRKQ_VALIDATION (T-08328).
+	var budget []timelineEntry
+	if err := json.Unmarshal([]byte(run("log", "rpccli-test-proj", "--all-types", "--limit", strconv.Itoa(wrkpMaxPageLimit+1), "--json")), &budget); err != nil {
+		t.Fatalf("decode --limit above the page cap: %v", err)
+	}
+	if len(budget) != 3 {
+		t.Fatalf("--limit above the page cap returned %d entries, want the 3 posted facts", len(budget))
 	}
 	if out := run("types", "rpccli-test-proj", "--json"); !strings.Contains(out, "turn.started") || !strings.Contains(out, "turn.ended") {
 		t.Fatalf("types lost turn facts: %s", out)

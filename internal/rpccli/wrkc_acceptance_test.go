@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -495,6 +496,13 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 	if unhideOut, uerr := runWrkc(t, f.dbPath, "agent:clod", "unhide", f.taskID, "--json"); uerr != nil {
 		t.Fatalf("wrkc unhide: %v\n%s", uerr, unhideOut)
 	}
+	restoredOut, rerr := runWrkc(t, f.dbPath, "agent:clod", "ls", "--output", "raw")
+	if rerr != nil {
+		t.Fatalf("wrkc ls after unhide: %v\n%s", rerr, restoredOut)
+	}
+	if !strings.Contains(restoredOut, f.taskID) {
+		t.Fatalf("unhide did not restore the room to the default listing: %q", restoredOut)
+	}
 	for _, gone := range []string{"close", "reopen", "open"} {
 		if out, cerr := runWrkc(t, f.dbPath, "agent:clod", gone, f.taskID); cerr == nil {
 			t.Fatalf("wrkc %s still exists: %s", gone, out)
@@ -554,7 +562,7 @@ func TestWrkcFullSurfaceWithNoHRCDaemon(t *testing.T) {
 func TestWrkcAdmissionFlagsAndWithdrawWithNoHRCDaemon(t *testing.T) {
 	f := newWrkcFixture(t)
 	sayOut, err := runWrkcInput(t, f.dbPath, "agent:clod", "admission\n",
-		"say", f.taskID, "-", "--to", "cody", "--ttl", "1h", "--preempt",
+		"say", f.taskID, "-", "--to", "cody,mable", "--ttl", "1h", "--preempt",
 		"--idempotency-key", "admission-cli-1", "--scope-ref", "clod@wrkc-proj:"+f.taskID, "--json")
 	if err != nil {
 		t.Fatalf("say admission: %v\n%s", err, sayOut)
@@ -563,8 +571,16 @@ func TestWrkcAdmissionFlagsAndWithdrawWithNoHRCDaemon(t *testing.T) {
 	if err := json.Unmarshal([]byte(sayOut), &said); err != nil {
 		t.Fatal(err)
 	}
-	if len(said.Envelopes) != 1 || said.Envelopes[0].Delivery != "hold" || said.Envelopes[0].ExpiresAt == nil {
-		t.Fatalf("admission envelope = %+v", said.Envelopes)
+	// The admission flags belong to the say, so every fanned-out envelope
+	// carries the ttl, the hold delivery and the idempotency key.
+	if len(said.Envelopes) != 2 {
+		t.Fatalf("fan-out to cody,mable = %d envelopes, want 2: %+v", len(said.Envelopes), said.Envelopes)
+	}
+	for _, envelope := range said.Envelopes {
+		if envelope.Delivery != "hold" || envelope.ExpiresAt == nil ||
+			envelope.IdempotencyKey == nil || *envelope.IdempotencyKey != "admission-cli-1" {
+			t.Fatalf("admission envelope = %+v, want hold + expiresAt + idempotencyKey admission-cli-1", envelope)
+		}
 	}
 
 	withdrawOut, err := runWrkc(t, f.dbPath, "agent:clod", "withdraw", said.Envelopes[0].ID, "--reason", "superseded", "--scope-ref", "clod@wrkc-proj:"+f.taskID, "--json")
@@ -664,6 +680,7 @@ func TestWrkcLogTranscriptRendersBodies(t *testing.T) {
 }
 
 func TestWrkcAdhocListShowAndLogRenderPairIdentity(t *testing.T) {
+	t.Setenv("TZ", "UTC")
 	f := newWrkcFixture(t)
 	senderSeat := "clod@wrkc-proj:primary"
 	targetSeat := "cody@wrkc-proj:primary"
@@ -700,6 +717,41 @@ func TestWrkcAdhocListShowAndLogRenderPairIdentity(t *testing.T) {
 	}
 	if strings.Contains(listed, "Subject") || strings.Contains(listed, "hidden tail") {
 		t.Fatalf("wrkc ls retained subject or failed the 80-rune clip:\n%s", listed)
+	}
+	// The Last cell is the first line clipped to exactly 80 runes.
+	if !strings.Contains(listed, strings.Repeat("界", 80)) || strings.Contains(listed, strings.Repeat("界", 81)) {
+		t.Fatalf("wrkc ls Last cell is not an exact 80-rune clip:\n%s", listed)
+	}
+	// Human tables show last activity as a local wall-clock time.
+	if !regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{1,2}:\d{2} (AM|PM) UTC`).MatchString(listed) {
+		t.Fatalf("wrkc ls last activity is not the human UTC format:\n%s", listed)
+	}
+	// Structured output keeps the RFC3339 timestamp.
+	structured, err := runWrkc(t, f.dbPath, "agent:clod", "ls", "--kind", "adhoc", "--json")
+	if err != nil {
+		t.Fatalf("wrkc ls --json: %v\n%s", err, structured)
+	}
+	var rooms []roomWire
+	if err := json.Unmarshal([]byte(structured), &rooms); err != nil || len(rooms) == 0 {
+		t.Fatalf("decode wrkc ls --json (%v):\n%s", err, structured)
+	}
+	for _, room := range rooms {
+		if _, perr := time.Parse(time.RFC3339, room.LastActivityAt); perr != nil {
+			t.Fatalf("structured lastActivityAt %q is not RFC3339: %v", room.LastActivityAt, perr)
+		}
+	}
+	// A task (work) room keeps the plain presentation: a numeric member count
+	// and a blank Last cell.
+	if out, err := runWrkc(t, f.dbPath, "agent:clod", "say", f.taskID, "-m", "work note", "--scope-ref", senderSeat); err != nil {
+		t.Fatalf("seed task room: %v\n%s", err, out)
+	}
+	all, err := runWrkc(t, f.dbPath, "agent:clod", "ls", "--output", "table")
+	if err != nil {
+		t.Fatalf("wrkc ls: %v\n%s", err, all)
+	}
+	taskRow := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(f.taskID) + `\s+task\s+\S+\s+\S+\s+\d+\s+\d+\s+\d{4}-\d{2}-\d{2} \d{1,2}:\d{2} (AM|PM) UTC\s*$`)
+	if !taskRow.MatchString(all) {
+		t.Fatalf("task room row lacks a numeric member count and blank Last:\n%s", all)
 	}
 
 	shown, err := runWrkc(t, f.dbPath, "agent:clod", "show", *first.ID, "--output", "human")

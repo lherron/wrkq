@@ -221,8 +221,12 @@ func TestRemoteInitializeAcceptsHealthyDaemon(t *testing.T) {
 	}
 	defer func() { _ = tr.Close() }()
 
-	if _, err := tr.Call(t.Context(), "wrkq.task.show", map[string]string{"task": "T-00001"}); err != nil {
+	raw, err := tr.Call(t.Context(), "wrkq.task.show", map[string]string{"task": "T-00001"})
+	if err != nil {
 		t.Fatalf("business call after healthy handshake: %v", err)
+	}
+	if !strings.Contains(string(raw), seedTaskSlug) {
+		t.Fatalf("remote task.show did not answer from the registry's store: %s", raw)
 	}
 	if len(remote.businessCalls()) == 0 {
 		t.Fatal("expected a business call to reach the server after a healthy handshake")

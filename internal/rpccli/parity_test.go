@@ -117,31 +117,6 @@ func TestProductionCommandContract_CompletionWorktreeCleanupHint(t *testing.T) {
 	}
 }
 
-func TestProductionCommandContract_BoundedMonitorAndWatch(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds production wrkq and wrkqadm binaries; skipped under -short")
-	}
-	bins := buildProductionBinaries(t)
-	dir := seedFixture(t, bins, [][]string{{"touch", "inbox/watched", "-t", "Watched"}})
-
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "monitor-watch-raw", args: []string{"monitor", "watch", "--raw", "--since", "0", "--stall-after", "300ms"}, want: `"event_type"`},
-		{name: "monitor-watch", args: []string{"monitor", "watch", "T-00001", "--until", "state=open", "--timeout", "1s", "--ndjson"}, want: `"result":"met"`},
-	} {
-		res := runCLI(t, bins.wrkq, dir, tc.args)
-		if res.exit != 0 {
-			t.Fatalf("%s exit=%d stdout=%q stderr=%q", tc.name, res.exit, res.stdout, res.stderr)
-		}
-		if !strings.Contains(res.stdout, tc.want) {
-			t.Fatalf("%s stdout missing %q:\n%s", tc.name, tc.want, res.stdout)
-		}
-	}
-}
-
 func TestProductionCommandContract_MonitorUntilValidation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds production wrkq and wrkqadm binaries; skipped under -short")
@@ -154,6 +129,11 @@ func TestProductionCommandContract_MonitorUntilValidation(t *testing.T) {
 		args      []string
 		wantError string
 	}{
+		{
+			name:      "wait-unknown-condition",
+			args:      []string{"monitor", "wait", "T-00001", "--until", "bogus", "--timeout", "10ms"},
+			wantError: `invalid --until condition "bogus": expected state=<s>[,<s>...], all-terminal, acked, or terminal`,
+		},
 		{
 			name:      "wait-composed-conditions",
 			args:      []string{"monitor", "wait", "T-00001", "--until", "state=blocked|all-terminal", "--timeout", "10ms"},
@@ -196,6 +176,13 @@ func TestProductionCommandContract_MonitorUntilValidation(t *testing.T) {
 		[]string{"monitor", "watch", "T-00001", "--until", "all-terminal", "--timeout", "1s"})
 	if allTerminal.exit != 0 || !strings.Contains(allTerminal.stdout, `"result":"met"`) {
 		t.Fatalf("all-terminal exit=%d stdout=%q stderr=%q", allTerminal.exit, allTerminal.stdout, allTerminal.stderr)
+	}
+
+	// A raw watch replays from --since and is bounded by --stall-after.
+	raw := runCLI(t, bins.wrkq, dir,
+		[]string{"monitor", "watch", "--raw", "--since", "0", "--stall-after", "300ms"})
+	if raw.exit != 0 || !strings.Contains(raw.stdout, `"event_type"`) {
+		t.Fatalf("raw stall-bounded watch exit=%d stdout=%q stderr=%q", raw.exit, raw.stdout, raw.stderr)
 	}
 }
 
@@ -370,5 +357,4 @@ func hermeticEnv() []string {
 	return []string{"HOME=" + sharedHome, "PATH=" + os.Getenv("PATH")}
 }
 
-var rfc3339Re = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})`)
 var uuidRe = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)

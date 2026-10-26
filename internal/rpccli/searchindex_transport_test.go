@@ -4,6 +4,8 @@ package rpccli
 
 import (
 	"context"
+	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -122,29 +124,41 @@ func TestTransportEquivalence_SearchIndex(t *testing.T) {
 	}
 }
 
-// TestSearchDisabled_TransportError proves that with search disabled (default
-// config, no search env), the server reports the legacy "search is disabled"
-// message through the transport — the mirror never opens the sidecar itself.
+// TestSearchDisabled_TransportError proves that with search disabled, every
+// search/index method reports the legacy WRKQ_VALIDATION "search is disabled"
+// through the transport, and that the server never opens (so never creates) the
+// configured sidecar — the mirror never opens it either.
 func TestSearchDisabled_TransportError(t *testing.T) {
 	dbPath, _ := migratedDBWithTask(t)
+	sidecar := filepath.Join(t.TempDir(), "search.sqlite")
 	t.Setenv("WRKQ_SEARCH_ENABLED", "0")
+	t.Setenv("WRKQ_SEARCH_DB_PATH", sidecar)
 
 	tr := inProcessTransport(t, dbPath)
 	defer func() { _ = tr.Close() }()
 
-	_, err := tr.Call(context.Background(), "wrkq.search.listView", map[string]any{"query": "x"})
-	if err == nil {
-		t.Fatal("expected error when search disabled")
+	for _, tc := range []struct {
+		method string
+		params map[string]any
+	}{
+		{method: "wrkq.search.listView", params: map[string]any{"query": "x"}},
+		{method: "wrkq.index.status", params: map[string]any{}},
+		{method: "wrkq.index.rebuild", params: map[string]any{}},
+	} {
+		_, err := tr.Call(context.Background(), tc.method, tc.params)
+		if err == nil {
+			t.Fatalf("%s: expected error when search disabled", tc.method)
+		}
+		rpcErr, ok := err.(*Error)
+		if !ok {
+			t.Fatalf("%s: error type = %T, want *rpccli.Error", tc.method, err)
+		}
+		if rpcErr.DomainID != "WRKQ_VALIDATION" || rpcErr.Message != "search is disabled" {
+			t.Errorf("%s: error = %s %q, want WRKQ_VALIDATION %q", tc.method, rpcErr.DomainID, rpcErr.Message, "search is disabled")
+		}
 	}
-	rpcErr, ok := err.(*Error)
-	if !ok {
-		t.Fatalf("error type = %T, want *rpccli.Error", err)
-	}
-	if rpcErr.DomainID != "WRKQ_VALIDATION" {
-		t.Errorf("DomainID = %q, want WRKQ_VALIDATION", rpcErr.DomainID)
-	}
-	if rpcErr.Message != "search is disabled" {
-		t.Errorf("Message = %q, want %q", rpcErr.Message, "search is disabled")
+	if _, err := os.Stat(sidecar); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("disabled search touched the sidecar %s: stat err = %v", sidecar, err)
 	}
 }
 
