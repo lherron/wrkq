@@ -446,15 +446,12 @@ func TestWrkqTaskMove_TargetPathNotFound_ReturnsError(t *testing.T) {
 
 // ─── wrkq.task.move: independent subtask blocked ──────────────────────────
 
-// TestWrkqTaskMove_IndependentSubtask_ReturnsValidation verifies that directly
-// selecting a subtask (rather than its root parent) for a cross-container move —
-// when the parent task is NOT included in the move — returns WRKQ_VALIDATION.
-//
-// An "independent subtask" move would violate the hierarchy invariant; the server
-// must reject it.
-//
-// RED: method not registered → p2ErrCode returns "" (from "method not found"),
-// not "WRKQ_VALIDATION".
+// TestWrkqTaskMove_IndependentSubtask_ReturnsValidation guards the same-residency
+// containment behavior preserved by wrkq.task-hierarchy.cross-project-parents.
+// Cross-project parent edges are allowed, but a child currently resident with
+// its parent must move with that root. The cross-project-parent implementation
+// (3d50a35) explicitly preserved this refusal. Named subtasks have a separate
+// owner-derived residency rule.
 func TestWrkqTaskMove_IndependentSubtask_ReturnsValidation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping subprocess in short mode")
@@ -471,8 +468,7 @@ func TestWrkqTaskMove_IndependentSubtask_ReturnsValidation(t *testing.T) {
 	subID := g5SeedSubtask(t, dbPath, "g5-subtask-sub", subUUID, srcProjUUID, rootTaskUUID)
 
 	// Directly move the SUBTASK (not its root parent) to a different container.
-	// The root task stays in srcProjUUID → this is an independent subtask cross-container
-	// move that would break the hierarchy invariant.
+	// The root stays in srcProjUUID; same-residency containment requires moving it.
 	frames := p2Run(t, dbPath,
 		mkRPC("mv1", "wrkq.task.move", map[string]any{
 			"task":       subID,
