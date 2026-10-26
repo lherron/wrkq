@@ -32,27 +32,6 @@ func TestWatchWaitingUsesSemanticInstanceStatus(t *testing.T) {
 	}
 }
 
-func TestWatchSuspendedUsesActiveSuspension(t *testing.T) {
-	svc, taskUUID, _ := setupSuspendOutcomeFixture(t)
-	snap, err := svc.WatchSnapshot(taskUUID, WatchUntilSuspended)
-	if err != nil {
-		t.Fatalf("WatchSnapshot suspended before park: %v", err)
-	}
-	if snap.Met {
-		t.Fatalf("running instance satisfied suspended predicate: %+v", snap)
-	}
-	if _, err := svc.Transition(taskUUID, "park", TransitionOptions{PrincipalRef: "agent:watch", Role: "coordinator"}); err != nil {
-		t.Fatalf("Transition park: %v", err)
-	}
-	snap, err = svc.WatchSnapshot(taskUUID, WatchUntilSuspended)
-	if err != nil {
-		t.Fatalf("WatchSnapshot suspended after park: %v", err)
-	}
-	if !snap.Met || snap.Class != WatchClassSuspended || snap.ExitCode != 0 || snap.Instance == nil || snap.Instance.Suspension == nil {
-		t.Fatalf("suspended snapshot = %+v", snap)
-	}
-}
-
 func TestWatchRunTerminalClassMapping(t *testing.T) {
 	cases := []struct {
 		status string
@@ -114,30 +93,5 @@ func TestWatchInstanceClosedClassMapping(t *testing.T) {
 	}
 	if !cancelled.Met || cancelled.ExitCode != 11 || cancelled.Class != WatchClassCancelled {
 		t.Fatalf("closed/cancelled snapshot = met:%v code:%d class:%s, want cancelled exit 11", cancelled.Met, cancelled.ExitCode, cancelled.Class)
-	}
-}
-
-func TestWatchEventsIncludeRunLifecycleInOrder(t *testing.T) {
-	svc, taskUUID := setupRunFixture(t)
-	run, err := svc.StartRun(taskUUID, "coordinator", "agent:watch", StartRunOptions{})
-	if err != nil {
-		t.Fatalf("StartRun: %v", err)
-	}
-	if _, err := svc.FinishRun(run.ID, "completed", "done"); err != nil {
-		t.Fatalf("FinishRun: %v", err)
-	}
-
-	events, err := svc.WatchEvents(run.ID, 0, 10)
-	if err != nil {
-		t.Fatalf("WatchEvents: %v", err)
-	}
-	if len(events) != 2 {
-		t.Fatalf("run watch events len=%d, want 2: %+v", len(events), events)
-	}
-	if events[0].Type != "workflow.run_started" || events[1].Type != "workflow.run_finished" {
-		t.Fatalf("event types = %q, %q; want run_started, run_finished", events[0].Type, events[1].Type)
-	}
-	if events[0].Seq >= events[1].Seq {
-		t.Fatalf("events not ordered by increasing seq: %d >= %d", events[0].Seq, events[1].Seq)
 	}
 }

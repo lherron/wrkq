@@ -5,6 +5,7 @@ package workflow
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -40,8 +41,9 @@ func TestLedgerAppendIsAppendOnlyAndStampsInstanceAttribution(t *testing.T) {
 func TestLedgerAppendAdmissionAndSettledInstance(t *testing.T) {
 	svc, task := ledgerFixture(t)
 	for _, writer := range []string{"", "system:wrkf", "human:lance", "agent:cody:project:wrkq"} {
-		if _, err := svc.AppendLedger(AppendLedgerParams{TaskID: task, Kind: "strike", AboutPrincipalRef: "agent:about", WrittenBy: writer}); err == nil {
-			t.Errorf("writer %q unexpectedly admitted", writer)
+		_, err := svc.AppendLedger(AppendLedgerParams{TaskID: task, Kind: "strike", AboutPrincipalRef: "agent:about", WrittenBy: writer})
+		if got := wrkfCode(err); got != wrkfCodeValidation || !strings.Contains(err.Error(), "requires an explicit canonical agent:<id> principal") {
+			t.Errorf("writer %q admission error = %v (code %q), want %s naming the canonical agent principal rule", writer, err, got, wrkfCodeValidation)
 		}
 	}
 	inst, err := svc.LatestInstance(task)

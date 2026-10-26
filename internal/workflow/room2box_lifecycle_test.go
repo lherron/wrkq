@@ -158,56 +158,6 @@ func TestBuiltinRoom2BoxTemplateContract(t *testing.T) {
 	assertV2EffectState(t, tpl, "direct_land_complete", "landed", "completed")
 }
 
-// Builtin install is idempotent, and a rebuilt binary's embedded definition
-// supersedes a stale stored definition in place.
-func TestRoom2BoxEnsureBuiltinIdempotentAndSupersede(t *testing.T) {
-	svc, _ := actionFixture(t)
-	id, version, err := svc.EnsureBuiltinTemplate(BuiltinRoom2BoxTemplateRef, "test-installer")
-	if err != nil || id != "room-2box" || version != "1" {
-		t.Fatalf("EnsureBuiltinTemplate = %s@%s, %v", id, version, err)
-	}
-	if _, _, err := svc.EnsureBuiltinTemplate(BuiltinRoom2BoxTemplateRef, "test-installer"); err != nil {
-		t.Fatalf("EnsureBuiltinTemplate replay: %v", err)
-	}
-
-	// Simulate a stale stored definition from an older binary: same id@version,
-	// different content/hash.
-	data, err := builtinTemplateData(BuiltinRoom2BoxTemplateRef)
-	if err != nil {
-		t.Fatalf("builtinTemplateData: %v", err)
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatalf("unmarshal builtin: %v", err)
-	}
-	doc["description"] = "stale definition from an older binary"
-	stale, err := json.Marshal(doc)
-	if err != nil {
-		t.Fatalf("marshal stale doc: %v", err)
-	}
-	staleTpl, staleCanonical, err := ParseTemplate(stale)
-	if err != nil {
-		t.Fatalf("ParseTemplate(stale): %v", err)
-	}
-	if _, err := svc.installTemplateCanonical(staleTpl, staleCanonical, Hash(staleCanonical), "old-binary", nil, true); err != nil {
-		t.Fatalf("install stale definition: %v", err)
-	}
-	if _, _, err := svc.EnsureBuiltinTemplate(BuiltinRoom2BoxTemplateRef, "test-installer"); err != nil {
-		t.Fatalf("EnsureBuiltinTemplate over stale: %v", err)
-	}
-	_, embeddedCanonical, err := ParseTemplate(data)
-	if err != nil {
-		t.Fatalf("ParseTemplate(embedded): %v", err)
-	}
-	info, err := svc.ShowTemplateVersion(BuiltinRoom2BoxTemplateRef)
-	if err != nil {
-		t.Fatalf("ShowTemplateVersion: %v", err)
-	}
-	if info.Hash != Hash(embeddedCanonical) {
-		t.Fatalf("stored hash = %s, want embedded %s (supersede did not overwrite)", info.Hash, Hash(embeddedCanonical))
-	}
-}
-
 // Happy path: implement done → review pass → landing landed → closed/done with
 // the set_task_state completed effect delivered.
 func TestRoom2BoxHappyPathLifecycle(t *testing.T) {
@@ -270,14 +220,17 @@ func TestRoom2BoxPushRejectedReturnsToReview(t *testing.T) {
 	room2BoxState(t, svc, taskUUID, "closed", "done")
 }
 
-// Every suspension outcome parks the instance in place, and resume re-opens the
-// same phase for a successor claim.
-func TestRoom2BoxSuspensionOutcomesAndResume(t *testing.T) {
+// Every suspension outcome parks the instance in place. Resume re-opens the
+// same phase for a successor claim; the cancel disposition terminalizes the
+// instance and cancels the task.
+func TestRoom2BoxSuspensionParksInPlaceAndResumeOrCancelResolves(t *testing.T) {
 	cases := []struct {
 		name  string
 		phase string
 		drive func(t *testing.T, svc *Service, taskUUID string)
 		facts string
+		// cancel resolves the park with the cancel disposition instead of resume.
+		cancel bool
 	}{
 		{
 			name:  "implement blocked",
@@ -308,6 +261,13 @@ func TestRoom2BoxSuspensionOutcomesAndResume(t *testing.T) {
 			},
 			facts: `{"result":"operator_required"}`,
 		},
+		{
+			name:   "implement blocked then cancel",
+			phase:  "implement",
+			drive:  func(*testing.T, *Service, string) {},
+			facts:  `{"result":"blocked"}`,
+			cancel: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -336,6 +296,30 @@ func TestRoom2BoxSuspensionOutcomesAndResume(t *testing.T) {
 			}
 
 			rev := parked.Revision
+			if tc.cancel {
+				if _, err := svc.ResolveSuspension(ResolveSuspensionParams{
+					SuspensionID:   parked.Suspension.ID,
+					Disposition:    "cancel",
+					Explanation:    "not worth fixing",
+					ExpectRevision: &rev,
+					PrincipalRef:   "agent:operator",
+					Role:           "coordinator",
+				}); err != nil {
+					t.Fatalf("ResolveSuspension cancel: %v", err)
+				}
+				inst, err := svc.LatestInstance(taskUUID)
+				if err != nil {
+					t.Fatalf("LatestInstance after cancel: %v", err)
+				}
+				if inst.Status != "closed" {
+					t.Fatalf("instance = %s/%s, want closed", inst.Status, inst.Phase)
+				}
+				assertSetTaskStateDelivered(t, svc, taskUUID, "cancelled")
+				if got := room2BoxTaskState(t, svc, taskUUID); got != "cancelled" {
+					t.Fatalf("task state = %q, want cancelled", got)
+				}
+				return
+			}
 			if _, err := svc.ResolveSuspension(ResolveSuspensionParams{
 				SuspensionID:   parked.Suspension.ID,
 				Disposition:    "resume",
@@ -360,41 +344,5 @@ func TestRoom2BoxSuspensionOutcomesAndResume(t *testing.T) {
 				t.Fatal("successor claim after resume returned no binding")
 			}
 		})
-	}
-}
-
-// The cancel disposition terminalizes the instance and cancels the task.
-func TestRoom2BoxCancelDisposition(t *testing.T) {
-	svc, taskUUID := room2BoxFixture(t)
-	claim := claimActionForTest(t, svc, taskUUID, "implement")
-	settleClaimForTest(t, svc, claim, `{"result":"blocked"}`, "blocked")
-	parked, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance: %v", err)
-	}
-	if parked.Suspension == nil {
-		t.Fatal("expected suspension after blocked settle")
-	}
-	rev := parked.Revision
-	if _, err := svc.ResolveSuspension(ResolveSuspensionParams{
-		SuspensionID:   parked.Suspension.ID,
-		Disposition:    "cancel",
-		Explanation:    "not worth fixing",
-		ExpectRevision: &rev,
-		PrincipalRef:   "agent:operator",
-		Role:           "coordinator",
-	}); err != nil {
-		t.Fatalf("ResolveSuspension cancel: %v", err)
-	}
-	inst, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance after cancel: %v", err)
-	}
-	if inst.Status != "closed" {
-		t.Fatalf("instance = %s/%s, want closed", inst.Status, inst.Phase)
-	}
-	assertSetTaskStateDelivered(t, svc, taskUUID, "cancelled")
-	if got := room2BoxTaskState(t, svc, taskUUID); got != "cancelled" {
-		t.Fatalf("task state = %q, want cancelled", got)
 	}
 }

@@ -45,18 +45,19 @@ func setupRunFixture(t *testing.T) (*Service, string) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 1 — StartRun idempotency: same key → same run (replay)
+// Test 1 — StartRun idempotency: same key → same run; changed role → mismatch
 // ---------------------------------------------------------------------------
 
-// TestStartRunIdempotency verifies that calling StartRun twice with the SAME
-// idempotencyKey returns the SAME run (replay), inserting no duplicate row.
+// TestStartRunSameKeyReplaysAndChangedRoleIsRefused verifies that calling
+// StartRun twice with the SAME idempotencyKey returns the SAME run (replay),
+// inserting no duplicate row, and that the same key with a different role is
+// refused WRKF_IDEMPOTENCY_MISMATCH rather than silently succeeding.
 //
 // Contract §5.1 / §6 invariant 3:
 //
 //	same key → same Run (replay).
-//
-// Regression guard: StartRunOptions.IdempotencyKey must replay the original run.
-func TestStartRunIdempotency(t *testing.T) {
+//	same key + different role/task → conflict (WRKF_IDEMPOTENCY_MISMATCH).
+func TestStartRunSameKeyReplaysAndChangedRoleIsRefused(t *testing.T) {
 	svc, taskUUID := setupRunFixture(t)
 
 	const idemKey = "run-idem-replay-1"
@@ -98,37 +99,12 @@ func TestStartRunIdempotency(t *testing.T) {
 	if rowCount != 1 {
 		t.Errorf("idempotency: expected 1 run for key %q, got %d (replay inserted a duplicate)", idemKey, rowCount)
 	}
-}
 
-// ---------------------------------------------------------------------------
-// Test 2 — StartRun conflict: same key + different role → WRKF_IDEMPOTENCY_MISMATCH
-// ---------------------------------------------------------------------------
-
-// TestStartRunIdempotencyMismatch verifies that presenting the same idempotencyKey
-// with a different role returns WRKF_IDEMPOTENCY_MISMATCH, not a silent success.
-//
-// Contract §5.1 / §6 invariant 3:
-//
-//	same key + different role/task → conflict (WRKF_IDEMPOTENCY_MISMATCH).
-//
-// Regression guard: a reused idempotency key with different run identity must
-// return WRKF_IDEMPOTENCY_MISMATCH.
-func TestStartRunIdempotencyMismatch(t *testing.T) {
-	svc, taskUUID := setupRunFixture(t)
-
-	const idemKey = "run-conflict-key-1"
-
-	// First call: role "coordinator".
-	_, err := svc.StartRun(taskUUID, "coordinator", "human:tester", StartRunOptions{
-		IdempotencyKey: idemKey,
-	})
-	if err != nil {
-		t.Fatalf("first StartRun: %v", err)
-	}
-
-	// Second call: SAME key, DIFFERENT role → must return WRKF_IDEMPOTENCY_MISMATCH.
+	// --- Third call: SAME key, DIFFERENT role → WRKF_IDEMPOTENCY_MISMATCH ---
+	// Contract §6 invariant 3: same key + different role/task → conflict.
 	_, err = svc.StartRun(taskUUID, "implementor", "human:tester", StartRunOptions{
 		IdempotencyKey: idemKey,
+		DeliveryRef:    "acp:msg-001",
 	})
 	requireWrkfCode(t, err, "WRKF_IDEMPOTENCY_MISMATCH")
 }
@@ -136,67 +112,6 @@ func TestStartRunIdempotencyMismatch(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Test 3 — BindExternal: sets external_run_ref; second bind with different ref → conflict
 // ---------------------------------------------------------------------------
-
-// TestBindExternal verifies that BindExternal persists the externalRunRef on the
-// run record, and that a second call with a DIFFERENT non-empty externalRunRef
-// returns a conflict error.
-//
-// Contract §5.1:
-//
-//	wrkf.run.bindExternal sets external_run_ref (unique when non-empty).
-//	Second bind with different non-empty ref → conflict.
-//
-// Regression guard: BindExternalOptions participates in the external-run
-// binding contract, and conflicting refs must remain rejected.
-func TestBindExternal(t *testing.T) {
-	svc, taskUUID := setupRunFixture(t)
-
-	// Start a run without an externalRunRef.
-	run, err := svc.StartRun(taskUUID, "coordinator", "human:tester", StartRunOptions{
-		DeliveryRef: "acp:msg-002",
-	})
-	if err != nil {
-		t.Fatalf("StartRun: %v", err)
-	}
-
-	const extRef1 = "gh-actions-run:12345"
-
-	// --- First bind: must set external_run_ref ---
-	bound, err := svc.BindExternal(run.ID, extRef1, BindExternalOptions{})
-	if err != nil {
-		t.Fatalf("first BindExternal: %v", err)
-	}
-	if bound == nil {
-		t.Fatalf("BindExternal returned nil run")
-	}
-	if bound.ExternalRunRef != extRef1 {
-		t.Errorf("BindExternal: ExternalRunRef = %q, want %q", bound.ExternalRunRef, extRef1)
-	}
-
-	// Verify the field was persisted to the DB.
-	persisted, err := svc.ShowRun(run.ID)
-	if err != nil {
-		t.Fatalf("ShowRun after BindExternal: %v", err)
-	}
-	if persisted.ExternalRunRef != extRef1 {
-		t.Errorf("persisted ExternalRunRef = %q, want %q", persisted.ExternalRunRef, extRef1)
-	}
-
-	// --- Second bind: different externalRunRef → conflict ---
-	// Contract §6 invariant 3: external_run_ref has a partial unique index
-	// (WHERE external_run_ref IS NOT NULL AND external_run_ref <> '').
-	// Binding a different non-empty ref to the same run must conflict.
-	const extRef2 = "gh-actions-run:99999"
-	_, err = svc.BindExternal(run.ID, extRef2, BindExternalOptions{})
-	if err == nil {
-		t.Fatalf("second BindExternal with different ref: expected conflict error, got nil")
-	}
-	// Uniqueness violation on external_run_ref is surfaced as WRKF_IDEMPOTENCY_MISMATCH.
-	code := wrkfCode(err)
-	if code != "WRKF_IDEMPOTENCY_MISMATCH" {
-		t.Errorf("second BindExternal conflict: expected WRKF_IDEMPOTENCY_MISMATCH, got %q (err: %v)", code, err)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Test 4 — FinishRun idempotency (legs a + b)

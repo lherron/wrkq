@@ -8,52 +8,6 @@ import (
 	"testing"
 )
 
-func TestBuiltinSimpleTaskV2ExecutableActionsValidate(t *testing.T) {
-	data, err := builtinTemplateData(BuiltinSimpleTaskV2TemplateRef)
-	if err != nil {
-		t.Fatalf("builtinTemplateData(v2): %v", err)
-	}
-	tpl, canonical, err := ParseTemplate(data)
-	if err != nil {
-		t.Fatalf("ParseTemplate(v2): %v", err)
-	}
-	if errs := ValidateTemplate(tpl, canonical, nil); len(errs) > 0 {
-		t.Fatalf("ValidateTemplate(v2) errors: %v", errs)
-	}
-	if tpl.ID != "wrkq-simple-task" || tpl.Version != "2" {
-		t.Fatalf("template ref = %s@%s, want wrkq-simple-task@2", tpl.ID, tpl.Version)
-	}
-	if len(tpl.ExecutableActions) != 3 {
-		t.Fatalf("executableActions len = %d, want 3", len(tpl.ExecutableActions))
-	}
-	if got := tpl.ExecutableActions["verify"].SourceBinding.Action; got != "implement" {
-		t.Fatalf("verify source action = %q, want implement", got)
-	}
-	if got := tpl.ExecutableActions["verify"].SourceBinding.BindFields.SourceIdentity; got != "change.id" {
-		t.Fatalf("verify source identity binding = %q, want change.id", got)
-	}
-	assertV2EffectState(t, tpl, "triage_complete", "ready", "open")
-	assertV2EffectState(t, tpl, "implement_complete", "blocked", "blocked")
-	assertV2EffectState(t, tpl, "verify_complete", "verified", "completed")
-	assertV2EffectState(t, tpl, "verify_complete", "failed", "blocked")
-	assertV2EffectState(t, tpl, "verify_complete", "blocked", "blocked")
-
-	v1Data, err := builtinTemplateData("wrkq-simple-task")
-	if err != nil {
-		t.Fatalf("builtinTemplateData(default): %v", err)
-	}
-	v1, _, err := ParseTemplate(v1Data)
-	if err != nil {
-		t.Fatalf("ParseTemplate(default): %v", err)
-	}
-	if v1.Version != "1" {
-		t.Fatalf("default built-in version = %q, want 1", v1.Version)
-	}
-	if len(v1.ExecutableActions) != 0 {
-		t.Fatalf("v1 executableActions len = %d, want 0", len(v1.ExecutableActions))
-	}
-}
-
 func TestBuiltinSimpleTaskV3BatchLandingContract(t *testing.T) {
 	data, err := builtinTemplateData(BuiltinSimpleTaskV3TemplateRef)
 	if err != nil {

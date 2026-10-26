@@ -12,7 +12,7 @@ package workflow
 // test (disposition-always) is owned by the loop side, not here.
 
 import (
-	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -113,102 +113,67 @@ func countSetTaskStateEffects(t *testing.T, svc *Service, taskUUID, state string
 	return n
 }
 
-// daedalus #9778 required test 1: no-facts implement/verify completion succeeds
-// and follows the backward-compatible `otherwise` outcome.
-func TestImplVerify_NoFactsFollowsOtherwise(t *testing.T) {
-	t.Run("implement", func(t *testing.T) {
-		svc, taskUUID := actionFixture(t)
-		driveToReady(t, svc, taskUUID)
-		out := completeAction(t, svc, taskUUID, "implement", "")
-		if got := outcomeOf(t, out); got != "implemented" {
-			t.Errorf("outcome = %q, want implemented (otherwise)", got)
-		}
-		inst, _ := svc.LatestInstance(taskUUID)
-		if inst.Status != "active" || inst.Phase != "implemented" {
-			t.Errorf("workflow = %s/%s, want active/implemented", inst.Status, inst.Phase)
-		}
-	})
-	t.Run("verify", func(t *testing.T) {
-		svc, taskUUID := actionFixture(t)
-		driveToImplemented(t, svc, taskUUID)
-		out := completeAction(t, svc, taskUUID, "verify", "")
-		if got := outcomeOf(t, out); got != "reviewing" {
-			t.Errorf("outcome = %q, want reviewing (otherwise)", got)
-		}
-		inst, _ := svc.LatestInstance(taskUUID)
-		if inst.Status != "active" || inst.Phase != "reviewing" {
-			t.Errorf("workflow = %s/%s, want active/reviewing", inst.Status, inst.Phase)
-		}
-	})
-}
-
-// daedalus #9778 required test 2: valid dispositions select the fact-specific
-// outcomes with their set_task_state effects.
-func TestImplVerify_DispositionSelectsOutcome(t *testing.T) {
-	t.Run("implement-done", func(t *testing.T) {
-		svc, taskUUID := actionFixture(t)
-		driveToReady(t, svc, taskUUID)
-		out := completeAction(t, svc, taskUUID, "implement", `{"impl.disposition":"done"}`)
-		if got := outcomeOf(t, out); got != "done" {
-			t.Errorf("outcome = %q, want done", got)
-		}
-		inst, _ := svc.LatestInstance(taskUUID)
-		if inst.Status != "active" || inst.Phase != "implemented" {
-			t.Errorf("workflow = %s/%s, want active/implemented", inst.Status, inst.Phase)
-		}
+// daedalus #9778 required tests 1, 2 and 4: the completion facts select the
+// outcome. A valid disposition selects its fact-specific outcome (with its
+// set_task_state effect); no facts, or facts without a disposition, follow the
+// backward-compatible `otherwise` outcome.
+func TestCompletionDispositionSelectsOutcomeAndTaskState(t *testing.T) {
+	cases := []struct {
+		name   string
+		action string
+		facts  string
+		// wantOutcome is the transition outcome; wantStatus/wantPhase the instance after it.
+		wantOutcome, wantStatus, wantPhase string
+		// wantTaskState is checked when non-empty.
+		wantTaskState string
+		// wantDelivered names the set_task_state effect that must be delivered, if any.
+		wantDelivered string
+	}{
 		// done carries no state effect; the task state is untouched (open after triage).
-		if got := readTaskState(t, svc, taskUUID); got != "open" {
-			t.Errorf("task state = %q, want open (done has no state effect)", got)
-		}
-	})
-	t.Run("implement-blocked", func(t *testing.T) {
-		svc, taskUUID := actionFixture(t)
-		driveToReady(t, svc, taskUUID)
-		out := completeAction(t, svc, taskUUID, "implement", `{"impl.disposition":"blocked"}`)
-		if got := outcomeOf(t, out); got != "blocked" {
-			t.Errorf("outcome = %q, want blocked", got)
-		}
-		inst, _ := svc.LatestInstance(taskUUID)
-		if inst.Status != "active" || inst.Phase != "ready" {
-			t.Errorf("workflow = %s/%s, want active/ready", inst.Status, inst.Phase)
-		}
-		if got := readTaskState(t, svc, taskUUID); got != "blocked" {
-			t.Errorf("task state = %q, want blocked", got)
-		}
-		assertSetTaskStateDelivered(t, svc, taskUUID, "blocked")
-	})
-	t.Run("verify-verified", func(t *testing.T) {
-		svc, taskUUID := actionFixture(t)
-		driveToImplemented(t, svc, taskUUID)
-		out := completeAction(t, svc, taskUUID, "verify", `{"verify.disposition":"verified"}`)
-		if got := outcomeOf(t, out); got != "verified" {
-			t.Errorf("outcome = %q, want verified", got)
-		}
-		inst, _ := svc.LatestInstance(taskUUID)
-		if inst.Status != "closed" || inst.Phase != "done" {
-			t.Errorf("workflow = %s/%s, want closed/done", inst.Status, inst.Phase)
-		}
-		if got := readTaskState(t, svc, taskUUID); got != "completed" {
-			t.Errorf("task state = %q, want completed", got)
-		}
-		assertSetTaskStateDelivered(t, svc, taskUUID, "completed")
-	})
-	t.Run("verify-blocked", func(t *testing.T) {
-		svc, taskUUID := actionFixture(t)
-		driveToImplemented(t, svc, taskUUID)
-		out := completeAction(t, svc, taskUUID, "verify", `{"verify.disposition":"blocked"}`)
-		if got := outcomeOf(t, out); got != "blocked" {
-			t.Errorf("outcome = %q, want blocked", got)
-		}
-		inst, _ := svc.LatestInstance(taskUUID)
-		if inst.Status != "active" || inst.Phase != "ready" {
-			t.Errorf("workflow = %s/%s, want active/ready", inst.Status, inst.Phase)
-		}
-		if got := readTaskState(t, svc, taskUUID); got != "blocked" {
-			t.Errorf("task state = %q, want blocked", got)
-		}
-		assertSetTaskStateDelivered(t, svc, taskUUID, "blocked")
-	})
+		{name: "implement-done", action: "implement", facts: `{"impl.disposition":"done"}`,
+			wantOutcome: "done", wantStatus: "active", wantPhase: "implemented", wantTaskState: "open"},
+		{name: "implement-blocked", action: "implement", facts: `{"impl.disposition":"blocked"}`,
+			wantOutcome: "blocked", wantStatus: "active", wantPhase: "ready", wantTaskState: "blocked", wantDelivered: "blocked"},
+		{name: "verify-verified", action: "verify", facts: `{"verify.disposition":"verified"}`,
+			wantOutcome: "verified", wantStatus: "closed", wantPhase: "done", wantTaskState: "completed", wantDelivered: "completed"},
+		{name: "verify-blocked", action: "verify", facts: `{"verify.disposition":"blocked"}`,
+			wantOutcome: "blocked", wantStatus: "active", wantPhase: "ready", wantTaskState: "blocked", wantDelivered: "blocked"},
+		{name: "implement-no-facts-otherwise", action: "implement", facts: "",
+			wantOutcome: "implemented", wantStatus: "active", wantPhase: "implemented"},
+		{name: "verify-no-facts-otherwise", action: "verify", facts: "",
+			wantOutcome: "reviewing", wantStatus: "active", wantPhase: "reviewing"},
+		// Facts present but the disposition key missing must not select done/blocked.
+		{name: "implement-facts-without-disposition-otherwise", action: "implement", facts: `{"git.clean":true,"green.exit":0}`,
+			wantOutcome: "implemented", wantStatus: "active", wantPhase: "implemented", wantTaskState: "open"},
+		{name: "verify-facts-without-disposition-otherwise", action: "verify", facts: `{"install.exit":0,"smoke.exit":0}`,
+			wantOutcome: "reviewing", wantStatus: "active", wantPhase: "reviewing"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, taskUUID := actionFixture(t)
+			if tc.action == "verify" {
+				driveToImplemented(t, svc, taskUUID)
+			} else {
+				driveToReady(t, svc, taskUUID)
+			}
+			out := completeAction(t, svc, taskUUID, tc.action, tc.facts)
+			if got := outcomeOf(t, out); got != tc.wantOutcome {
+				t.Errorf("outcome = %q, want %q", got, tc.wantOutcome)
+			}
+			inst, _ := svc.LatestInstance(taskUUID)
+			if inst.Status != tc.wantStatus || inst.Phase != tc.wantPhase {
+				t.Errorf("workflow = %s/%s, want %s/%s", inst.Status, inst.Phase, tc.wantStatus, tc.wantPhase)
+			}
+			if tc.wantTaskState != "" {
+				if got := readTaskState(t, svc, taskUUID); got != tc.wantTaskState {
+					t.Errorf("task state = %q, want %q", got, tc.wantTaskState)
+				}
+			}
+			if tc.wantDelivered != "" {
+				assertSetTaskStateDelivered(t, svc, taskUUID, tc.wantDelivered)
+			}
+		})
+	}
 }
 
 // daedalus #9778 required test 3: an invalid disposition is rejected by evidence
@@ -226,11 +191,9 @@ func TestImplVerify_InvalidDispositionRejectedBeforeTransition(t *testing.T) {
 		ActionRunID: run.RunID,
 		Evidence:    &ActionEvidenceInput{Summary: "impl", Facts: `{"impl.disposition":"bogus"}`},
 	})
-	if err == nil {
-		t.Fatalf("expected error for invalid disposition, got nil")
-	}
-	if !strings.Contains(err.Error(), "impl.disposition") {
-		t.Errorf("error %q does not mention impl.disposition", err.Error())
+	detail, ok := AsErrorDetail(err)
+	if !ok || detail.Code != wrkfCodeValidation || detail.Field != "facts.impl.disposition" {
+		t.Fatalf("invalid disposition error = %v (detail %+v), want %s on field facts.impl.disposition", err, detail, wrkfCodeValidation)
 	}
 	// No evidence was written and the instance did not advance.
 	ev, err := svc.ListEvidence(taskUUID, "")
@@ -248,85 +211,111 @@ func TestImplVerify_InvalidDispositionRejectedBeforeTransition(t *testing.T) {
 	}
 }
 
-// daedalus #9778 required test 4: facts supplied but MISSING the disposition do
-// NOT select done/blocked — they route to `otherwise`. Made explicit so the
-// behavior is intentional, not accidental.
-func TestImplVerify_FactsWithoutDispositionRouteToOtherwise(t *testing.T) {
-	t.Run("implement", func(t *testing.T) {
-		svc, taskUUID := actionFixture(t)
-		driveToReady(t, svc, taskUUID)
-		out := completeAction(t, svc, taskUUID, "implement", `{"git.clean":true,"green.exit":0}`)
-		if got := outcomeOf(t, out); got != "implemented" {
-			t.Errorf("outcome = %q, want implemented (otherwise)", got)
-		}
-		inst, _ := svc.LatestInstance(taskUUID)
-		if inst.Phase != "implemented" {
-			t.Errorf("workflow phase = %q, want implemented", inst.Phase)
-		}
-		if got := readTaskState(t, svc, taskUUID); got != "open" {
-			t.Errorf("task state = %q, want open (no blocked effect)", got)
-		}
-	})
-	t.Run("verify", func(t *testing.T) {
-		svc, taskUUID := actionFixture(t)
-		driveToImplemented(t, svc, taskUUID)
-		out := completeAction(t, svc, taskUUID, "verify", `{"install.exit":0,"smoke.exit":0}`)
-		if got := outcomeOf(t, out); got != "reviewing" {
-			t.Errorf("outcome = %q, want reviewing (otherwise)", got)
-		}
-		inst, _ := svc.LatestInstance(taskUUID)
-		if inst.Phase != "reviewing" {
-			t.Errorf("workflow phase = %q, want reviewing", inst.Phase)
-		}
-	})
-}
+// daedalus #9778 required test 6 (plus the triage blocked and verify-launch
+// replay requirements): replaying the same action.complete is idempotent: same
+// evidence id, same outcome, and the outcome's effect created exactly once.
+// Every row uses a transition that stays available on replay (a blocked
+// self-transition, or the replay key of a completed transition), so the replay
+// goes through the idempotency-key path while carrying an effect.
+func TestCompletionReplayReturnsSameEvidenceAndDoesNotDuplicateEffects(t *testing.T) {
+	const verifyLaunchFacts = `{"impl.disposition":"done","automation.verifyLaunch":"acp-command-run/v1"}`
+	cases := []struct {
+		name    string
+		prepare func(t *testing.T, svc *Service, taskUUID string)
+		action  string
+		facts   string
+		// wantOutcome is checked on both completions when non-empty.
+		wantOutcome string
+		check       func(t *testing.T, svc *Service, taskUUID, runID string)
+	}{
+		{
+			name: "triage-blocked-self-transition",
+			prepare: func(t *testing.T, svc *Service, taskUUID string) {
+				setTaskSpecAndState(t, svc, taskUUID, "", "open")
+			},
+			action: "triage",
+			check: func(t *testing.T, svc *Service, taskUUID, _ string) {
+				if got := readTaskState(t, svc, taskUUID); got != "blocked" {
+					t.Errorf("task state after replay = %q, want blocked", got)
+				}
+			},
+		},
+		{
+			name:        "implement-blocked-set-task-state",
+			prepare:     driveToReady,
+			action:      "implement",
+			facts:       `{"impl.disposition":"blocked"}`,
+			wantOutcome: "blocked",
+			check: func(t *testing.T, svc *Service, taskUUID, _ string) {
+				ev, _ := svc.ListEvidence(taskUUID, "")
+				implCount := 0
+				for _, e := range ev {
+					if e.Kind == "implement_result" {
+						implCount++
+					}
+				}
+				if implCount != 1 {
+					t.Errorf("implement_result evidence count = %d, want 1", implCount)
+				}
+				if n := countSetTaskStateEffects(t, svc, taskUUID, "blocked"); n != 1 {
+					t.Errorf("set_task_state:blocked effect count = %d, want 1 (no duplicate)", n)
+				}
+				if got := readTaskState(t, svc, taskUUID); got != "blocked" {
+					t.Errorf("task state after replay = %q, want blocked", got)
+				}
+			},
+		},
+		{
+			name:    "implement-verify-launch-opt-in",
+			prepare: driveToReady,
+			action:  "implement",
+			facts:   verifyLaunchFacts,
+			check: func(t *testing.T, svc *Service, taskUUID, runID string) {
+				effects := verifyLaunchEffects(t, svc, taskUUID)
+				if len(effects) != 1 {
+					t.Fatalf("verify-launch effects after replay = %d, want exactly 1: %+v", len(effects), effects)
+				}
+				wantKey := fmt.Sprintf("verify-launch:%s:%d:%s", taskUUID, effects[0].Revision, runID)
+				if effects[0].SemanticKey != wantKey || effects[0].IdempotencyKey == "" {
+					t.Errorf("effect idempotency binding = semanticKey %q idempotencyKey %q, want semanticKey %q and non-empty idempotencyKey", effects[0].SemanticKey, effects[0].IdempotencyKey, wantKey)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, taskUUID := actionFixture(t)
+			tc.prepare(t, svc, taskUUID)
 
-// daedalus #9778 required test 6: replaying the same action.complete is
-// idempotent — same evidence id, same transition outcome, and the engine-owned
-// set_task_state effect created exactly once (no duplicate). Uses the implement
-// `blocked` self-transition (active/ready → active/ready), which keeps the same
-// transition available on replay and so exercises the idempotency-key replay
-// path while carrying a set_task_state effect.
-func TestImplVerify_ReplayIdempotent(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	driveToReady(t, svc, taskUUID)
+			run, err := svc.StartAction(StartActionParams{
+				Task: taskUUID, Workflow: BuiltinSimpleTaskTemplateRef, Action: tc.action, PrincipalRef: "agent:t", IdempotencyKey: "replay-" + tc.name,
+			})
+			if err != nil {
+				t.Fatalf("StartAction %s: %v", tc.action, err)
+			}
+			complete := func(label string) *ActionCompleteResult {
+				out, err := svc.CompleteAction(CompleteActionParams{ActionRunID: run.RunID, Evidence: &ActionEvidenceInput{Summary: tc.action, Facts: tc.facts}})
+				if err != nil {
+					t.Fatalf("CompleteAction %s: %v", label, err)
+				}
+				return out
+			}
+			first := complete("first")
+			second := complete("replay")
 
-	run, err := svc.StartAction(StartActionParams{Task: taskUUID, Action: "implement", PrincipalRef: "agent:t", IdempotencyKey: "ik"})
-	if err != nil {
-		t.Fatalf("StartAction implement: %v", err)
-	}
-	facts := `{"impl.disposition":"blocked"}`
-	first, err := svc.CompleteAction(CompleteActionParams{ActionRunID: run.RunID, Evidence: &ActionEvidenceInput{Summary: "i", Facts: facts}})
-	if err != nil {
-		t.Fatalf("CompleteAction first: %v", err)
-	}
-	second, err := svc.CompleteAction(CompleteActionParams{ActionRunID: run.RunID, Evidence: &ActionEvidenceInput{Summary: "i", Facts: facts}})
-	if err != nil {
-		t.Fatalf("CompleteAction replay: %v", err)
-	}
-
-	if first.Evidence == nil || second.Evidence == nil || first.Evidence.ID != second.Evidence.ID {
-		t.Errorf("replay produced different/absent evidence: %+v vs %+v", first.Evidence, second.Evidence)
-	}
-	if outcomeOf(t, first) != "blocked" || outcomeOf(t, second) != "blocked" {
-		t.Errorf("replay outcome mismatch: %q vs %q (want blocked both)", outcomeOf(t, first), outcomeOf(t, second))
-	}
-	// Exactly one implement_result evidence and one set_task_state:blocked effect.
-	ev, _ := svc.ListEvidence(taskUUID, "")
-	implCount := 0
-	for _, e := range ev {
-		if e.Kind == "implement_result" {
-			implCount++
-		}
-	}
-	if implCount != 1 {
-		t.Errorf("implement_result evidence count = %d, want 1", implCount)
-	}
-	if n := countSetTaskStateEffects(t, svc, taskUUID, "blocked"); n != 1 {
-		t.Errorf("set_task_state:blocked effect count = %d, want 1 (no duplicate)", n)
-	}
-	if got := readTaskState(t, svc, taskUUID); got != "blocked" {
-		t.Errorf("task state after replay = %q, want blocked", got)
+			if first.Evidence == nil || second.Evidence == nil || first.Evidence.ID != second.Evidence.ID {
+				t.Errorf("replay produced different/absent evidence: %+v vs %+v", first.Evidence, second.Evidence)
+			}
+			if second.Run.Status != "completed" {
+				t.Errorf("replay run status = %q, want completed", second.Run.Status)
+			}
+			if tc.wantOutcome != "" {
+				if got1, got2 := outcomeOf(t, first), outcomeOf(t, second); got1 != tc.wantOutcome || got2 != tc.wantOutcome {
+					t.Errorf("replay outcome mismatch: %q vs %q (want %s both)", got1, got2, tc.wantOutcome)
+				}
+			}
+			tc.check(t, svc, taskUUID, run.RunID)
+		})
 	}
 }
 
@@ -359,107 +348,4 @@ func TestImplVerify_LatestEvidenceControlsOverStale(t *testing.T) {
 	if inst2.Status != "active" || inst2.Phase != "implemented" {
 		t.Errorf("workflow = %s/%s, want active/implemented", inst2.Status, inst2.Phase)
 	}
-}
-
-// Template-contract test (daedalus #9768 #1 / acceptance criteria): the built-in
-// declares the fact-branched outcomes with effects, `otherwise` last, and the
-// disposition enum facts schemas on implement_result / verify_result without
-// marking them required.
-func TestBuiltinTemplate_FactBranchedContract(t *testing.T) {
-	svc, _ := actionFixture(t)
-	if _, _, err := svc.EnsureBuiltinTemplate(BuiltinSimpleTaskTemplateRef, "agent:t"); err != nil {
-		t.Fatalf("EnsureBuiltinTemplate: %v", err)
-	}
-	tpl, _, err := svc.ShowTemplate(BuiltinSimpleTaskTemplateRef)
-	if err != nil {
-		t.Fatalf("ShowTemplate: %v", err)
-	}
-
-	byID := map[string]TransitionSpec{}
-	for _, tr := range tpl.Transitions {
-		byID[tr.ID] = tr
-	}
-
-	assertOutcomeOrder := func(trID string, want []string) {
-		tr, ok := byID[trID]
-		if !ok {
-			t.Fatalf("transition %s not found", trID)
-		}
-		if len(tr.Outcomes) != len(want) {
-			t.Fatalf("%s outcomes = %d, want %d", trID, len(tr.Outcomes), len(want))
-		}
-		for i, id := range want {
-			if tr.Outcomes[i].ID != id {
-				t.Errorf("%s outcome[%d] = %q, want %q", trID, i, tr.Outcomes[i].ID, id)
-			}
-		}
-		last := tr.Outcomes[len(tr.Outcomes)-1]
-		if last.When.Otherwise == nil || !*last.When.Otherwise {
-			t.Errorf("%s last outcome %q is not `otherwise`", trID, last.ID)
-		}
-	}
-	assertOutcomeOrder("implement_complete", []string{"done_verify_launch", "done", "blocked", "implemented"})
-	assertOutcomeOrder("verify_complete", []string{"verified", "blocked", "reviewing"})
-
-	// Effects: implement blocked + verify verified/blocked carry set_task_state.
-	findEffectState := func(trID, outcomeID string) (string, bool) {
-		for _, o := range byID[trID].Outcomes {
-			if o.ID != outcomeID {
-				continue
-			}
-			for _, e := range o.Effects {
-				if e.Kind == "set_task_state" {
-					s, _ := e.Data["state"].(string)
-					return s, true
-				}
-			}
-		}
-		return "", false
-	}
-	for _, c := range []struct {
-		tr, outcome, state string
-	}{
-		{"implement_complete", "blocked", "blocked"},
-		{"verify_complete", "verified", "completed"},
-		{"verify_complete", "blocked", "blocked"},
-	} {
-		got, ok := findEffectState(c.tr, c.outcome)
-		if !ok {
-			t.Errorf("%s/%s missing set_task_state effect", c.tr, c.outcome)
-		} else if got != c.state {
-			t.Errorf("%s/%s set_task_state state = %q, want %q", c.tr, c.outcome, got, c.state)
-		}
-	}
-	// done must carry NO effect.
-	if _, ok := findEffectState("implement_complete", "done"); ok {
-		t.Errorf("implement_complete/done must not carry a set_task_state effect")
-	}
-
-	// Facts schemas: disposition enums declared, NOT required (verdict A).
-	assertEnumNotRequired := func(kind, prop string, wantEnum []string) {
-		spec, ok := tpl.EvidenceKinds[kind]
-		if !ok || spec.Facts == nil {
-			t.Fatalf("evidence kind %s has no facts schema", kind)
-		}
-		fp, ok := spec.Facts.Properties[prop]
-		if !ok {
-			t.Fatalf("%s facts missing property %s", kind, prop)
-		}
-		got := []string{}
-		for _, raw := range fp.Enum {
-			var s string
-			_ = json.Unmarshal(raw, &s)
-			got = append(got, s)
-		}
-		if strings.Join(got, ",") != strings.Join(wantEnum, ",") {
-			t.Errorf("%s.%s enum = %v, want %v", kind, prop, got, wantEnum)
-		}
-		for _, r := range spec.Facts.Required {
-			if r == prop {
-				t.Errorf("%s.%s must NOT be required (verdict A: backward-compat no-facts path)", kind, prop)
-			}
-		}
-	}
-	assertEnumNotRequired("implement_result", "impl.disposition", []string{"done", "blocked"})
-	assertEnumNotRequired("verify_result", "verify.disposition", []string{"verified", "blocked"})
 }

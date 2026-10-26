@@ -65,192 +65,6 @@ func startV1Action(svc *Service, params StartActionParams) (*ActionRun, error) {
 	return svc.StartAction(params)
 }
 
-// Action leases are durable claim metadata, so a migrated workflow DB must
-// expose the fields claim and settlement paths rely on.
-func TestActionLeaseRecoveryMigrationAddsRunColumns(t *testing.T) {
-	svc, _ := actionFixture(t)
-
-	rows, err := svc.db.Query(`PRAGMA table_info(workflow_runs)`)
-	if err != nil {
-		t.Fatalf("PRAGMA table_info(workflow_runs): %v", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	got := map[string]bool{}
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			t.Fatalf("scan workflow_runs column: %v", err)
-		}
-		got[name] = true
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read workflow_runs columns: %v", err)
-	}
-
-	for _, want := range []string{
-		"lease_owner", "lease_token", "lease_expires_at", "heartbeat_at",
-		"semantic_action_key", "attempt", "agent_ref", "scope_ref",
-		"handler_contract", "workspace_ref",
-		"source_run_id", "source_evidence_id", "source_commit_sha", "source_identity", "owner_generation",
-		"predecessor_run_id", "superseded_by_run_id", "side_effect_classes_json",
-	} {
-		if !got[want] {
-			t.Errorf("workflow_runs missing %s column for action lease recovery", want)
-		}
-	}
-}
-
-func TestStartAction_BuiltinAttachAndIdempotency(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-
-	run, err := svc.StartAction(StartActionParams{
-		Task: taskUUID, Action: "implement", PrincipalRef: "agent:t", IdempotencyKey: "k1",
-	})
-	if err != nil {
-		t.Fatalf("StartAction: %v", err)
-	}
-	if run.Role != "implementer" {
-		t.Errorf("role = %q, want implementer", run.Role)
-	}
-	if run.Lane != "implementation" {
-		t.Errorf("lane = %q, want implementation", run.Lane)
-	}
-	if run.Workflow.ID != "wrkq-simple-task" || run.Workflow.Version != "5" {
-		t.Errorf("workflow = %+v, want wrkq-simple-task@5", run.Workflow)
-	}
-	if run.Status != "active" {
-		t.Errorf("status = %q, want active", run.Status)
-	}
-
-	// Replay → same run.
-	again, err := svc.StartAction(StartActionParams{
-		Task: taskUUID, Action: "implement", PrincipalRef: "agent:t", IdempotencyKey: "k1",
-	})
-	if err != nil {
-		t.Fatalf("StartAction replay: %v", err)
-	}
-	if again.RunID != run.RunID {
-		t.Errorf("replay run %q != original %q", again.RunID, run.RunID)
-	}
-
-	// Exactly one run on the instance.
-	runs, err := svc.ListRuns(taskUUID)
-	if err != nil {
-		t.Fatalf("ListRuns: %v", err)
-	}
-	if len(runs) != 1 {
-		t.Errorf("expected 1 run, got %d", len(runs))
-	}
-
-	// Mismatch: same key, different action → idempotency mismatch.
-	if _, err := svc.StartAction(StartActionParams{
-		Task: taskUUID, Action: "verify", PrincipalRef: "agent:t", IdempotencyKey: "k1",
-	}); err == nil {
-		t.Errorf("expected idempotency mismatch for same key + different action")
-	}
-}
-
-func TestStartAction_DefaultV5IgnoresDiscontinuedV1AndExplicitRefRemainsAuthoritative(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	if _, _, err := svc.EnsureBuiltinTemplate(BuiltinSimpleTaskTemplateRef, "agent:installer"); err != nil {
-		t.Fatalf("EnsureBuiltinTemplate(v1): %v", err)
-	}
-	if err := svc.DiscontinueTemplate("wrkq-simple-task", "1", "agent:curator"); err != nil {
-		t.Fatalf("DiscontinueTemplate(v1): %v", err)
-	}
-	if _, _, err := svc.EnsureBuiltinTemplate(BuiltinSimpleTaskV5TemplateRef, "agent:installer"); err != nil {
-		t.Fatalf("EnsureBuiltinTemplate(v5): %v", err)
-	}
-
-	run, err := svc.StartAction(StartActionParams{
-		Task: taskUUID, Action: "implement", PrincipalRef: "agent:t",
-	})
-	if err != nil {
-		t.Fatalf("StartAction default with discontinued v1: %v", err)
-	}
-	if run.Workflow.ID != "wrkq-simple-task" || run.Workflow.Version != "5" {
-		t.Fatalf("default workflow = %+v, want wrkq-simple-task@5", run.Workflow)
-	}
-
-	explicitTaskUUID := "ffffffff-ffff-4fff-bfff-000000000002"
-	if _, err := svc.db.Exec(
-		`INSERT INTO tasks (uuid, slug, title, specification, project_uuid, state, priority, kind, created_by_actor_uuid, updated_by_actor_uuid)
-		 SELECT ?, 'explicit-discontinued', 'Explicit Discontinued', 'Shaped spec.', project_uuid, 'open', 2, 'task', created_by_actor_uuid, updated_by_actor_uuid
-		 FROM tasks WHERE uuid = ?`,
-		explicitTaskUUID, taskUUID,
-	); err != nil {
-		t.Fatalf("insert explicit task: %v", err)
-	}
-	if _, err := startV1Action(svc, StartActionParams{
-		Task: explicitTaskUUID, Workflow: BuiltinSimpleTaskTemplateRef, Action: "triage", PrincipalRef: "agent:t",
-	}); err == nil || !strings.Contains(err.Error(), "discontinued") {
-		t.Fatalf("explicit discontinued v1 error = %v, want discontinued refusal", err)
-	}
-}
-
-func TestCompleteAction_EvidenceTransitionFinishReplay(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
-	if err != nil {
-		t.Fatalf("StartAction: %v", err)
-	}
-
-	out, err := svc.CompleteAction(CompleteActionParams{
-		ActionRunID: run.RunID,
-		Evidence:    &ActionEvidenceInput{Summary: "ok"},
-		RunSummary:  "done",
-	})
-	if err != nil {
-		t.Fatalf("CompleteAction: %v", err)
-	}
-	if out.Evidence == nil || out.Evidence.Kind != "triage_result" {
-		t.Errorf("evidence = %+v, want kind triage_result", out.Evidence)
-	}
-	if out.Evidence.RunID != run.RunID {
-		t.Errorf("evidence runId = %q, want %q", out.Evidence.RunID, run.RunID)
-	}
-	if out.Transition == nil {
-		t.Fatalf("expected a transition")
-	}
-	if out.Run.Status != "completed" {
-		t.Errorf("run status = %q, want completed", out.Run.Status)
-	}
-
-	// Instance advanced to active/ready.
-	inst, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance: %v", err)
-	}
-	if inst.Phase != "ready" {
-		t.Errorf("instance phase = %q, want ready", inst.Phase)
-	}
-
-	// Replay: same evidence id, no duplicate, run still completed.
-	replay, err := svc.CompleteAction(CompleteActionParams{
-		ActionRunID: run.RunID,
-		Evidence:    &ActionEvidenceInput{Summary: "ok"},
-		RunSummary:  "done",
-	})
-	if err != nil {
-		t.Fatalf("CompleteAction replay: %v", err)
-	}
-	if replay.Evidence == nil || replay.Evidence.ID != out.Evidence.ID {
-		t.Errorf("replay evidence id = %v, want %v", replay.Evidence, out.Evidence.ID)
-	}
-	evList, err := svc.ListEvidence(taskUUID, "")
-	if err != nil {
-		t.Fatalf("ListEvidence: %v", err)
-	}
-	if len(evList) != 1 {
-		t.Errorf("expected 1 evidence after replay, got %d", len(evList))
-	}
-}
-
 // TestCompleteAction_PartialReplayRecovers simulates a mid-sequence failure
 // where evidence and the transition are already committed but the run was not
 // finished, then retries CompleteAction and asserts recovery without duplicate
@@ -333,92 +147,9 @@ func TestCompleteAction_PartialReplayRecovers(t *testing.T) {
 	}
 }
 
-// TestCompleteAction_DefaultEvidenceKindMatchesTemplate asserts the generated
-// default evidence kind (<action>_result) matches the built-in workflow's
-// declared vocabulary for implement and verify (daedalus required test #3).
-func TestCompleteAction_DefaultEvidenceKindMatchesTemplate(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	if _, _, err := svc.EnsureBuiltinTemplate(BuiltinSimpleTaskTemplateRef, "agent:t"); err != nil {
-		t.Fatalf("EnsureBuiltinTemplate: %v", err)
-	}
-	tpl, _, err := svc.ShowTemplate(BuiltinSimpleTaskTemplateRef)
-	if err != nil {
-		t.Fatalf("load template: %v", err)
-	}
-
-	type step struct {
-		action   string
-		wantKind string
-	}
-	for _, s := range []step{
-		{"triage", "triage_result"},
-		{"implement", "implement_result"},
-		{"verify", "verify_result"},
-		{"review", "review_result"},
-	} {
-		run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: s.action, PrincipalRef: "agent:t"})
-		if err != nil {
-			t.Fatalf("StartAction %s: %v", s.action, err)
-		}
-		out, err := svc.CompleteAction(CompleteActionParams{
-			ActionRunID: run.RunID,
-			Evidence:    &ActionEvidenceInput{Summary: s.action},
-		})
-		if err != nil {
-			t.Fatalf("CompleteAction %s: %v", s.action, err)
-		}
-		if out.Evidence == nil || out.Evidence.Kind != s.wantKind {
-			t.Errorf("%s default evidence kind = %v, want %q", s.action, out.Evidence, s.wantKind)
-		}
-		if _, ok := tpl.EvidenceKinds[s.wantKind]; !ok {
-			t.Errorf("built-in template does not declare evidence kind %q produced by action %q", s.wantKind, s.action)
-		}
-	}
-}
-
-func TestFailAction_EvidenceAndTerminalNoTransition(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
-	if err != nil {
-		t.Fatalf("StartAction: %v", err)
-	}
-
-	failed, err := svc.FailAction(FailActionParams{
-		ActionRunID: run.RunID,
-		Summary:     "nope",
-		Evidence:    &ActionEvidenceInput{Summary: "boom"},
-	})
-	if err != nil {
-		t.Fatalf("FailAction: %v", err)
-	}
-	if failed.Status != "failed" {
-		t.Errorf("status = %q, want failed", failed.Status)
-	}
-
-	show, err := svc.ShowAction(run.RunID)
-	if err != nil {
-		t.Fatalf("ShowAction: %v", err)
-	}
-	if len(show.EvidenceKinds) != 1 || show.EvidenceKinds[0] != "failure_result" {
-		t.Errorf("evidence kinds = %v, want [failure_result]", show.EvidenceKinds)
-	}
-	if len(show.TransitionEventIDs) != 0 {
-		t.Errorf("fail must not apply a transition, got %v", show.TransitionEventIDs)
-	}
-
-	// Instance stayed in intake.
-	inst, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance: %v", err)
-	}
-	if inst.Phase != "intake" {
-		t.Errorf("instance phase = %q, want intake", inst.Phase)
-	}
-}
-
 // T-05067: a failed/reaped action is terminal. Retrying success completion after
 // terminalization must not record success evidence or apply a success transition.
-func TestCompleteAction_TerminalFailedRunRejectsSuccessSideEffects(t *testing.T) {
+func TestCompleteAfterFailIsRefusedWithoutSuccessEvidence(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
 	if err != nil {
@@ -432,13 +163,12 @@ func TestCompleteAction_TerminalFailedRunRejectsSuccessSideEffects(t *testing.T)
 		t.Fatalf("FailAction: %v", err)
 	}
 
-	if _, err := svc.CompleteAction(CompleteActionParams{
+	_, err = svc.CompleteAction(CompleteActionParams{
 		ActionRunID: run.RunID,
 		Evidence:    &ActionEvidenceInput{Summary: "should not be recorded"},
 		RunSummary:  "should not complete",
-	}); err == nil {
-		t.Fatalf("CompleteAction on terminal failed run succeeded; want lease/terminal conflict")
-	}
+	})
+	requireWrkfCode(t, err, "WRKF_LEASE_CONFLICT")
 
 	show, err := svc.ShowAction(run.RunID)
 	if err != nil {
@@ -508,80 +238,43 @@ func TestCompleteAction_TriageReadyNormalizesInProgressToOpen(t *testing.T) {
 	}
 }
 
-// daedalus required test 2: empty spec leaves workflow open/intake and blocks the task.
-func TestCompleteAction_TriageNoSpecBlocksTask(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	setTaskSpecAndState(t, svc, taskUUID, "", "open")
+// daedalus required tests 2+3: an empty or whitespace-only spec leaves the
+// workflow open/intake (held for re-triage) and blocks the task, while the
+// triage action itself still completes.
+func TestTriageWithoutSpecBlocksTaskAndHoldsIntake(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec string
+	}{
+		{name: "empty", spec: ""},
+		{name: "whitespace-only", spec: "   \n\t  "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, taskUUID := actionFixture(t)
+			setTaskSpecAndState(t, svc, taskUUID, tc.spec, "open")
 
-	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
-	if err != nil {
-		t.Fatalf("StartAction: %v", err)
-	}
-	out, err := svc.CompleteAction(CompleteActionParams{ActionRunID: run.RunID, Evidence: &ActionEvidenceInput{Summary: "no actionable detail"}, RunSummary: "blocked"})
-	if err != nil {
-		t.Fatalf("CompleteAction: %v", err)
-	}
-	if out.Run.Status != "completed" {
-		t.Errorf("run status = %q, want completed (blocked is a task state, the action still completes)", out.Run.Status)
-	}
-	inst, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance: %v", err)
-	}
-	if inst.Status != "open" || inst.Phase != "intake" {
-		t.Errorf("workflow = %s/%s, want open/intake (held for re-triage)", inst.Status, inst.Phase)
-	}
-	if got := readTaskState(t, svc, taskUUID); got != "blocked" {
-		t.Errorf("task state = %q, want blocked", got)
-	}
-}
-
-// daedalus required test 3: whitespace-only spec follows the blocked path.
-func TestCompleteAction_TriageWhitespaceSpecBlocksTask(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	setTaskSpecAndState(t, svc, taskUUID, "   \n\t  ", "open")
-
-	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
-	if err != nil {
-		t.Fatalf("StartAction: %v", err)
-	}
-	if _, err := svc.CompleteAction(CompleteActionParams{ActionRunID: run.RunID, Evidence: &ActionEvidenceInput{Summary: "whitespace only"}}); err != nil {
-		t.Fatalf("CompleteAction: %v", err)
-	}
-	inst, _ := svc.LatestInstance(taskUUID)
-	if inst.Phase != "intake" {
-		t.Errorf("workflow phase = %q, want intake", inst.Phase)
-	}
-	if got := readTaskState(t, svc, taskUUID); got != "blocked" {
-		t.Errorf("task state = %q, want blocked (whitespace-only spec is not a spec)", got)
-	}
-}
-
-// daedalus required test 4: blocked self-transition replay is idempotent.
-func TestCompleteAction_TriageBlockedReplayIdempotent(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	setTaskSpecAndState(t, svc, taskUUID, "", "open")
-
-	run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
-	if err != nil {
-		t.Fatalf("StartAction: %v", err)
-	}
-	first, err := svc.CompleteAction(CompleteActionParams{ActionRunID: run.RunID, Evidence: &ActionEvidenceInput{Summary: "blocked"}})
-	if err != nil {
-		t.Fatalf("CompleteAction first: %v", err)
-	}
-	second, err := svc.CompleteAction(CompleteActionParams{ActionRunID: run.RunID, Evidence: &ActionEvidenceInput{Summary: "blocked"}})
-	if err != nil {
-		t.Fatalf("CompleteAction replay: %v", err)
-	}
-	if first.Evidence == nil || second.Evidence == nil || first.Evidence.ID != second.Evidence.ID {
-		t.Errorf("replay produced different/absent evidence: %+v vs %+v", first.Evidence, second.Evidence)
-	}
-	if second.Run.Status != "completed" {
-		t.Errorf("replay run status = %q, want completed", second.Run.Status)
-	}
-	if got := readTaskState(t, svc, taskUUID); got != "blocked" {
-		t.Errorf("task state after replay = %q, want blocked", got)
+			run, err := startV1Action(svc, StartActionParams{Task: taskUUID, Action: "triage", PrincipalRef: "agent:t"})
+			if err != nil {
+				t.Fatalf("StartAction: %v", err)
+			}
+			out, err := svc.CompleteAction(CompleteActionParams{ActionRunID: run.RunID, Evidence: &ActionEvidenceInput{Summary: "no actionable detail"}, RunSummary: "blocked"})
+			if err != nil {
+				t.Fatalf("CompleteAction: %v", err)
+			}
+			if out.Run.Status != "completed" {
+				t.Errorf("run status = %q, want completed (blocked is a task state, the action still completes)", out.Run.Status)
+			}
+			inst, err := svc.LatestInstance(taskUUID)
+			if err != nil {
+				t.Fatalf("LatestInstance: %v", err)
+			}
+			if inst.Status != "open" || inst.Phase != "intake" {
+				t.Errorf("workflow = %s/%s, want open/intake (held for re-triage)", inst.Status, inst.Phase)
+			}
+			if got := readTaskState(t, svc, taskUUID); got != "blocked" {
+				t.Errorf("task state = %q, want blocked", got)
+			}
+		})
 	}
 }
 

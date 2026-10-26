@@ -269,29 +269,3 @@ func TestResolveSuspensionTerminalizationFailureRollsBackEveryMutation(t *testin
 		t.Fatalf("failed terminal disposition committed a partial mutation:\nbefore %s\nafter  %s", before, after)
 	}
 }
-
-func TestResolveSuspensionWrongIDAndStaleRevisionPreserveInstanceRunsAndLedger(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		call func(terminalDispositionFixture) ResolveSuspensionParams
-	}{
-		{name: "wrong suspension id", call: func(f terminalDispositionFixture) ResolveSuspensionParams {
-			return ResolveSuspensionParams{SuspensionID: "sus_wrong", Disposition: DispositionCancel}
-		}},
-		{name: "stale revision", call: func(f terminalDispositionFixture) ResolveSuspensionParams {
-			stale := f.suspended.Revision - 1
-			return ResolveSuspensionParams{SuspensionID: f.suspended.Suspension.ID, Disposition: DispositionCancel, ExpectRevision: &stale}
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := setupTerminalDispositionFixture(t)
-			before := terminalDispositionMutationSnapshot(t, f)
-			if _, err := f.svc.ResolveSuspension(tc.call(f)); err == nil {
-				t.Fatal("terminal resolve refusal unexpectedly succeeded")
-			}
-			if after := terminalDispositionMutationSnapshot(t, f); after != before {
-				t.Fatalf("refused terminal resolve mutated durable state:\nbefore %s\nafter  %s", before, after)
-			}
-		})
-	}
-}

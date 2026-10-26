@@ -127,18 +127,16 @@ func TestClaimEffectsAtomicity(t *testing.T) {
 	close(start) // release all goroutines simultaneously
 	wg.Wait()
 
-	// Verify no effect ID appears in more than one claim result.
+	// Every racer must succeed (an exhausted pool yields an empty claim, not an
+	// error), no effect ID may appear in more than one claim result, and
+	// together the racers must have leased the whole pool.
 	seen := map[string]int{} // effectID → racer index that claimed it
 	for i, r := range resultSlice {
 		if r.err != nil {
-			// It is acceptable for a claimer to return an error when no
-			// effects remain to claim; a nil error with empty Effects is
-			// also acceptable.
-			t.Logf("racer %d returned error (may be ok if pool exhausted): %v", i, r.err)
-			continue
+			t.Fatalf("racer %d ClaimEffects: %v", i, r.err)
 		}
 		if r.claim == nil {
-			continue
+			t.Fatalf("racer %d returned nil EffectClaim", i)
 		}
 		for _, eff := range r.claim.Effects {
 			if prev, dup := seen[eff.ID]; dup {
@@ -147,6 +145,9 @@ func TestClaimEffectsAtomicity(t *testing.T) {
 			}
 			seen[eff.ID] = i
 		}
+	}
+	if len(seen) != totalEffects {
+		t.Errorf("racers leased %d distinct effects, want the whole pool of %d", len(seen), totalEffects)
 	}
 }
 
@@ -178,10 +179,10 @@ func TestClaimEffectsLimit(t *testing.T) {
 		t.Fatal("ClaimEffects returned nil EffectClaim")
 	}
 
-	// Limit must be respected — never more than requested.
-	if len(claim.Effects) > limit {
-		t.Errorf("ClaimEffects returned %d effects, want ≤ %d (limit not respected)",
-			len(claim.Effects), limit)
+	// With more pending effects than the limit, exactly limit are leased.
+	if len(claim.Effects) != limit {
+		t.Errorf("ClaimEffects returned %d effects, want exactly %d of the %d pending",
+			len(claim.Effects), limit, totalEffects)
 	}
 
 	// LeaseToken must be non-empty.
@@ -210,175 +211,135 @@ func TestClaimEffectsLimit(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3 — AckEffect with correct token succeeds
+// Test 3 — terminal paths (ack, fail) clear the lease
 // ---------------------------------------------------------------------------
 
-// TestAckEffectCorrectToken verifies that AckEffect(effectID, leaseToken)
-// succeeds and marks the effect as 'delivered' when the token matches.
+// TestEffectTerminalPathsClearLease verifies that AckEffect and a
+// non-retryable FailEffect, given the claim's lease token, move the effect to
+// its terminal status and clear the lease fields.
 //
 // Contract §5.1:
 //
 //	"wrkf.effect.ack params: { effectId, leaseToken, receipt? }"
+//	"wrkf.effect.fail params: { effectId, leaseToken, reason, retryable? }"
 //
-// Regression guard: AckEffect must validate the supplied lease token and clear
-// lease metadata when delivery succeeds.
-func TestAckEffectCorrectToken(t *testing.T) {
-	svc := setupEffectFixture(t, 2)
+// Contract §6 inv 4:
+//
+//	"terminal/retry paths MUST clear lease_token/leased_by/leased_until."
+func TestEffectTerminalPathsClearLease(t *testing.T) {
+	cases := []struct {
+		name       string
+		settle     func(svc *Service, effectID, token string) (*Effect, error)
+		wantStatus string
+	}{
+		{
+			name: "ack",
+			settle: func(svc *Service, effectID, token string) (*Effect, error) {
+				return svc.AckEffect(effectID, token)
+			},
+			wantStatus: "delivered",
+		},
+		{
+			name: "fail-not-retryable",
+			settle: func(svc *Service, effectID, token string) (*Effect, error) {
+				return svc.FailEffect(effectID, token, "deliberate test failure", false)
+			},
+			wantStatus: "failed",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := setupEffectFixture(t, 2)
 
-	claim, err := svc.ClaimEffects("test-adapter", 1, 30_000, "", "")
-	if err != nil || claim == nil || len(claim.Effects) == 0 {
-		t.Fatalf("ClaimEffects: err=%v claim=%v", err, claim)
-	}
-	effectID := claim.Effects[0].ID
-	token := claim.LeaseToken
+			claim, err := svc.ClaimEffects("test-adapter", 1, 30_000, "", "")
+			if err != nil || claim == nil || len(claim.Effects) == 0 {
+				t.Fatalf("ClaimEffects: err=%v claim=%v", err, claim)
+			}
 
-	eff, err := svc.AckEffect(effectID, token)
-	if err != nil {
-		t.Fatalf("AckEffect with correct token: expected success, got %v", err)
-	}
-	if eff == nil {
-		t.Fatal("AckEffect returned nil Effect")
-	}
-	if eff.Status != "delivered" {
-		t.Errorf("AckEffect: expected status 'delivered', got %q", eff.Status)
-	}
-	// Contract §6 inv 4: terminal paths MUST clear lease fields.
-	if eff.LeasedBy != "" {
-		t.Errorf("AckEffect: LeasedBy not cleared after ack: %q", eff.LeasedBy)
-	}
-	if eff.LeasedUntil != "" {
-		t.Errorf("AckEffect: LeasedUntil not cleared after ack: %q", eff.LeasedUntil)
+			eff, err := tc.settle(svc, claim.Effects[0].ID, claim.LeaseToken)
+			if err != nil {
+				t.Fatalf("%s with correct token: expected success, got %v", tc.name, err)
+			}
+			if eff == nil {
+				t.Fatalf("%s returned nil Effect", tc.name)
+			}
+			if eff.Status != tc.wantStatus {
+				t.Errorf("%s: expected status %q, got %q", tc.name, tc.wantStatus, eff.Status)
+			}
+			if eff.LeasedBy != "" {
+				t.Errorf("%s: LeasedBy not cleared: %q", tc.name, eff.LeasedBy)
+			}
+			if eff.LeasedUntil != "" {
+				t.Errorf("%s: LeasedUntil not cleared: %q", tc.name, eff.LeasedUntil)
+			}
+		})
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Test 4 — AckEffect with wrong token → WRKF_LEASE_CONFLICT
+// Test 4 — ack/fail without the current lease → WRKF_LEASE_CONFLICT
 // ---------------------------------------------------------------------------
 
-// TestAckEffectWrongToken verifies that AckEffect returns WRKF_LEASE_CONFLICT
-// when the supplied token does not match the stored lease_token.
+// TestEffectAckAndFailRefuseWithoutCurrentLease verifies the lease fence on the
+// terminal paths: a wrong token, or the right token after the lease expired,
+// is refused WRKF_LEASE_CONFLICT.
 //
 // Contract §5.1 / §3 error table:
 //
 //	"Wrong/expired token → WRKF_LEASE_CONFLICT"  (data.code, retryable=true)
 //
-// Regression guard: AckEffect must reject a token that does not match the
-// stored lease token.
-func TestAckEffectWrongToken(t *testing.T) {
-	svc := setupEffectFixture(t, 2)
-
-	claim, err := svc.ClaimEffects("test-adapter", 1, 30_000, "", "")
-	if err != nil || claim == nil || len(claim.Effects) == 0 {
-		t.Fatalf("ClaimEffects: err=%v claim=%v", err, claim)
-	}
-	effectID := claim.Effects[0].ID
-
-	_, err = svc.AckEffect(effectID, "totally-wrong-lease-token")
-	// Wrong tokens are rejected with the lease-conflict code.
-	requireWrkfCode(t, err, "WRKF_LEASE_CONFLICT")
-}
-
-// ---------------------------------------------------------------------------
-// Test 5 — AckEffect with expired token → WRKF_LEASE_CONFLICT
-// ---------------------------------------------------------------------------
-
-// TestAckEffectExpiredToken verifies that AckEffect returns WRKF_LEASE_CONFLICT
-// when the lease has expired (leased_until < now), even if the token string
-// is otherwise correct.
-//
 // Contract §6 inv 4:
 //
 //	"ack/fail MUST update only WHERE id=? AND status='leased' AND
 //	 lease_token=? AND leased_until > now (else WRKF_LEASE_CONFLICT)"
-//
-// Regression guard: AckEffect must enforce leased_until, not only token
-// equality.
-func TestAckEffectExpiredToken(t *testing.T) {
-	svc := setupEffectFixture(t, 2)
-
-	// Claim with a 50 ms lease — short enough to expire in this test.
-	claim, err := svc.ClaimEffects("test-adapter", 1, 50, "", "")
-	if err != nil || claim == nil || len(claim.Effects) == 0 {
-		t.Fatalf("ClaimEffects (50ms lease): err=%v claim=%v", err, claim)
+func TestEffectAckAndFailRefuseWithoutCurrentLease(t *testing.T) {
+	cases := []struct {
+		name string
+		// leaseMs is the claim's lease; expire sleeps past it before settling.
+		leaseMs int64
+		expire  bool
+		settle  func(svc *Service, effectID, token string) error
+	}{
+		{
+			name:    "ack-wrong-token",
+			leaseMs: 30_000,
+			settle: func(svc *Service, effectID, _ string) error {
+				_, err := svc.AckEffect(effectID, "totally-wrong-lease-token")
+				return err
+			},
+		},
+		{
+			// The token is correct; only leased_until has passed.
+			name:    "ack-after-lease-expiry",
+			leaseMs: 50,
+			expire:  true,
+			settle: func(svc *Service, effectID, token string) error {
+				_, err := svc.AckEffect(effectID, token)
+				return err
+			},
+		},
+		{
+			name:    "fail-wrong-token",
+			leaseMs: 30_000,
+			settle: func(svc *Service, effectID, _ string) error {
+				_, err := svc.FailEffect(effectID, "wrong-lease-token", "deliberate test failure", false)
+				return err
+			},
+		},
 	}
-	effectID := claim.Effects[0].ID
-	token := claim.LeaseToken
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := setupEffectFixture(t, 2)
 
-	// Wait for the lease to expire.
-	time.Sleep(100 * time.Millisecond)
+			claim, err := svc.ClaimEffects("test-adapter", 1, tc.leaseMs, "", "")
+			if err != nil || claim == nil || len(claim.Effects) == 0 {
+				t.Fatalf("ClaimEffects: err=%v claim=%v", err, claim)
+			}
+			if tc.expire {
+				time.Sleep(time.Duration(2*tc.leaseMs) * time.Millisecond)
+			}
 
-	_, err = svc.AckEffect(effectID, token)
-	// Expired leases are rejected with the lease-conflict code.
-	requireWrkfCode(t, err, "WRKF_LEASE_CONFLICT")
-}
-
-// ---------------------------------------------------------------------------
-// Test 6 — FailEffect with wrong token → WRKF_LEASE_CONFLICT
-// ---------------------------------------------------------------------------
-
-// TestFailEffectWrongToken verifies that FailEffect returns WRKF_LEASE_CONFLICT
-// when the supplied token does not match the stored lease_token.
-//
-// Contract §5.1:
-//
-//	"wrkf.effect.fail params: { effectId, leaseToken, reason, retryable? }"
-//	"Wrong/expired token → WRKF_LEASE_CONFLICT"
-//
-// Regression guard: FailEffect must require the lease token and reject
-// mismatches before mutating the effect.
-func TestFailEffectWrongToken(t *testing.T) {
-	svc := setupEffectFixture(t, 2)
-
-	claim, err := svc.ClaimEffects("test-adapter", 1, 30_000, "", "")
-	if err != nil || claim == nil || len(claim.Effects) == 0 {
-		t.Fatalf("ClaimEffects: err=%v claim=%v", err, claim)
-	}
-	effectID := claim.Effects[0].ID
-
-	// Wrong token + retryable=false.
-	_, err = svc.FailEffect(effectID, "wrong-lease-token", "deliberate test failure", false)
-	requireWrkfCode(t, err, "WRKF_LEASE_CONFLICT")
-}
-
-// ---------------------------------------------------------------------------
-// Test 7 — FailEffect with correct token clears lease fields
-// ---------------------------------------------------------------------------
-
-// TestFailEffectCorrectToken verifies that FailEffect(id, leaseToken, reason,
-// retryable) succeeds when the token matches, marks the effect 'failed', and
-// clears the lease fields (leased_by, leased_until).
-//
-// Contract §6 inv 4:
-//
-//	"terminal/retry paths MUST clear lease_token/leased_by/leased_until."
-//
-// Regression guard: FailEffect must accept the token/retryable contract and
-// clear lease metadata on successful terminal failure.
-func TestFailEffectCorrectToken(t *testing.T) {
-	svc := setupEffectFixture(t, 2)
-
-	claim, err := svc.ClaimEffects("test-adapter", 1, 30_000, "", "")
-	if err != nil || claim == nil || len(claim.Effects) == 0 {
-		t.Fatalf("ClaimEffects: err=%v claim=%v", err, claim)
-	}
-	effectID := claim.Effects[0].ID
-	token := claim.LeaseToken
-
-	eff, err := svc.FailEffect(effectID, token, "deliberate test failure", false)
-	if err != nil {
-		t.Fatalf("FailEffect with correct token: expected success, got %v", err)
-	}
-	if eff == nil {
-		t.Fatal("FailEffect returned nil Effect")
-	}
-	if eff.Status != "failed" {
-		t.Errorf("FailEffect: expected status 'failed', got %q", eff.Status)
-	}
-	// Contract §6 inv 4: terminal paths MUST clear lease fields.
-	if eff.LeasedBy != "" {
-		t.Errorf("FailEffect: LeasedBy not cleared: %q", eff.LeasedBy)
-	}
-	if eff.LeasedUntil != "" {
-		t.Errorf("FailEffect: LeasedUntil not cleared: %q", eff.LeasedUntil)
+			requireWrkfCode(t, tc.settle(svc, claim.Effects[0].ID, claim.LeaseToken), "WRKF_LEASE_CONFLICT")
+		})
 	}
 }

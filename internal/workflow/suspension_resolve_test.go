@@ -126,61 +126,61 @@ func TestResolveSuspensionResumeClearsAndPreservesPhase(t *testing.T) {
 	}
 }
 
-// TestResolveSuspensionCloseTerminalizes proves close lands the instance in
-// closed/done and applies the close effect.
-func TestResolveSuspensionCloseTerminalizes(t *testing.T) {
-	testResolveSuspensionTerminalizesAndDelivers(t, DispositionClose, "done", "completed")
-}
+// TestResolveSuspensionTerminalDispositionClosesInstanceAndSetsTaskState proves
+// close and cancel land the instance in closed/<outcome>, clear the suspension,
+// bump the revision, and deliver the disposition's set_task_state effect.
+func TestResolveSuspensionTerminalDispositionClosesInstanceAndSetsTaskState(t *testing.T) {
+	for _, tc := range []struct {
+		disposition, outcome, taskState string
+	}{
+		{disposition: DispositionClose, outcome: "done", taskState: "completed"},
+		{disposition: DispositionCancel, outcome: "cancelled", taskState: "cancelled"},
+	} {
+		t.Run(tc.disposition, func(t *testing.T) {
+			disposition := tc.disposition
+			svc, taskUUID, suspended := parkForResolve(t)
 
-// TestResolveSuspensionCancelTerminalizes proves cancel lands the instance in
-// closed/cancelled.
-func TestResolveSuspensionCancelTerminalizes(t *testing.T) {
-	testResolveSuspensionTerminalizesAndDelivers(t, DispositionCancel, "cancelled", "cancelled")
-}
+			out, err := svc.ResolveSuspension(ResolveSuspensionParams{
+				SuspensionID: suspended.Suspension.ID,
+				Disposition:  disposition,
+				PrincipalRef: "human:op",
+			})
+			if err != nil {
+				t.Fatalf("ResolveSuspension %s: %v", disposition, err)
+			}
+			resolved, err := svc.LatestInstance(taskUUID)
+			if err != nil {
+				t.Fatalf("LatestInstance after %s: %v", disposition, err)
+			}
+			if resolved.Status != "closed" || resolved.Outcome != tc.outcome || resolved.Suspended() {
+				t.Fatalf("%s state = %+v suspended=%v, want closed/%s and cleared", disposition, resolved.State(), resolved.Suspended(), tc.outcome)
+			}
+			if resolved.Revision != suspended.Revision+1 {
+				t.Fatalf("%s revision = %d, want %d", disposition, resolved.Revision, suspended.Revision+1)
+			}
 
-func testResolveSuspensionTerminalizesAndDelivers(t *testing.T, disposition, outcome, taskState string) {
-	t.Helper()
-	svc, taskUUID, suspended := parkForResolve(t)
+			effects, ok := out["effects"].([]Effect)
+			if !ok || len(effects) != 1 {
+				t.Fatalf("%s returned effects = %#v, want one effect", disposition, out["effects"])
+			}
+			assertDeliveredTaskStateEffect(t, effects[0])
+			listed, err := svc.ListEffects(taskUUID, true)
+			if err != nil {
+				t.Fatalf("ListEffects after %s: %v", disposition, err)
+			}
+			if len(listed) != 1 || listed[0].SemanticKey == "" || listed[0].ID != effects[0].ID {
+				t.Fatalf("%s listed effects = %+v, want exactly one semantic-keyed effect", disposition, listed)
+			}
+			assertDeliveredTaskStateEffect(t, listed[0])
 
-	out, err := svc.ResolveSuspension(ResolveSuspensionParams{
-		SuspensionID: suspended.Suspension.ID,
-		Disposition:  disposition,
-		PrincipalRef: "human:op",
-	})
-	if err != nil {
-		t.Fatalf("ResolveSuspension %s: %v", disposition, err)
-	}
-	resolved, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance after %s: %v", disposition, err)
-	}
-	if resolved.Status != "closed" || resolved.Outcome != outcome || resolved.Suspended() {
-		t.Fatalf("%s state = %+v suspended=%v, want closed/%s and cleared", disposition, resolved.State(), resolved.Suspended(), outcome)
-	}
-	if resolved.Revision != suspended.Revision+1 {
-		t.Fatalf("%s revision = %d, want %d", disposition, resolved.Revision, suspended.Revision+1)
-	}
-
-	effects, ok := out["effects"].([]Effect)
-	if !ok || len(effects) != 1 {
-		t.Fatalf("%s returned effects = %#v, want one effect", disposition, out["effects"])
-	}
-	assertDeliveredTaskStateEffect(t, effects[0])
-	listed, err := svc.ListEffects(taskUUID, true)
-	if err != nil {
-		t.Fatalf("ListEffects after %s: %v", disposition, err)
-	}
-	if len(listed) != 1 || listed[0].SemanticKey == "" || listed[0].ID != effects[0].ID {
-		t.Fatalf("%s listed effects = %+v, want exactly one semantic-keyed effect", disposition, listed)
-	}
-	assertDeliveredTaskStateEffect(t, listed[0])
-
-	var state, updatedBy string
-	if err := svc.db.QueryRow(`SELECT state, COALESCE(updated_by_principal_ref, '') FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state, &updatedBy); err != nil {
-		t.Fatalf("read task after %s: %v", disposition, err)
-	}
-	if state != taskState || updatedBy != workflowSystemAttribution.PrincipalRef {
-		t.Fatalf("task after %s = state %q updated_by %q, want %q by %q", disposition, state, updatedBy, taskState, workflowSystemAttribution.PrincipalRef)
+			var state, updatedBy string
+			if err := svc.db.QueryRow(`SELECT state, COALESCE(updated_by_principal_ref, '') FROM tasks WHERE uuid = ?`, taskUUID).Scan(&state, &updatedBy); err != nil {
+				t.Fatalf("read task after %s: %v", disposition, err)
+			}
+			if state != tc.taskState || updatedBy != workflowSystemAttribution.PrincipalRef {
+				t.Fatalf("task after %s = state %q updated_by %q, want %q by %q", disposition, state, updatedBy, tc.taskState, workflowSystemAttribution.PrincipalRef)
+			}
+		})
 	}
 }
 
@@ -288,73 +288,72 @@ func TestResolveSuspensionBuiltinEffectFailureReturnsCommittedPartialResult(t *t
 	}
 }
 
-// TestResolveSuspensionIDIsTheOnlyGate proves a non-matching suspension id is
-// refused with WRKF_SUSPENSION_NOT_FOUND and nothing is written.
-func TestResolveSuspensionIDIsTheOnlyGate(t *testing.T) {
-	svc, taskUUID, suspended := parkForResolve(t)
-
-	_, err := svc.ResolveSuspension(ResolveSuspensionParams{
-		SuspensionID: "sus_does_not_exist",
-		Disposition:  DispositionResume,
-	})
-	requireWrkfCode(t, err, wrkfCodeSuspensionNotFound)
-
-	after, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance after refused resolve: %v", err)
+// TestSuspensionResolveRefusalsWriteNothing proves every refused resolution
+// leaves the instance, its runs (including active holders a terminal
+// disposition would revoke), the task, the event ledger and the effect outbox
+// exactly as they were. The suspension id is the only gate: a non-matching id
+// and an id that no longer names an active suspension (repeat resolve) are both
+// WRKF_SUSPENSION_NOT_FOUND, so a resolve is never double-applied.
+func TestSuspensionResolveRefusalsWriteNothing(t *testing.T) {
+	cases := []struct {
+		name string
+		// prepare runs before the durable snapshot is taken.
+		prepare  func(t *testing.T, f terminalDispositionFixture)
+		params   func(f terminalDispositionFixture) ResolveSuspensionParams
+		wantCode string
+	}{
+		{
+			name: "unknown suspension id",
+			params: func(terminalDispositionFixture) ResolveSuspensionParams {
+				return ResolveSuspensionParams{SuspensionID: "sus_does_not_exist", Disposition: DispositionCancel}
+			},
+			wantCode: wrkfCodeSuspensionNotFound,
+		},
+		{
+			name: "unknown disposition",
+			params: func(f terminalDispositionFixture) ResolveSuspensionParams {
+				return ResolveSuspensionParams{SuspensionID: f.suspended.Suspension.ID, Disposition: "retry"}
+			},
+			wantCode: wrkfCodeValidation,
+		},
+		{
+			name: "stale expectRevision",
+			params: func(f terminalDispositionFixture) ResolveSuspensionParams {
+				stale := f.suspended.Revision - 1
+				return ResolveSuspensionParams{SuspensionID: f.suspended.Suspension.ID, Disposition: DispositionCancel, ExpectRevision: &stale}
+			},
+			wantCode: wrkfCodeStaleRevision,
+		},
+		{
+			name: "repeat resolve after clear",
+			prepare: func(t *testing.T, f terminalDispositionFixture) {
+				if _, err := f.svc.ResolveSuspension(ResolveSuspensionParams{
+					SuspensionID: f.suspended.Suspension.ID, Disposition: DispositionResume,
+					PrincipalRef: "agent:supervisor", Role: "supervisor",
+				}); err != nil {
+					t.Fatalf("first resolve: %v", err)
+				}
+			},
+			params: func(f terminalDispositionFixture) ResolveSuspensionParams {
+				return ResolveSuspensionParams{SuspensionID: f.suspended.Suspension.ID, Disposition: DispositionCancel}
+			},
+			wantCode: wrkfCodeSuspensionNotFound,
+		},
 	}
-	if !after.Suspended() || after.Suspension.ID != suspended.Suspension.ID || after.Revision != suspended.Revision {
-		t.Fatalf("refused resolve mutated the instance: %+v rev=%d", after.Suspension, after.Revision)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setupTerminalDispositionFixture(t)
+			if tc.prepare != nil {
+				tc.prepare(t, f)
+			}
+			before := terminalDispositionMutationSnapshot(t, f)
+			_, err := f.svc.ResolveSuspension(tc.params(f))
+			requireWrkfCode(t, err, tc.wantCode)
+			if after := terminalDispositionMutationSnapshot(t, f); after != before {
+				t.Fatalf("refused resolve mutated durable state:\nbefore %s\nafter  %s", before, after)
+			}
+		})
 	}
-}
-
-// TestResolveSuspensionRejectsUnknownDisposition guards the disposition input.
-func TestResolveSuspensionRejectsUnknownDisposition(t *testing.T) {
-	svc, _, suspended := parkForResolve(t)
-	_, err := svc.ResolveSuspension(ResolveSuspensionParams{
-		SuspensionID: suspended.Suspension.ID,
-		Disposition:  "retry",
-	})
-	requireWrkfCode(t, err, wrkfCodeValidation)
-}
-
-// TestResolveSuspensionHonorsRevisionCAS proves the ordinary revision CAS
-// precondition applies and a stale expectation is rejected without a write.
-func TestResolveSuspensionHonorsRevisionCAS(t *testing.T) {
-	svc, taskUUID, suspended := parkForResolve(t)
-	stale := suspended.Revision - 1
-	_, err := svc.ResolveSuspension(ResolveSuspensionParams{
-		SuspensionID:   suspended.Suspension.ID,
-		Disposition:    DispositionResume,
-		ExpectRevision: &stale,
-	})
-	requireWrkfCode(t, err, wrkfCodeStaleRevision)
-
-	after, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance after stale CAS: %v", err)
-	}
-	if !after.Suspended() || after.Revision != suspended.Revision {
-		t.Fatalf("stale CAS still wrote: suspended=%v rev=%d", after.Suspended(), after.Revision)
-	}
-}
-
-// TestResolveSuspensionIsIdempotentAfterClear proves a repeat resolution of an
-// already-cleared suspension is refused (the id no longer names an active
-// suspension) rather than double-applying.
-func TestResolveSuspensionIsIdempotentAfterClear(t *testing.T) {
-	svc, _, suspended := parkForResolve(t)
-	if _, err := svc.ResolveSuspension(ResolveSuspensionParams{
-		SuspensionID: suspended.Suspension.ID,
-		Disposition:  DispositionResume,
-	}); err != nil {
-		t.Fatalf("first resolve: %v", err)
-	}
-	_, err := svc.ResolveSuspension(ResolveSuspensionParams{
-		SuspensionID: suspended.Suspension.ID,
-		Disposition:  DispositionResume,
-	})
-	requireWrkfCode(t, err, wrkfCodeSuspensionNotFound)
 }
 
 func hasSuspensionResolvedEvent(t *testing.T, svc *Service, instanceID, disposition string) bool {

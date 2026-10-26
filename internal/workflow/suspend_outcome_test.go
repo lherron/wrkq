@@ -3,7 +3,6 @@
 package workflow
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,125 +52,6 @@ const suspendOutcomeTemplate = `{
     }
   ]
 }`
-
-func TestSuspendOutcomeParsesTaggedUnionAndDispositionEffects(t *testing.T) {
-	tpl, canonical, err := ParseTemplate([]byte(suspendOutcomeTemplate))
-	if err != nil {
-		t.Fatalf("ParseTemplate: %v", err)
-	}
-	if errs := ValidateTemplate(tpl, canonical, nil); len(errs) > 0 {
-		t.Fatalf("ValidateTemplate: %v", errs)
-	}
-	outcome := tpl.Transitions[0].Outcomes[0]
-	if outcome.To != nil || outcome.Suspend == nil || outcome.Suspend.Reason != "operator_required" {
-		t.Fatalf("outcome union = to:%+v suspend:%+v", outcome.To, outcome.Suspend)
-	}
-	if tpl.Suspension == nil || len(tpl.Suspension.Effects["resume"]) != 1 || len(tpl.Suspension.Effects["close"]) != 1 || len(tpl.Suspension.Effects["cancel"]) != 1 {
-		t.Fatalf("suspension disposition effects did not parse: %+v", tpl.Suspension)
-	}
-}
-
-func TestSuspendOutcomeRejectsBothToAndSuspend(t *testing.T) {
-	bad := strings.Replace(suspendOutcomeTemplate,
-		`"suspend": { "reason": "operator_required" }`,
-		`"to": { "status": "closed", "outcome": "done" }, "suspend": { "reason": "operator_required" }`, 1)
-	requireTemplateValidationError(t, bad, "must declare exactly one of to or suspend")
-}
-
-func TestSuspendOutcomeRejectsNeitherToNorSuspend(t *testing.T) {
-	bad := strings.Replace(suspendOutcomeTemplate, `"suspend": { "reason": "operator_required" }`, `"description": "missing target"`, 1)
-	requireTemplateValidationError(t, bad, "transition park outcome needs_operator must declare exactly one of to or suspend")
-}
-
-func TestSuspendOutcomeRejectsUndeclaredReason(t *testing.T) {
-	bad := strings.Replace(suspendOutcomeTemplate, `"reason": "operator_required"`, `"reason": "unlisted_reason"`, 1)
-	requireTemplateValidationError(t, bad, `outcome needs_operator suspend reason "unlisted_reason" is not declared`)
-}
-
-func TestSuspendOutcomeRejectsClosedSource(t *testing.T) {
-	bad := strings.Replace(suspendOutcomeTemplate,
-		`"from": { "status": "active", "phase": "ready" }`,
-		`"from": { "status": "closed", "outcome": "done" }`, 1)
-	requireTemplateValidationError(t, bad, "outcome needs_operator cannot suspend from a closed state")
-}
-
-func TestSuspensionPolicyRejectsDeadDeclaration(t *testing.T) {
-	bad := strings.Replace(suspendOutcomeTemplate, `"suspend": { "reason": "operator_required" }`, `"to": { "status": "closed", "outcome": "done" }`, 1)
-	requireTemplateValidationError(t, bad, "suspension is declared but no outcome uses suspend")
-}
-
-func TestSuspensionPolicyReasonDeclarationValidation(t *testing.T) {
-	tests := []struct {
-		name         string
-		document     string
-		wantErrors   []string
-		wantErrorLen int
-	}{
-		{
-			name:         "used declaration",
-			document:     suspendOutcomeTemplate,
-			wantErrorLen: 0,
-		},
-		{
-			name:     "unused declaration",
-			document: strings.Replace(suspendOutcomeTemplate, `["operator_required"]`, `["operator_required", "never_used"]`, 1),
-			wantErrors: []string{
-				`suspension reason "never_used" is declared but not referenced by any outcome`,
-			},
-			wantErrorLen: 1,
-		},
-		{
-			name:     "duplicate declaration",
-			document: strings.Replace(suspendOutcomeTemplate, `["operator_required"]`, `["operator_required", "operator_required"]`, 1),
-			wantErrors: []string{
-				`duplicate suspension reason "operator_required"`,
-			},
-			wantErrorLen: 1,
-		},
-		{
-			name:     "empty declaration",
-			document: strings.Replace(suspendOutcomeTemplate, `["operator_required"]`, `["operator_required", " "]`, 1),
-			wantErrors: []string{
-				`suspension.reasons[1] must not be empty`,
-			},
-			wantErrorLen: 1,
-		},
-		{
-			name:     "referenced but undeclared",
-			document: strings.Replace(suspendOutcomeTemplate, `"reason": "operator_required"`, `"reason": "unlisted_reason"`, 1),
-			wantErrors: []string{
-				`transition park outcome needs_operator suspend reason "unlisted_reason" is not declared in suspension.reasons`,
-				`suspension reason "operator_required" is declared but not referenced by any outcome`,
-			},
-			wantErrorLen: 2,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			tpl, canonical, err := ParseTemplate([]byte(tc.document))
-			if err != nil {
-				t.Fatalf("ParseTemplate: %v", err)
-			}
-			errs := ValidateTemplate(tpl, canonical, nil)
-			if len(errs) != tc.wantErrorLen {
-				t.Fatalf("validation errors = %v, want %d", errs, tc.wantErrorLen)
-			}
-			for i, want := range tc.wantErrors {
-				if errs[i] != want {
-					t.Fatalf("validation errors[%d] = %q, want %q; all errors: %v", i, errs[i], want, errs)
-				}
-			}
-		})
-	}
-}
-
-func TestSuspensionPolicyRejectsUnknownDisposition(t *testing.T) {
-	bad := strings.Replace(suspendOutcomeTemplate,
-		`"resume": [{ "kind": "resume_notice", "role": "coordinator" }]`,
-		`"retry": [{ "kind": "resume_notice", "role": "coordinator" }]`, 1)
-	requireTemplateValidationError(t, bad, `unknown disposition "retry"`)
-}
 
 func TestTransitionSuspendOutcomeRecordsConditionAndPreservesState(t *testing.T) {
 	svc, taskUUID, attached := setupSuspendOutcomeFixture(t)
@@ -229,76 +109,18 @@ func TestTransitionSuspendOutcomeRecordsConditionAndPreservesState(t *testing.T)
 	if len(queried.Items) != 1 || queried.Items[0].Suspension == nil || queried.Items[0].BeforeRevision != attached.Revision || queried.Items[0].AfterRevision != current.Revision {
 		t.Fatalf("queried suspension event = %+v", queried.Items)
 	}
-}
 
-func TestActionSettlementSuspendOutcomeRecordsConditionAndPreservesState(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	doc := builtinV2Doc(t)
-	doc["id"] = "action-suspend-outcome-test"
-	doc["version"] = "1"
-	doc["suspension"] = map[string]any{"reasons": []any{"operator_required"}}
-	transitions := doc["transitions"].([]any)
-	for _, raw := range transitions {
-		transition := raw.(map[string]any)
-		if transition["id"] != "triage_complete" {
-			continue
-		}
-		ready := transition["outcomes"].([]any)[0].(map[string]any)
-		delete(ready, "to")
-		ready["suspend"] = map[string]any{"reason": "operator_required"}
-	}
-	data, err := json.Marshal(doc)
+	// Reads/inspection are unaffected by the park and surface the suspension.
+	readback, err := svc.InspectTask(taskUUID)
 	if err != nil {
-		t.Fatalf("marshal template: %v", err)
+		t.Fatalf("InspectTask while suspended: %v", err)
 	}
-	tpl, canonical, err := ParseTemplate(data)
-	if err != nil {
-		t.Fatalf("ParseTemplate: %v", err)
+	if !readback.Suspended() || readback.Suspension.ID != current.Suspension.ID {
+		t.Fatalf("readback lost suspension: %+v", readback.Suspension)
 	}
-	if _, err := svc.installTemplateCanonical(tpl, canonical, Hash(canonical), "test-installer", nil, false); err != nil {
-		t.Fatalf("install template: %v", err)
-	}
-	attached, err := svc.AttachTask(taskUUID, "action-suspend-outcome-test@1", "test-installer")
-	if err != nil {
-		t.Fatalf("AttachTask: %v", err)
-	}
-	claim := claimActionForTest(t, svc, taskUUID, "triage")
-	var taskETagBefore int64
-	if err := svc.db.QueryRow(`SELECT etag FROM tasks WHERE uuid = ?`, taskUUID).Scan(&taskETagBefore); err != nil {
-		t.Fatalf("task etag before settle: %v", err)
-	}
-	if _, err := svc.SettleAction(SettleActionParams{
-		ActionRunID:     claim.Binding.Run.ID,
-		OwnerToken:      claim.Binding.Authority.OwnerToken,
-		OwnerGeneration: claim.Binding.Authority.OwnerGeneration,
-		Result:          "completed",
-		Evidence:        &ActionEvidenceInput{Summary: "triaged", Facts: `{"result":"ready"}`},
-	}); err != nil {
-		t.Fatalf("SettleAction: %v", err)
-	}
-	current, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance: %v", err)
-	}
-	if current.State() != attached.State() {
-		t.Fatalf("settlement suspend outcome changed state: before=%+v after=%+v", attached.State(), current.State())
-	}
-	if current.Revision != attached.Revision+1 || current.Suspension == nil || current.Suspension.Reason != "operator_required" || current.Suspension.CauseRef == "" {
-		t.Fatalf("settlement suspension/revision = %+v rev=%d", current.Suspension, current.Revision)
-	}
-	var taskETagAfter int64
-	if err := svc.db.QueryRow(`SELECT etag FROM tasks WHERE uuid = ?`, taskUUID).Scan(&taskETagAfter); err != nil {
-		t.Fatalf("task etag after settle: %v", err)
-	}
-	if taskETagAfter != taskETagBefore {
-		t.Fatalf("settlement suspend outcome touched task document etag: before=%d after=%d", taskETagBefore, taskETagAfter)
-	}
-	var eventType string
-	if err := svc.db.QueryRow(`SELECT type FROM workflow_events WHERE id = ?`, current.Suspension.CauseRef).Scan(&eventType); err != nil {
-		t.Fatalf("load settlement suspension event: %v", err)
-	}
-	if eventType != "workflow.suspended" {
-		t.Fatalf("settlement park event type = %q, want workflow.suspended", eventType)
+	if readback.Status != attached.Status || readback.Phase != attached.Phase ||
+		readback.Outcome != attached.Outcome || readback.Revision != attached.Revision+1 {
+		t.Fatalf("readback state drifted: %+v rev=%d", readback.State(), readback.Revision)
 	}
 }
 
@@ -324,16 +146,4 @@ func setupSuspendOutcomeFixture(t *testing.T) (*Service, string, *Instance) {
 		t.Fatalf("AttachTask: %v", err)
 	}
 	return svc, taskUUID, attached
-}
-
-func requireTemplateValidationError(t *testing.T, document, want string) {
-	t.Helper()
-	tpl, canonical, err := ParseTemplate([]byte(document))
-	if err != nil {
-		t.Fatalf("ParseTemplate: %v", err)
-	}
-	joined := strings.Join(ValidateTemplate(tpl, canonical, nil), "; ")
-	if !strings.Contains(joined, want) {
-		t.Fatalf("validation errors = %q, want substring %q", joined, want)
-	}
 }

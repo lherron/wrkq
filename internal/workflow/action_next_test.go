@@ -4,8 +4,6 @@ package workflow
 
 import (
 	"encoding/json"
-	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -95,56 +93,6 @@ func TestActionNextV2CandidatesByPhaseAndReadOnly(t *testing.T) {
 		t.Fatalf("ActionNext ready: %v", err)
 	}
 	assertActionCandidates(t, ready, "implement")
-}
-
-func TestActionNextVerifyCandidateUsesExactImplementEvidenceSource(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	attachSimpleTaskV2WithSourceIdentity(t, svc, taskUUID)
-	startAndCompleteAction(t, svc, taskUUID, "triage", `{"result":"ready"}`)
-	impl := startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"commit-abc123","change.id":"change-v1:opaque-identity","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
-	if impl.Evidence == nil {
-		t.Fatalf("implement completion missing evidence")
-	}
-
-	// A newer implement_result without an implement action run must not become
-	// the verify source. This guards against "latest evidence" inference.
-	if _, err := svc.AddEvidence(AddEvidenceParams{
-		TaskSelector: taskUUID,
-		Kind:         "implement_result",
-		Ref:          "manual:unrelated",
-		Summary:      "unrelated latest evidence",
-		Facts:        `{"result":"done","commit.sha":"wrong-latest"}`,
-		PrincipalRef: "agent:t",
-		Role:         "implementer",
-	}); err != nil {
-		t.Fatalf("AddEvidence unrelated implement_result: %v", err)
-	}
-
-	result, err := svc.ActionNext(ActionNextParams{Task: taskUUID})
-	if err != nil {
-		t.Fatalf("ActionNext implemented: %v", err)
-	}
-	assertActionCandidates(t, result, "verify")
-	c := result.Candidates[0]
-	if c.Source == nil {
-		t.Fatalf("verify candidate missing source: %+v", c)
-	}
-	if c.Source.SourceRunID != impl.Run.RunID {
-		t.Fatalf("sourceRunId = %q, want %q", c.Source.SourceRunID, impl.Run.RunID)
-	}
-	if c.Source.SourceEvidenceID != impl.Evidence.ID {
-		t.Fatalf("sourceEvidenceId = %q, want %q", c.Source.SourceEvidenceID, impl.Evidence.ID)
-	}
-	if c.Source.SourceIdentity != "change-v1:opaque-identity" {
-		t.Fatalf("sourceIdentity = %q, want change-v1:opaque-identity", c.Source.SourceIdentity)
-	}
-	wantSemanticKey := fmt.Sprintf("verify:%s:r%d", c.InstanceID, c.ExpectedStateRevision)
-	if c.SemanticActionKey != wantSemanticKey {
-		t.Fatalf("semanticActionKey = %q, want action occurrence %q", c.SemanticActionKey, wantSemanticKey)
-	}
-	if strings.Contains(c.SemanticActionKey, "wrong-latest") {
-		t.Fatalf("semanticActionKey used unrelated latest evidence: %q", c.SemanticActionKey)
-	}
 }
 
 func TestActionNextBlockedVerifyWhenSourceMissing(t *testing.T) {

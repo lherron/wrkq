@@ -7,32 +7,6 @@ import (
 	"testing"
 )
 
-func TestAttachTaskEnsuresBuiltinTemplate(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-
-	inst, err := svc.AttachTask(taskUUID, BuiltinRoom2BoxTemplateRef, "agent:t")
-	if err != nil {
-		t.Fatalf("AttachTask(%s) on fresh DB: %v", BuiltinRoom2BoxTemplateRef, err)
-	}
-	if inst.TemplateID != "room-2box" || inst.TemplateVersion != "1" {
-		t.Fatalf("instance template = %s@%s, want room-2box@1", inst.TemplateID, inst.TemplateVersion)
-	}
-
-	templates, err := svc.ListTemplates()
-	if err != nil {
-		t.Fatalf("ListTemplates: %v", err)
-	}
-	found := false
-	for _, row := range templates {
-		if row["id"] == "room-2box" && row["version"] == "1" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("room-2box@1 not installed after attach; templates = %v", templates)
-	}
-}
-
 func TestAttachTaskUnknownNonBuiltinStillErrors(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 

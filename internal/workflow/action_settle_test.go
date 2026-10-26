@@ -46,38 +46,7 @@ func attachSimpleTaskV2WithGenericSettleContracts(t *testing.T, svc *Service, ta
 	}
 }
 
-func TestSettleActionTemplateIdentityRejectsMismatch(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	attachSimpleTaskV2WithGenericSettleContracts(t, svc, taskUUID)
-	triage := claimActionForTest(t, svc, taskUUID, "triage")
-	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
-	implement := claimActionForTest(t, svc, taskUUID, "implement")
-	impl := settleClaimForTest(t, svc, implement, `{"result":"done","commit.sha":"abc123","change.id":"change-v1:expected","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
-	verify := claimActionForTest(t, svc, taskUUID, "verify")
-	if verify.Binding.Run.Source == nil || verify.Binding.Run.Source.SourceIdentity != "change-v1:expected" {
-		t.Fatalf("verify source = %+v, want change-v1:expected", verify.Binding.Run.Source)
-	}
-
-	before := actionNextMutationCounts(t, svc)
-	_, err := svc.SettleAction(SettleActionParams{
-		ActionRunID:     verify.Binding.Run.ID,
-		OwnerToken:      verify.Binding.Authority.OwnerToken,
-		OwnerGeneration: verify.Binding.Authority.OwnerGeneration,
-		Result:          "completed",
-		Evidence: &ActionEvidenceInput{
-			Summary: "wrong identity",
-			Facts:   `{"result":"verified","source.commit.sha":"abc123","verified.commit.sha":"abc123","source.evidence_id":"` + impl.Evidence.ID + `","verified.change.id":"change-v1:foreign","git.clean":true}`,
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "identity") {
-		t.Fatalf("wrong source identity error = %v, want identity validation", err)
-	}
-	if after := actionNextMutationCounts(t, svc); after != before {
-		t.Fatalf("wrong source identity mutated rows: before=%+v after=%+v", before, after)
-	}
-}
-
-func TestSettleActionTemplateContractsRejectMissingLinkageAndEcho(t *testing.T) {
+func TestSettleRefusesVerifyFactsViolatingTemplateContractWithoutWrites(t *testing.T) {
 	cases := []struct {
 		name               string
 		facts              func(string) string
@@ -116,6 +85,13 @@ func TestSettleActionTemplateContractsRejectMissingLinkageAndEcho(t *testing.T) 
 			},
 			wantError: "echo",
 		},
+		{
+			name: "identity mismatch",
+			facts: func(sourceEvidenceID string) string {
+				return `{"result":"verified","source.commit.sha":"abc123","verified.commit.sha":"abc123","source.evidence_id":"` + sourceEvidenceID + `","verified.change.id":"change-v1:foreign","git.clean":true}`
+			},
+			wantError: "identity",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -126,6 +102,9 @@ func TestSettleActionTemplateContractsRejectMissingLinkageAndEcho(t *testing.T) 
 			implement := claimActionForTest(t, svc, taskUUID, "implement")
 			impl := settleClaimForTest(t, svc, implement, `{"result":"done","commit.sha":"abc123","change.id":"change-v1:expected","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
 			verify := claimActionForTest(t, svc, taskUUID, "verify")
+			if verify.Binding.Run.Source == nil || verify.Binding.Run.Source.SourceIdentity != "change-v1:expected" {
+				t.Fatalf("verify source = %+v, want change-v1:expected", verify.Binding.Run.Source)
+			}
 			sourceEvidenceID := impl.Evidence.ID
 			if tc.foreignSource {
 				foreign, err := svc.AddEvidence(AddEvidenceParams{
@@ -165,63 +144,100 @@ func TestSettleActionTemplateContractsRejectMissingLinkageAndEcho(t *testing.T) 
 	}
 }
 
-func TestSettleActionCompletedIdempotentAndProjection(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	setTaskSpecAndState(t, svc, taskUUID, "Shaped spec.", "in_progress")
-	attachSimpleTaskV2(t, svc, taskUUID)
-	claim := claimActionForTest(t, svc, taskUUID, "triage")
+// Settlement is idempotent per action run: a replay with the same payload
+// returns the same run and evidence without writing evidence or event rows, and
+// a replay with a changed payload is refused WRKF_IDEMPOTENCY_MISMATCH. The
+// completed row also pins the settle projection (task state, revoked token with
+// the claim audit fields kept); the operational_failed row covers a downgrade
+// settle carrying an explicit evidence kind and no transition.
+func TestSettleReplayIsIdempotentAndChangedPayloadIsRefused(t *testing.T) {
+	t.Run("completed", func(t *testing.T) {
+		svc, taskUUID := actionFixture(t)
+		setTaskSpecAndState(t, svc, taskUUID, "Shaped spec.", "in_progress")
+		attachSimpleTaskV2(t, svc, taskUUID)
+		claim := claimActionForTest(t, svc, taskUUID, "triage")
 
-	settle := settleClaimForTest(t, svc, claim, `{"result":"ready"}`, "triaged")
-	if settle.Run.Status != "completed" {
-		t.Fatalf("settled run status = %q, want completed", settle.Run.Status)
-	}
-	if settle.Evidence == nil || settle.Evidence.Kind != "triage_result" || settle.Evidence.RunID != claim.Binding.Run.ID {
-		t.Fatalf("settlement evidence = %+v", settle.Evidence)
-	}
-	if settle.Transition == nil {
-		t.Fatalf("settlement missing transition")
-	}
-	inst, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance: %v", err)
-	}
-	if inst.Phase != "ready" || inst.Revision != 1 {
-		t.Fatalf("instance state = %+v, want active/ready rev 1", inst.State())
-	}
-	if got := readTaskState(t, svc, taskUUID); got != "open" {
-		t.Fatalf("task state after v2 triage = %q, want open", got)
-	}
-	shown, err := svc.ShowRun(claim.Binding.Run.ID)
-	if err != nil {
-		t.Fatalf("ShowRun: %v", err)
-	}
-	if shown.LeaseToken != "" || shown.LeaseOwner != claim.Binding.Authority.RunnerID || shown.LeaseExpiresAt == "" || shown.HeartbeatAt == "" {
-		t.Fatalf("settlement did not revoke token while preserving claim audit fields: %+v", shown)
-	}
+		settle := settleClaimForTest(t, svc, claim, `{"result":"ready"}`, "triaged")
+		if settle.Run.Status != "completed" {
+			t.Fatalf("settled run status = %q, want completed", settle.Run.Status)
+		}
+		if settle.Evidence == nil || settle.Evidence.Kind != "triage_result" || settle.Evidence.RunID != claim.Binding.Run.ID {
+			t.Fatalf("settlement evidence = %+v", settle.Evidence)
+		}
+		if settle.Transition == nil {
+			t.Fatalf("settlement missing transition")
+		}
+		inst, err := svc.LatestInstance(taskUUID)
+		if err != nil {
+			t.Fatalf("LatestInstance: %v", err)
+		}
+		if inst.Phase != "ready" || inst.Revision != 1 {
+			t.Fatalf("instance state = %+v, want active/ready rev 1", inst.State())
+		}
+		if got := readTaskState(t, svc, taskUUID); got != "open" {
+			t.Fatalf("task state after v2 triage = %q, want open", got)
+		}
+		shown, err := svc.ShowRun(claim.Binding.Run.ID)
+		if err != nil {
+			t.Fatalf("ShowRun: %v", err)
+		}
+		if shown.LeaseToken != "" || shown.LeaseOwner != claim.Binding.Authority.RunnerID || shown.LeaseExpiresAt == "" || shown.HeartbeatAt == "" {
+			t.Fatalf("settlement did not revoke token while preserving claim audit fields: %+v", shown)
+		}
 
-	beforeEvidence := countTable(t, svc, "workflow_evidence")
-	beforeEvents := countTable(t, svc, "workflow_events")
-	replay := settleClaimForTest(t, svc, claim, `{"result":"ready"}`, "triaged")
-	if replay.Evidence == nil || replay.Evidence.ID != settle.Evidence.ID {
-		t.Fatalf("replay evidence = %+v, want %s", replay.Evidence, settle.Evidence.ID)
-	}
-	if got := countTable(t, svc, "workflow_evidence"); got != beforeEvidence {
-		t.Fatalf("evidence rows after replay = %d, want %d", got, beforeEvidence)
-	}
-	if got := countTable(t, svc, "workflow_events"); got != beforeEvents {
-		t.Fatalf("event rows after replay = %d, want %d", got, beforeEvents)
-	}
+		beforeEvidence := countTable(t, svc, "workflow_evidence")
+		beforeEvents := countTable(t, svc, "workflow_events")
+		replay := settleClaimForTest(t, svc, claim, `{"result":"ready"}`, "triaged")
+		if replay.Evidence == nil || replay.Evidence.ID != settle.Evidence.ID {
+			t.Fatalf("replay evidence = %+v, want %s", replay.Evidence, settle.Evidence.ID)
+		}
+		if got := countTable(t, svc, "workflow_evidence"); got != beforeEvidence {
+			t.Fatalf("evidence rows after replay = %d, want %d", got, beforeEvidence)
+		}
+		if got := countTable(t, svc, "workflow_events"); got != beforeEvents {
+			t.Fatalf("event rows after replay = %d, want %d", got, beforeEvents)
+		}
 
-	_, err = svc.SettleAction(SettleActionParams{
-		ActionRunID:     claim.Binding.Run.ID,
-		OwnerToken:      claim.Binding.Authority.OwnerToken,
-		OwnerGeneration: claim.Binding.Authority.OwnerGeneration,
-		Result:          "completed",
-		Evidence:        &ActionEvidenceInput{Summary: "different", Facts: `{"result":"ready"}`},
+		_, err = svc.SettleAction(SettleActionParams{
+			ActionRunID:     claim.Binding.Run.ID,
+			OwnerToken:      claim.Binding.Authority.OwnerToken,
+			OwnerGeneration: claim.Binding.Authority.OwnerGeneration,
+			Result:          "completed",
+			Evidence:        &ActionEvidenceInput{Summary: "different", Facts: `{"result":"ready"}`},
+		})
+		requireWrkfCode(t, err, "WRKF_IDEMPOTENCY_MISMATCH")
 	})
-	if err == nil || !strings.Contains(err.Error(), "idempotency") {
-		t.Fatalf("conflicting terminal replay error = %v, want idempotency conflict", err)
-	}
+
+	t.Run("operational_failed", func(t *testing.T) {
+		svc, taskUUID := actionFixture(t)
+		attachSimpleTaskV2WithSourceIdentity(t, svc, taskUUID)
+		startAndCompleteAction(t, svc, taskUUID, "triage", `{"result":"ready"}`)
+		startAndCompleteAction(t, svc, taskUUID, "implement", `{"result":"done","commit.sha":"source-one","change.id":"change-v1:source-one","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`)
+		verify := claimActionForTest(t, svc, taskUUID, "verify")
+
+		settle := SettleActionParams{
+			ActionRunID:     verify.Binding.Run.ID,
+			OwnerToken:      verify.Binding.Authority.OwnerToken,
+			OwnerGeneration: verify.Binding.Authority.OwnerGeneration,
+			Result:          "operational_failed",
+			Evidence: &ActionEvidenceInput{
+				Kind:    "failure_result",
+				Summary: "retryable verification failure",
+				Facts:   `{}`,
+			},
+		}
+		if _, err := svc.SettleAction(settle); err != nil {
+			t.Fatalf("settle verification failure: %v", err)
+		}
+		if replayed, err := svc.SettleAction(settle); err != nil {
+			t.Fatalf("idempotent settlement replay: %v", err)
+		} else if replayed.Run.ID != verify.Binding.Run.ID {
+			t.Fatalf("idempotent settlement run id = %q, want %q", replayed.Run.ID, verify.Binding.Run.ID)
+		}
+		settle.Evidence.Summary = "different failure payload"
+		_, err := svc.SettleAction(settle)
+		requireWrkfCode(t, err, "WRKF_IDEMPOTENCY_MISMATCH")
+	})
 }
 
 func TestSettleActionRejectsWrongOwnershipWithoutMutation(t *testing.T) {
@@ -237,9 +253,7 @@ func TestSettleActionRejectsWrongOwnershipWithoutMutation(t *testing.T) {
 		Result:          "completed",
 		Evidence:        &ActionEvidenceInput{Summary: "triaged", Facts: `{"result":"ready"}`},
 	})
-	if err == nil || !strings.Contains(err.Error(), "lease conflict") {
-		t.Fatalf("wrong owner error = %v, want lease conflict", err)
-	}
+	requireWrkfCode(t, err, "WRKF_LEASE_CONFLICT")
 	after := actionNextMutationCounts(t, svc)
 	if after != before {
 		t.Fatalf("wrong owner mutated rows: before=%+v after=%+v", before, after)
@@ -415,63 +429,6 @@ func TestSettleActionImplementRequiresGitCommittedCleanFacts(t *testing.T) {
 	}
 	if inst.Phase != "implemented" {
 		t.Fatalf("instance phase = %q, want implemented", inst.Phase)
-	}
-}
-
-func TestSettleActionVerifyRequiresBoundSourceIdentity(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	attachSimpleTaskV2(t, svc, taskUUID)
-	triage := claimActionForTest(t, svc, taskUUID, "triage")
-	settleClaimForTest(t, svc, triage, `{"result":"ready"}`, "triaged")
-	impl := claimActionForTest(t, svc, taskUUID, "implement")
-	implemented := settleClaimForTest(t, svc, impl, `{"result":"done","commit.sha":"abc123","change.id":"change-v1:abc123","git.clean":true,"base.sha":"base000","postcondition":"git_committed_clean","repair.turns":0}`, "implemented")
-	if _, err := svc.AddEvidence(AddEvidenceParams{
-		TaskSelector: taskUUID,
-		Kind:         "implement_result",
-		Ref:          "manual:latest-head",
-		Summary:      "unrelated latest evidence",
-		Facts:        `{"result":"done","commit.sha":"wrong-latest"}`,
-		PrincipalRef: "agent:t",
-		Role:         "implementer",
-	}); err != nil {
-		t.Fatalf("AddEvidence unrelated latest: %v", err)
-	}
-
-	verify := claimActionForTest(t, svc, taskUUID, "verify")
-	if verify.Binding.Run.Source == nil || verify.Binding.Run.Source.SourceIdentity != "change-v1:abc123" {
-		t.Fatalf("verify claim source = %+v, want change-v1:abc123", verify.Binding.Run.Source)
-	}
-	before := actionNextMutationCounts(t, svc)
-	_, err := svc.SettleAction(SettleActionParams{
-		ActionRunID:     verify.Binding.Run.ID,
-		OwnerToken:      verify.Binding.Authority.OwnerToken,
-		OwnerGeneration: verify.Binding.Authority.OwnerGeneration,
-		Result:          "completed",
-		Evidence: &ActionEvidenceInput{
-			Summary: "verified wrong latest",
-			Facts:   `{"result":"verified","source.evidence_id":"` + implemented.Evidence.ID + `","source.commit.sha":"abc123","verified.commit.sha":"abc123","verified.change.id":"change-v1:wrong-latest","git.clean":true}`,
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "identity") {
-		t.Fatalf("wrong source verify error = %v, want source identity validation", err)
-	}
-	if after := actionNextMutationCounts(t, svc); after != before {
-		t.Fatalf("wrong source verify mutated rows: before=%+v after=%+v", before, after)
-	}
-
-	out := settleClaimForTest(t, svc, verify, `{"result":"verified","source.evidence_id":"`+implemented.Evidence.ID+`","source.commit.sha":"abc123","verified.commit.sha":"abc123","verified.change.id":"change-v1:abc123","context.id":"context-v1:abc123","git.clean":true}`, "verified")
-	if out.Transition == nil {
-		t.Fatalf("verify settlement missing transition")
-	}
-	inst, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance: %v", err)
-	}
-	if inst.Status != "closed" || inst.Phase != "done" {
-		t.Fatalf("instance state = %+v, want closed/done", inst.State())
-	}
-	if got := readTaskState(t, svc, taskUUID); got != "completed" {
-		t.Fatalf("task state after v2 verify = %q, want completed", got)
 	}
 }
 

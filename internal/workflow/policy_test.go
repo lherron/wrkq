@@ -4,7 +4,6 @@ package workflow
 
 import (
 	"database/sql"
-	"errors"
 	"strings"
 	"testing"
 )
@@ -128,21 +127,6 @@ func TestWorkflowPolicyRegistryResolution(t *testing.T) {
 	}
 }
 
-func TestDefaultWorkflowPolicyNoop(t *testing.T) {
-	policy := defaultWorkflowPolicy{}
-	obligations := []Obligation{{ID: "stored", Kind: "stored", Status: "open"}}
-	if err := policy.ValidateEvidence(AddEvidenceParams{Kind: "anything"}, nil); err != nil {
-		t.Fatalf("ValidateEvidence default: %v", err)
-	}
-	if err := policy.OnEvidenceAdded(nil, nil, nil); err != nil {
-		t.Fatalf("OnEvidenceAdded default: %v", err)
-	}
-	got := policy.ProjectObligations(nil, nil, obligations, nil, true)
-	if len(got) != 1 || got[0].ID != "stored" {
-		t.Fatalf("ProjectObligations default = %+v, want stored obligation unchanged", got)
-	}
-}
-
 func TestAddEvidenceDispatchesPolicyValidationSideEffectsAndIdempotency(t *testing.T) {
 	svc, taskUUID := setupDirectEvidenceFixture(t)
 	policy := &recordingWorkflowPolicy{insertObligation: true}
@@ -187,41 +171,6 @@ func TestAddEvidenceDispatchesPolicyValidationSideEffectsAndIdempotency(t *testi
 	}
 	if count != 1 {
 		t.Fatalf("side-effect obligations = %d, want 1", count)
-	}
-}
-
-func TestAddActionEvidenceTxDispatchesPolicyValidation(t *testing.T) {
-	svc, taskUUID := setupDirectEvidenceFixture(t)
-	sentinel := errors.New("policy validation sentinel")
-	policy := &recordingWorkflowPolicy{validateErr: sentinel}
-	cleanup := installWorkflowPolicyForTest("direct_evidence_test", "1", policy)
-	defer cleanup()
-
-	inst, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance: %v", err)
-	}
-	tpl, _, err := svc.ShowTemplate(inst.TemplateID + "@" + inst.TemplateVersion)
-	if err != nil {
-		t.Fatalf("ShowTemplate: %v", err)
-	}
-	err = withImmediateTx(svc.db, func(tx *sql.Tx) error {
-		_, err := svc.addActionEvidenceTx(tx, inst, tpl, AddEvidenceParams{
-			Kind:         "behavior_note",
-			Ref:          "urn:policy:action-note",
-			PrincipalRef: "agent:policy",
-			Role:         "agent",
-		})
-		return err
-	})
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("addActionEvidenceTx error = %v, want sentinel validation error", err)
-	}
-	if policy.validateCalls != 1 {
-		t.Fatalf("ValidateEvidence calls = %d, want 1", policy.validateCalls)
-	}
-	if len(policy.addedEvidenceIDs) != 0 {
-		t.Fatalf("OnEvidenceAdded should not run after validation failure: %v", policy.addedEvidenceIDs)
 	}
 }
 

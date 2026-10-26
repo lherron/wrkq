@@ -266,10 +266,13 @@ func TestTransitionCASRace(t *testing.T) {
 // Test 2 — Idempotency replay
 // ---------------------------------------------------------------------------
 
-// TestTransitionIdempotencyReplay verifies the replay semantics of §5.1:
+// TestTransitionReplayWithStaleRevisionReturnsOriginalEvent verifies the
+// idempotency semantics of §5.1 / §6 invariant 2:
 //
 //	same idempotencyKey + same request hash → return the ORIGINAL committed
 //	TransitionResult (same eventId), not a fresh event.
+//	same idempotencyKey + different request hash → WRKF_IDEMPOTENCY_MISMATCH,
+//	detected before CAS and state-match rejection (no silent replay).
 //
 // Regression guard:
 //
@@ -278,7 +281,7 @@ func TestTransitionCASRace(t *testing.T) {
 //
 //	b) The idempotency check runs before CAS, so a second call with the original
 //	   ExpectRevision=0 replays instead of being rejected as stale.
-func TestTransitionIdempotencyReplay(t *testing.T) {
+func TestTransitionReplayWithStaleRevisionReturnsOriginalEvent(t *testing.T) {
 	svc, taskUUID, database := setupCASFixture(t)
 
 	rev0 := int64(0)
@@ -357,48 +360,15 @@ func TestTransitionIdempotencyReplay(t *testing.T) {
 		t.Errorf("replay inserted %d new event(s); want 0 (before=%d, after=%d)",
 			eventsAfter-eventsBefore, eventsBefore, eventsAfter)
 	}
-}
 
-// ---------------------------------------------------------------------------
-// Test 3 — Idempotency mismatch
-// ---------------------------------------------------------------------------
-
-// TestTransitionIdempotencyMismatch verifies that presenting the same
-// idempotencyKey with a different request payload returns WRKF_IDEMPOTENCY_MISMATCH
-// (contract §3 error table, §5.1, §6 invariant 2).
-//
-// Regression guard:
-//
-//	a) Idempotency mismatch detection runs before state-match rejection.
-//	b) The stored request hash is compared for reused keys so mismatches do not
-//	   replay silently.
-func TestTransitionIdempotencyMismatch(t *testing.T) {
-	svc, taskUUID, _ := setupCASFixture(t)
-
-	rev0 := int64(0)
-	const idemKey = "mismatch-key-1"
-
-	// ------ First call: commit with actor "human:alice" ------
-	_, err := svc.Transition(taskUUID, "complete", TransitionOptions{
-		PrincipalRef:   "human:alice",
-		Role:           "coordinator",
-		IdempotencyKey: idemKey,
-		ExpectRevision: &rev0,
-	})
-	if err != nil {
-		t.Fatalf("first transition: %v", err)
-	}
-
-	// ------ Second call: SAME key, DIFFERENT actor (different request hash) ------
+	// ------ Third call: SAME key, DIFFERENT principal (different request hash) ------
 	// Contract §5.1: same key + different request hash → WRKF_IDEMPOTENCY_MISMATCH.
-	// We deliberately omit ExpectRevision so the call is NOT rejected by CAS first —
-	// the mismatch check must fire before any CAS comparison.
+	// ExpectRevision is deliberately omitted so the call is NOT rejected by CAS
+	// first — the mismatch check must fire before any CAS or state-match check.
 	_, err = svc.Transition(taskUUID, "complete", TransitionOptions{
-		PrincipalRef:   "human:bob", // different from "human:alice"
+		PrincipalRef:   "human:other-actor",
 		Role:           "coordinator",
 		IdempotencyKey: idemKey,
-		// No ExpectRevision: let idempotency check reach mismatch detection.
 	})
-	// Idempotency mismatch must surface the typed conflict code.
 	requireWrkfCode(t, err, "WRKF_IDEMPOTENCY_MISMATCH")
 }

@@ -153,88 +153,61 @@ func TestProducibleByRejectsNonProducerRole(t *testing.T) {
 	}
 }
 
-func TestProducibleByUnsetAllowsAllRoles(t *testing.T) {
-	svc, task := setupDirectEvidenceFixture(t)
-	// behavior_note declares no producibleBy → any role allowed.
-	if _, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:x", PrincipalRef: "anyone", Role: "agent"}); err != nil {
-		t.Fatalf("unrestricted kind add should succeed: %v", err)
-	}
-}
-
 // E3 — data linkage resolution.
-func TestLinkageRefRejectsDanglingReference(t *testing.T) {
-	svc, task := setupDirectEvidenceFixture(t)
+func TestEvidenceLinkageRefusesDanglingMissingAndWrongKindRefs(t *testing.T) {
+	cases := []struct {
+		name string
+		// data builds the review's data from a seeded behavior_note-linked review id.
+		data func(seededReviewID string) string
+		// wantMessage, when non-empty, must appear in the refusal.
+		wantMessage string
+	}{
+		{
+			name:        "dangling id",
+			data:        func(string) string { return `{"basedOnBehaviorNoteId":"ev-DOESNOTEXIST"}` },
+			wantMessage: "ev-DOESNOTEXIST",
+		},
+		{
+			name: "required ref missing",
+			data: func(string) string { return `{}` },
+		},
+		{
+			// Points at a review, not a behavior_note.
+			name:        "wrong kind target",
+			data:        func(seededReviewID string) string { return `{"basedOnBehaviorNoteId":"` + seededReviewID + `"}` },
+			wantMessage: "expected behavior_note",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, task := setupDirectEvidenceFixture(t)
+			note, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:k", PrincipalRef: "agent-a", Role: "agent"})
+			if err != nil {
+				t.Fatalf("seed note: %v", err)
+			}
+			rev, err := svc.AddEvidence(AddEvidenceParams{
+				TaskSelector: task, Kind: "review", Ref: "urn:rev:k1",
+				Facts:        `{"verdict":"ready"}`,
+				Data:         `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
+				PrincipalRef: "po-a", Role: "product_owner",
+			})
+			if err != nil {
+				t.Fatalf("seed review with a valid linkage: %v", err)
+			}
 
-	_, err := svc.AddEvidence(AddEvidenceParams{
-		TaskSelector: task, Kind: "review", Ref: "urn:rev:dangling",
-		Facts:        `{"verdict":"ready"}`,
-		Data:         `{"basedOnBehaviorNoteId":"ev-DOESNOTEXIST"}`,
-		PrincipalRef: "po-a", Role: "product_owner",
-	})
-	if got := wrkfCode(err); got != wrkfCodeLinkageUnresolved {
-		t.Fatalf("dangling ref code = %q, want %s (err=%v)", got, wrkfCodeLinkageUnresolved, err)
-	}
-	if !strings.Contains(err.Error(), "ev-DOESNOTEXIST") {
-		t.Fatalf("message should name the bad ref: %v", err)
-	}
-}
-
-func TestLinkageRefRequiredMissing(t *testing.T) {
-	svc, task := setupDirectEvidenceFixture(t)
-	_, err := svc.AddEvidence(AddEvidenceParams{
-		TaskSelector: task, Kind: "review", Ref: "urn:rev:missing",
-		Facts:        `{"verdict":"ready"}`,
-		Data:         `{}`,
-		PrincipalRef: "po-a", Role: "product_owner",
-	})
-	if got := wrkfCode(err); got != wrkfCodeLinkageUnresolved {
-		t.Fatalf("missing required ref code = %q, want %s (err=%v)", got, wrkfCodeLinkageUnresolved, err)
-	}
-}
-
-func TestLinkageRefWrongKind(t *testing.T) {
-	svc, task := setupDirectEvidenceFixture(t)
-	// Create a review first, then reference IT (wrong kind) from another review.
-	note, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:k", PrincipalRef: "agent-a", Role: "agent"})
-	if err != nil {
-		t.Fatalf("seed note: %v", err)
-	}
-	rev, err := svc.AddEvidence(AddEvidenceParams{
-		TaskSelector: task, Kind: "review", Ref: "urn:rev:k1",
-		Facts:        `{"verdict":"ready"}`,
-		Data:         `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
-		PrincipalRef: "po-a", Role: "product_owner",
-	})
-	if err != nil {
-		t.Fatalf("seed review: %v", err)
-	}
-	_, err = svc.AddEvidence(AddEvidenceParams{
-		TaskSelector: task, Kind: "review", Ref: "urn:rev:k2",
-		Facts:        `{"verdict":"ready"}`,
-		Data:         `{"basedOnBehaviorNoteId":"` + rev.ID + `"}`, // points at a review, not a behavior_note
-		PrincipalRef: "po-a", Role: "product_owner",
-	})
-	if got := wrkfCode(err); got != wrkfCodeLinkageUnresolved {
-		t.Fatalf("wrong-kind ref code = %q, want %s (err=%v)", got, wrkfCodeLinkageUnresolved, err)
-	}
-	if !strings.Contains(err.Error(), "expected behavior_note") {
-		t.Fatalf("message should name expected kind: %v", err)
-	}
-}
-
-func TestLinkageRefValidReferenceSucceeds(t *testing.T) {
-	svc, task := setupDirectEvidenceFixture(t)
-	note, err := svc.AddEvidence(AddEvidenceParams{TaskSelector: task, Kind: "behavior_note", Ref: "urn:note:ok", PrincipalRef: "agent-a", Role: "agent"})
-	if err != nil {
-		t.Fatalf("seed note: %v", err)
-	}
-	if _, err := svc.AddEvidence(AddEvidenceParams{
-		TaskSelector: task, Kind: "review", Ref: "urn:rev:ok",
-		Facts:        `{"verdict":"ready"}`,
-		Data:         `{"basedOnBehaviorNoteId":"` + note.ID + `"}`,
-		PrincipalRef: "po-a", Role: "product_owner",
-	}); err != nil {
-		t.Fatalf("valid linkage add should succeed: %v", err)
+			_, err = svc.AddEvidence(AddEvidenceParams{
+				TaskSelector: task, Kind: "review", Ref: "urn:rev:bad",
+				Facts:        `{"verdict":"ready"}`,
+				Data:         tc.data(rev.ID),
+				PrincipalRef: "po-a", Role: "product_owner",
+			})
+			if got := wrkfCode(err); got != wrkfCodeLinkageUnresolved {
+				t.Fatalf("%s code = %q, want %s (err=%v)", tc.name, got, wrkfCodeLinkageUnresolved, err)
+			}
+			if tc.wantMessage != "" && !strings.Contains(err.Error(), tc.wantMessage) {
+				t.Fatalf("%s message should contain %q: %v", tc.name, tc.wantMessage, err)
+			}
+		})
 	}
 }
 
@@ -339,31 +312,6 @@ func TestLinkageLatestRejectsSupersededAndAcceptsCurrent(t *testing.T) {
 	}
 }
 
-func TestInstallValidationLatestRequiresKind(t *testing.T) {
-	bad := `{
-	  "schemaVersion": "wrkf.workflow-template.v0",
-	  "id": "bad_latest",
-	  "version": "1",
-	  "kind": "agent_first_workflow",
-	  "initial": { "status": "active", "phase": "p" },
-	  "roles": { "agent": {} },
-	  "states": [ { "status": "active", "phase": "p" }, { "status": "closed", "outcome": "x" } ],
-	  "evidenceKinds": { "k": { "linkageRefs": [ { "path": "/ref", "latest": true } ] } },
-	  "transitions": [
-	    { "id": "t", "from": { "status": "active", "phase": "p" }, "by": ["agent"],
-	      "outcomes": [ { "id": "o", "when": { "always": true }, "to": { "status": "closed", "outcome": "x" } } ] }
-	  ]
-	}`
-	var tpl Template
-	if err := json.Unmarshal([]byte(bad), &tpl); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	joined := strings.Join(ValidateTemplate(&tpl, []byte(bad), nil), "\n")
-	if !strings.Contains(joined, "latest requires resolvesToKind") {
-		t.Errorf("expected latest-requires-kind validation error, got:\n%s", joined)
-	}
-}
-
 // F1/F2 — structured error detail with fix hint.
 func TestStructuredErrorDetailOnMissingFact(t *testing.T) {
 	svc, task := setupDirectEvidenceFixture(t)
@@ -401,8 +349,10 @@ func TestFactsParseErrorIncludesOffset(t *testing.T) {
 		Facts:        `{"x": }`, // malformed
 		PrincipalRef: "agent-a", Role: "agent",
 	})
-	if err == nil || !strings.Contains(err.Error(), "offset") {
-		t.Fatalf("malformed facts should report a byte offset: %v", err)
+	// `{"x": }` is malformed at byte 7 (the closing brace where a value belongs).
+	requireWrkfCode(t, err, wrkfCodeValidation)
+	if !strings.Contains(err.Error(), "byte offset 7") {
+		t.Fatalf("malformed facts should report the failing byte offset 7: %v", err)
 	}
 }
 
@@ -450,7 +400,8 @@ func TestInstallValidationProducibleByAndLinkage(t *testing.T) {
 	      "linkageRefs": [
 	        { "path": "basedOnX" },
 	        { "path": "/a/b" },
-	        { "path": "/ok", "resolvesToKind": "missing_kind" }
+	        { "path": "/ok", "resolvesToKind": "missing_kind" },
+	        { "path": "/latest", "latest": true }
 	      ]
 	    }
 	  },
@@ -471,6 +422,7 @@ func TestInstallValidationProducibleByAndLinkage(t *testing.T) {
 		"must be a JSON Pointer beginning with '/'",
 		"must be a single top-level pointer",
 		"resolvesToKind references unknown evidence kind \"missing_kind\"",
+		"latest requires resolvesToKind",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("install validation missing %q\nGot:\n%s", want, joined)

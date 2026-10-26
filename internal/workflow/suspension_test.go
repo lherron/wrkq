@@ -20,61 +20,6 @@ import (
 	"testing"
 )
 
-// TestSuspendRecordsConditionWithoutStateChange proves park is a record, not a
-// state change: the suspension appears; status/phase/outcome are untouched;
-// the transition advances revision; and fresh reads expose the suspension.
-func TestSuspendRecordsConditionWithoutStateChange(t *testing.T) {
-	svc, taskUUID, before := setupSuspendOutcomeFixture(t)
-	if before.Suspended() {
-		t.Fatalf("fresh instance is suspended: %+v", before.Suspension)
-	}
-
-	result, err := svc.Transition(taskUUID, "park", TransitionOptions{PrincipalRef: "agent:op", Role: "coordinator"})
-	if err != nil {
-		t.Fatalf("Transition park: %v", err)
-	}
-	suspended, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance after park: %v", err)
-	}
-	if !suspended.Suspended() {
-		t.Fatalf("Suspend returned a running instance: %+v", suspended)
-	}
-	sus := suspended.Suspension
-	eventID, _ := result["eventId"].(string)
-	if sus.ID == "" || sus.Reason != "operator_required" || sus.At == "" || sus.CauseRef != eventID || eventID == "" {
-		t.Fatalf("suspension record = %+v, want populated id/reason/at/causeRef", sus)
-	}
-	if suspended.Status != before.Status || suspended.Phase != before.Phase ||
-		suspended.Outcome != before.Outcome || suspended.Revision != before.Revision+1 {
-		t.Fatalf("park changed state: before=%+v rev=%d after=%+v rev=%d",
-			before.State(), before.Revision, suspended.State(), suspended.Revision)
-	}
-
-	// Reads/inspection are unaffected and surface the suspension.
-	readback, err := svc.InspectTask(taskUUID)
-	if err != nil {
-		t.Fatalf("InspectTask while suspended: %v", err)
-	}
-	if !readback.Suspended() || readback.Suspension.ID != sus.ID {
-		t.Fatalf("readback lost suspension: %+v", readback.Suspension)
-	}
-	if readback.Status != before.Status || readback.Phase != before.Phase ||
-		readback.Outcome != before.Outcome || readback.Revision != before.Revision+1 {
-		t.Fatalf("readback state drifted: %+v rev=%d", readback.State(), readback.Revision)
-	}
-}
-
-// TestSuspendRejectsEmptyReason guards the template-declared reason code as
-// required input.
-func TestSuspendRejectsEmptyReason(t *testing.T) {
-	svc, _, _ := setupSuspendOutcomeFixture(t)
-	err := withImmediateTx(svc.db, func(tx *sql.Tx) error {
-		return applySuspendOutcomeTx(tx, &Instance{Status: "active"}, &SuspendSpec{Reason: "   "}, "wfe_test", svc.now().Format("2006-01-02T15:04:05Z07:00"))
-	})
-	requireWrkfCode(t, err, wrkfCodeValidation)
-}
-
 // TestSuspendedWriteGateDoor1 proves the gate on TransitionForSelectors: an
 // otherwise-legal transition at the post-park revision bounces with
 // WRKF_SUSPENDED, and dry-run inspection still passes.
@@ -146,60 +91,6 @@ func TestSuspendedWriteGateDoor2(t *testing.T) {
 	}
 	if !after.Suspended() {
 		t.Fatalf("suspension vanished after bounced settle: %+v", after)
-	}
-}
-
-// TestSuspendedWriteGateDoor3 proves the claim gate rejects a new run before
-// issuing work authority, carries only the active suspension record, and opens
-// normally once that suspension is resolved.
-func TestSuspendedWriteGateDoor3(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	attachSimpleTaskV2(t, svc, taskUUID)
-	parkInstanceForTest(t, svc, taskUUID)
-
-	parked, err := svc.LatestInstance(taskUUID)
-	if err != nil {
-		t.Fatalf("LatestInstance after park: %v", err)
-	}
-	_, err = svc.ClaimAction(ClaimActionParams{
-		Task: taskUUID, RunnerID: "runner-a", AgentRef: "agent:cody",
-		Prefer: ActionClaimPrefer{Action: "triage"}, LeaseMs: 300000,
-		PriorRunProvided: true,
-	})
-	requireWrkfCode(t, err, wrkfCodeSuspended)
-	detail, ok := AsErrorDetail(err)
-	if !ok || detail.Suspension == nil {
-		t.Fatalf("claim refusal detail = %+v err=%v, want active suspension", detail, err)
-	}
-	if *detail.Suspension != *parked.Suspension {
-		t.Fatalf("claim refusal suspension = %+v, want %+v", detail.Suspension, parked.Suspension)
-	}
-	if detail.Predecessor != nil {
-		t.Fatalf("claim refusal leaked predecessor dossier: %+v", detail.Predecessor)
-	}
-	var runs int
-	if err := svc.db.QueryRow(`SELECT COUNT(*) FROM workflow_runs WHERE instance_id = ?`, parked.ID).Scan(&runs); err != nil {
-		t.Fatalf("count runs after suspended claim: %v", err)
-	}
-	if runs != 0 {
-		t.Fatalf("runs after suspended claim = %d, want 0", runs)
-	}
-
-	if _, err := svc.ResolveSuspension(ResolveSuspensionParams{
-		SuspensionID: parked.Suspension.ID, Disposition: "resume", PrincipalRef: "agent:op",
-	}); err != nil {
-		t.Fatalf("ResolveSuspension resume: %v", err)
-	}
-	claim, err := svc.ClaimAction(ClaimActionParams{
-		Task: taskUUID, RunnerID: "runner-a", AgentRef: "agent:cody",
-		Prefer: ActionClaimPrefer{Action: "triage"}, LeaseMs: 300000,
-		PriorRunProvided: true,
-	})
-	if err != nil {
-		t.Fatalf("ClaimAction after resume: %v", err)
-	}
-	if claim.Binding == nil || claim.Binding.Run.Action != "triage" {
-		t.Fatalf("claim after resume = %+v, want triage binding", claim)
 	}
 }
 

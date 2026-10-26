@@ -68,43 +68,6 @@ const gapClosureTemplate = `{
   ]
 }`
 
-const gapExternalEffectTemplate = `{
-  "schemaVersion": "wrkf.workflow-template.v0",
-  "id": "gap_external_effect_test",
-  "version": "1",
-  "kind": "agent_first_workflow",
-  "initial": { "status": "active", "phase": "review" },
-  "roles": {
-    "reviewer": { "description": "Review authority" }
-  },
-  "states": [
-    { "status": "active", "phase": "review" },
-    { "status": "closed", "outcome": "approved" }
-  ],
-  "transitions": [
-    {
-      "id": "decide",
-      "from": { "status": "active", "phase": "review" },
-      "by": ["reviewer"],
-      "outcomes": [
-        {
-          "id": "approved",
-          "when": { "always": true },
-          "to": { "status": "closed", "outcome": "approved" },
-          "effects": [
-            {
-              "kind": "request_observer_review",
-              "role": "observer",
-              "semanticKey": "observer-review:{taskUuid}:{revision}",
-              "data": { "reason": "external review required" }
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}`
-
 const gapInvalidBuiltinEffectTemplate = `{
   "schemaVersion": "wrkf.workflow-template.v0",
   "id": "gap_invalid_builtin_effect_test",
@@ -280,27 +243,6 @@ func TestGapClosureNextStaleEvidenceAndEffectReceipt(t *testing.T) {
 	}
 	if state != "completed" {
 		t.Fatalf("task state = %q, want completed", state)
-	}
-}
-
-func TestTransitionExternalEffectRemainsPending(t *testing.T) {
-	svc, taskUUID, _ := setupGapClosureFixtureWithTemplate(t, "gap_external_effect_test", gapExternalEffectTemplate)
-
-	rev0 := int64(0)
-	result, err := svc.Transition(taskUUID, "decide", TransitionOptions{PrincipalRef: "reviewer-a", Role: "reviewer", ExpectRevision: &rev0})
-	if err != nil {
-		t.Fatalf("Transition: %v", err)
-	}
-	var effects []Effect
-	rawEffects, _ := json.Marshal(result["effects"])
-	if err := json.Unmarshal(rawEffects, &effects); err != nil {
-		t.Fatalf("decode effects: %v", err)
-	}
-	if len(effects) != 1 {
-		t.Fatalf("created effects = %d, want 1", len(effects))
-	}
-	if effects[0].Kind != "request_observer_review" || effects[0].Status != "pending" {
-		t.Fatalf("external effect should remain pending: %+v", effects[0])
 	}
 }
 

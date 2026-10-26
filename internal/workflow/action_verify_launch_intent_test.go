@@ -53,21 +53,6 @@ func assertNoVerifyLaunchEffect(t *testing.T, svc *Service, taskUUID string) {
 	}
 }
 
-func TestImplementCompleteDoneWithoutAutomationFactDoesNotLaunchVerify(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	driveToReady(t, svc, taskUUID)
-
-	out := completeAction(t, svc, taskUUID, "implement", `{"impl.disposition":"done"}`)
-	if got := outcomeOf(t, out); got != "done" {
-		t.Errorf("outcome = %q, want generic done", got)
-	}
-	inst, _ := svc.LatestInstance(taskUUID)
-	if inst.Status != "active" || inst.Phase != "implemented" {
-		t.Errorf("workflow = %s/%s, want active/implemented", inst.Status, inst.Phase)
-	}
-	assertNoVerifyLaunchEffect(t, svc, taskUUID)
-}
-
 func TestImplementCompleteDoneWithAutomationFactCreatesPendingVerifyLaunch(t *testing.T) {
 	svc, taskUUID := actionFixture(t)
 	driveToReady(t, svc, taskUUID)
@@ -119,6 +104,7 @@ func TestImplementCompleteDoesNotLaunchVerifyForNonOptInEvidence(t *testing.T) {
 		wantPhase string
 		allowErr  bool
 	}{
+		{name: "done-without-automation-fact", facts: `{"impl.disposition":"done"}`, wantPhase: "implemented"},
 		{name: "blocked", facts: `{"impl.disposition":"blocked","automation.verifyLaunch":"acp-command-run/v1"}`, wantPhase: "ready"},
 		{name: "fail", facts: `{"impl.disposition":"fail","automation.verifyLaunch":"acp-command-run/v1"}`, wantPhase: "ready", allowErr: true},
 		{name: "missing-disposition", facts: `{"automation.verifyLaunch":"acp-command-run/v1"}`, wantPhase: "implemented"},
@@ -277,8 +263,8 @@ func TestTransitionEffectUnresolvedTokenFailsAtomically(t *testing.T) {
 		IdempotencyKey: "verify-launch-unresolved",
 		RunID:          "run_bad_token",
 	})
-	if err == nil {
-		t.Fatal("Transition succeeded with unresolved effect token; want atomic failure")
+	if err == nil || !strings.Contains(err.Error(), "{doesNotExist}") {
+		t.Fatalf("Transition error = %v; want an atomic failure naming the unresolved token {doesNotExist}", err)
 	}
 	inst, err := svc.LatestInstance(taskUUID)
 	if err != nil {
@@ -293,33 +279,5 @@ func TestTransitionEffectUnresolvedTokenFailsAtomically(t *testing.T) {
 	}
 	if len(effects) != 0 {
 		t.Fatalf("effects committed after failed token render = %d, want 0: %+v", len(effects), effects)
-	}
-}
-
-func TestImplementCompleteVerifyLaunchReplayIsIdempotent(t *testing.T) {
-	svc, taskUUID := actionFixture(t)
-	driveToReady(t, svc, taskUUID)
-
-	run, first, err := completeImplementWithRun(t, svc, taskUUID, `{"impl.disposition":"done","automation.verifyLaunch":"acp-command-run/v1"}`, "impl-replay")
-	if err != nil {
-		t.Fatalf("CompleteAction first: %v", err)
-	}
-	second, err := svc.CompleteAction(CompleteActionParams{
-		ActionRunID: run.RunID,
-		Evidence:    &ActionEvidenceInput{Summary: "impl", Facts: `{"impl.disposition":"done","automation.verifyLaunch":"acp-command-run/v1"}`},
-	})
-	if err != nil {
-		t.Fatalf("CompleteAction replay: %v", err)
-	}
-	if first.Evidence == nil || second.Evidence == nil || first.Evidence.ID != second.Evidence.ID {
-		t.Fatalf("replay evidence mismatch: first=%+v second=%+v", first.Evidence, second.Evidence)
-	}
-	effects := verifyLaunchEffects(t, svc, taskUUID)
-	if len(effects) != 1 {
-		t.Fatalf("verify-launch effects after replay = %d, want exactly 1: %+v", len(effects), effects)
-	}
-	wantKey := fmt.Sprintf("verify-launch:%s:%d:%s", taskUUID, effects[0].Revision, run.RunID)
-	if effects[0].SemanticKey != wantKey || effects[0].IdempotencyKey == "" {
-		t.Errorf("effect idempotency binding = semanticKey %q idempotencyKey %q, want semanticKey %q and non-empty idempotencyKey", effects[0].SemanticKey, effects[0].IdempotencyKey, wantKey)
 	}
 }
