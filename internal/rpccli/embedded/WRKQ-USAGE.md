@@ -93,6 +93,8 @@ wrkq handoff get H-00001 --json
 wrkq handoff acknowledge H-00001 --if-match 1 --note 'Consumed; <retained context>' --json
 ```
 
+To hand a seat's work to a different agent, address the successor: `wrkq handoff create --to clod@agents -t 'Take over T-00001' --body-file -`. It lands in the successor's pending list with you as author, and the successor acknowledges it as itself.
+
 Replace the example scope with the intended agent/project. List defaults to pending and includes full bodies and etags; read those bodies and skip `get` when already complete. Use `get` for a known ID or incomplete output. Acknowledge with the returned etag, not the example value. Acknowledgement retires the handoff from pending listings; it does not complete the work described in it.
 
 ## Schedule future attention

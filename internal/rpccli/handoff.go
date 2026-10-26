@@ -47,6 +47,17 @@ const (
 
 const handoffScopeExample = "wrkq handoff create --scope cody@wrkq -t 'Next steps' --body-file -"
 
+const handoffToExample = "wrkq handoff create --to clod@wrkq -t 'Next steps' --body-file -"
+
+// handoffFrom returns the author when someone other than the scope agent wrote
+// the handoff (a --to successor handoff), else "".
+func handoffFrom(h handoffJSON) string {
+	if h.CreatedByAgentID == "" || h.CreatedByAgentID == h.AgentID {
+		return ""
+	}
+	return h.CreatedByAgentID
+}
+
 // handoffJSON reproduces the legacy internal/cli handoffJSON shape EXACTLY so the
 // mirror re-marshals the RPC DTO into byte-identical output. Field order + tags +
 // pointer/omitempty match the WrkqHandoff DTO (which itself pins the legacy order).

@@ -63,6 +63,9 @@ func writeHandoffGetOutput(cmd *cobra.Command, mode handoffOutputMode, h handoff
 		fmt.Fprintf(stdout, "Scope: %s\n", h.ScopeRef)
 		fmt.Fprintf(stdout, "Scope Kind: %s\n", h.ScopeKind)
 		fmt.Fprintf(stdout, "Agent: %s\n", h.AgentID)
+		if from := handoffFrom(h); from != "" {
+			fmt.Fprintf(stdout, "From: %s\n", from)
+		}
 		fmt.Fprintf(stdout, "Project: %s\n", h.ProjectID)
 		fmt.Fprintf(stdout, "Status: %s\n", h.Status)
 		fmt.Fprintf(stdout, "Title: %s\n", h.Title)

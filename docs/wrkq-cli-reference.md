@@ -264,6 +264,8 @@ wrkq index resume
 ```bash
 wrkq handoff create --scope cody@wrkq --title "Continue T-00001" \
   --body "Left off after step 3..."
+wrkq handoff create --to clod@wrkq --title "Take over T-00001" \
+  --body-file -                         # successor files it; clod lists and acks it as itself
 wrkq handoff list                       # defaults to status=pending
 wrkq handoff get H-00001
 wrkq handoff acknowledge H-00001

@@ -1,8 +1,9 @@
 package rpccli
 
 // handoff_create.go — `wrkq handoff create`: read the title/body/meta inputs,
-// resolve the caller's own agent/project scope (self-scope enforced), and
-// submit wrkq.handoff.create with that scope explicit.
+// resolve the caller's own agent/project scope (self-scope enforced) or the
+// successor named by --to, and submit wrkq.handoff.create with that scope
+// explicit.
 
 import (
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/style"
 	"github.com/spf13/cobra"
@@ -21,6 +23,7 @@ func newHandoffCreateCmd() *cobra.Command {
 		body           string
 		bodyFile       string
 		scopeOverride  string
+		to             string
 		profile        string
 		idempotencyKey string
 		meta           string
@@ -33,10 +36,13 @@ func newHandoffCreateCmd() *cobra.Command {
 		Use:   "create",
 		Short: "Create a new pending handoff for the resolved agent/project scope",
 		Long: "Create a new pending handoff for the resolved agent/project scope.\n\n" +
-			"Exactly one body source must be explicitly selected: --body or --body-file.",
+			"Exactly one body source must be explicitly selected: --body or --body-file.\n\n" +
+			"--to addresses the handoff to a successor agent (clod@hrc-runtime): it is filed in\n" +
+			"that agent's scope with you recorded as its author, so the successor lists and\n" +
+			"acknowledges it as itself. A task in the handle is ignored; handoffs are agent/project scoped.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runHandoffCreate(cmd, handoffCreateFlags{
-				title: title, body: body, bodyFile: bodyFile, scopeOverride: scopeOverride,
+				title: title, body: body, bodyFile: bodyFile, scopeOverride: scopeOverride, to: to,
 				idempotencyKey: idempotencyKey, meta: meta, dryRun: dryRun,
 				asJSON: asJSON, ndjson: ndjson, human: human,
 			})
@@ -46,6 +52,7 @@ func newHandoffCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&body, "body", "", "Inline Markdown body (mutually exclusive with --body-file)")
 	cmd.Flags().StringVar(&bodyFile, "body-file", "", "Path to a Markdown body file, or '-' for stdin (mutually exclusive with --body)")
 	cmd.Flags().StringVar(&scopeOverride, "scope", "", "Override scope (ScopeRef like agent:cody:project:wrkq or handle like cody@wrkq)")
+	cmd.Flags().StringVar(&to, "to", "", "Address the handoff to a successor agent (handle like clod@hrc-runtime); you are recorded as its author")
 	cmd.Flags().StringVar(&profile, "profile", "", "Named profile to resolve scope/defaults from")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Idempotency key to safely retry create without producing duplicates")
 	cmd.Flags().StringVar(&meta, "meta", "", "Optional JSON object of additional metadata")
@@ -57,8 +64,8 @@ func newHandoffCreateCmd() *cobra.Command {
 }
 
 type handoffCreateFlags struct {
-	title, body, bodyFile, scopeOverride, idempotencyKey, meta string
-	dryRun, asJSON, ndjson, human                              bool
+	title, body, bodyFile, scopeOverride, to, idempotencyKey, meta string
+	dryRun, asJSON, ndjson, human                                  bool
 }
 
 func runHandoffCreate(cmd *cobra.Command, f handoffCreateFlags) error {
@@ -71,14 +78,31 @@ func runHandoffCreate(cmd *cobra.Command, f handoffCreateFlags) error {
 			"wrkq handoff create -t 'Next steps' --body-file notes.md")
 	}
 
-	// CALLER-side scope resolution + self-scope enforcement (the server never
-	// reads env).
-	resolved, diags, resolveErr := scope.Resolve(strings.TrimSpace(f.scopeOverride))
+	to := strings.TrimSpace(f.to)
+	if to != "" && strings.TrimSpace(f.scopeOverride) != "" {
+		return writeHandoffError(stderr, mode, 2, "validation_error", "",
+			"--to and --scope are mutually exclusive: --to names the successor, --scope files under your own scope", nil, handoffToExample)
+	}
+
+	// CALLER-side scope resolution (the server never reads env). --scope and
+	// the runtime default are self-scope enforced; --to is the explicit way to
+	// address another agent, and the caller is recorded as author instead.
+	selector := to
+	if selector == "" {
+		selector = strings.TrimSpace(f.scopeOverride)
+	}
+	resolved, diags, resolveErr := scope.Resolve(selector)
 	if resolveErr != nil {
 		return writeHandoffError(stderr, mode, 2, "scope_unresolvable", "", resolveErr.Error(), diags, handoffScopeExample)
 	}
-	if err := scope.EnforceSelfScope(resolved, scope.RuntimeIdentity{AgentID: scope.ReadEnv().ASPAgentID}); err != nil {
-		return writeHandoffError(stderr, mode, 1, "self_scope_violation", "", err.Error(), diags, handoffScopeExample)
+	author := ""
+	if to != "" {
+		var authorErr error
+		if author, authorErr = resolveHandoffAuthor(cmd); authorErr != nil {
+			return writeHandoffError(stderr, mode, 2, "scope_unresolvable", "", authorErr.Error(), diags, handoffToExample)
+		}
+	} else if err := scope.EnforceSelfScope(resolved, scope.RuntimeIdentity{AgentID: scope.ReadEnv().ASPAgentID}); err != nil {
+		return writeHandoffError(stderr, mode, 1, "self_scope_violation", "", err.Error(), diags, handoffToExample)
 	}
 	if resolved.ProjectID == "" {
 		return writeHandoffError(stderr, mode, 2, "scope_unresolvable",
@@ -95,9 +119,10 @@ func runHandoffCreate(cmd *cobra.Command, f handoffCreateFlags) error {
 	// Legacy `wrkq handoff create` attributes createdBy to the RESOLVED SCOPE agent
 	// (handoff_create.go: CreatedByAgentID = resolved.AgentID), NOT the global --as
 	// actor. So we pass an empty actorAgentId and let the server default createdBy to
-	// the scope agent — preserving byte parity even when --as is set.
+	// the scope agent — preserving byte parity even when --as is set. Only --to
+	// names an author distinct from the scope agent.
 	params := handoffCreateParams(resolved.CanonicalRef, resolved.AgentID, resolved.ProjectID,
-		title, body, meta, idemKey, f.dryRun, "")
+		title, body, meta, idemKey, f.dryRun, author)
 
 	raw, rerr := tr.Call(cmd.Context(), "wrkq.handoff.create", params)
 	if rerr != nil {
@@ -129,6 +154,25 @@ func runHandoffCreate(cmd *cobra.Command, f handoffCreateFlags) error {
 		Diagnostics:      diags,
 		DryRun:           f.dryRun,
 	})
+}
+
+// resolveHandoffAuthor names the agent writing a --to handoff: --as when given,
+// else the runtime scope's agent, else ASP_AGENT_ID.
+func resolveHandoffAuthor(cmd *cobra.Command) (string, error) {
+	if as := changedStringFlag(cmd, "as"); as != "" {
+		principalRef, err := attribution.NormalizeCanonical(as)
+		if err != nil {
+			return "", fmt.Errorf("invalid --as: %w", err)
+		}
+		return strings.TrimPrefix(principalRef, "agent:"), nil
+	}
+	if resolved, _, err := scope.Resolve(""); err == nil && strings.TrimSpace(resolved.AgentID) != "" {
+		return resolved.AgentID, nil
+	}
+	if agentID := strings.TrimSpace(scope.ReadEnv().ASPAgentID); agentID != "" {
+		return agentID, nil
+	}
+	return "", fmt.Errorf("handoff create --to needs a resolvable author; run from an agent runtime or pass --as agent:<id>")
 }
 
 type handoffCreateOutput struct {
@@ -198,10 +242,17 @@ func writeHandoffCreateOutput(cmd *cobra.Command, mode handoffOutputMode, out ha
 	switch mode {
 	case handoffOutputHuman:
 		writeHandoffDiagnostics(cmd.ErrOrStderr(), out.Diagnostics)
-		fmt.Fprintf(stdout, "ID\tScope\tStatus\tTitle\tCreated At\n")
-		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\n",
-			out.Handoff.ID, out.Handoff.ScopeRef, out.Handoff.Status, out.Handoff.Title,
-			style.FormatLocalTime(out.Handoff.CreatedAt))
+		if from := handoffFrom(out.Handoff); from != "" {
+			fmt.Fprintf(stdout, "ID\tScope\tFrom\tStatus\tTitle\tCreated At\n")
+			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				out.Handoff.ID, out.Handoff.ScopeRef, from, out.Handoff.Status, out.Handoff.Title,
+				style.FormatLocalTime(out.Handoff.CreatedAt))
+		} else {
+			fmt.Fprintf(stdout, "ID\tScope\tStatus\tTitle\tCreated At\n")
+			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\n",
+				out.Handoff.ID, out.Handoff.ScopeRef, out.Handoff.Status, out.Handoff.Title,
+				style.FormatLocalTime(out.Handoff.CreatedAt))
+		}
 		if out.IdempotentReplay {
 			fmt.Fprintln(stdout, "(idempotent replay)")
 		}

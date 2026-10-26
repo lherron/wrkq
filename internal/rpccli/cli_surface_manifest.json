@@ -1568,6 +1568,12 @@
                 "usage": "Handoff title (required)",
                 "type": "string",
                 "hidden": false
+              },
+              {
+                "name": "to",
+                "usage": "Address the handoff to a successor agent (handle like clod@hrc-runtime); you are recorded as its author",
+                "type": "string",
+                "hidden": false
               }
             ]
           },

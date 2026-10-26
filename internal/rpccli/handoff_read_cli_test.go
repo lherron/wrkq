@@ -219,3 +219,67 @@ func TestHandoffAcknowledgeThenAlreadyAcknowledged(t *testing.T) {
 		t.Fatalf("second acknowledge stderr = %q", again.stderr)
 	}
 }
+
+// A seat swap: cody writes a handoff addressed to clod with --to. The row is
+// filed in clod's scope with cody as author, clod finds it in its own pending
+// listing, and clod acknowledges it as itself.
+func TestHandoffCreateToSuccessorIsConsumedBySuccessor(t *testing.T) {
+	dbPath := newHandoffReadFixture(t)
+	for _, key := range []string{"AGENT_SCOPE_REF", "ASP_SCOPE_REF", "ASP_HANDLE", "ASP_PROJECT"} {
+		t.Setenv(key, "")
+	}
+
+	created := decodeCreatedHandoff(t, runHandoffCreateCLI(t, dbPath, "",
+		"handoff", "create", "--to", "clod@rpccli-test-proj:T-00099", "--title", "seat swap", "--body", "carry on", "--json"))
+	if created.ScopeRef != "agent:clod:project:rpccli-test-proj" || created.AgentID != "clod" || created.CreatedByAgentID != "cody" {
+		t.Fatalf("created = scope %q agent %q author %q", created.ScopeRef, created.AgentID, created.CreatedByAgentID)
+	}
+
+	both := runHandoffCreateCLI(t, dbPath, "",
+		"handoff", "create", "--to", "clod@rpccli-test-proj", "--scope", handoffReadScope, "--title", "x", "--body", "y", "--json")
+	if both.err == nil || ExitCodeForError(both.err) != 2 || !strings.Contains(both.stderr, "--to and --scope") {
+		t.Fatalf("--to with --scope: err=%v stderr=%s", both.err, both.stderr)
+	}
+
+	t.Setenv("ASP_AGENT_ID", "clod")
+	list := runHandoffCreateCLI(t, dbPath, "", "handoff", "list", "--scope", "clod@rpccli-test-proj", "--human")
+	if list.err != nil {
+		t.Fatalf("list: %v\nstderr:\n%s", list.err, list.stderr)
+	}
+	if !strings.Contains(list.stdout, "From") || !strings.Contains(list.stdout, created.ID) || !strings.Contains(list.stdout, "cody") {
+		t.Fatalf("successor listing lacks the handoff or its author:\n%s", list.stdout)
+	}
+
+	get := runHandoffCreateCLI(t, dbPath, "", "handoff", "get", created.ID, "--human")
+	if get.err != nil || !strings.Contains(get.stdout, "From: cody\n") {
+		t.Fatalf("get: %v\n%s", get.err, get.stdout)
+	}
+
+	ack := runHandoffCreateCLI(t, dbPath, "", "handoff", "acknowledge", created.ID, "--note", "consumed by clod", "--json")
+	if ack.err != nil {
+		t.Fatalf("successor acknowledge: %v\nstderr:\n%s", ack.err, ack.stderr)
+	}
+	var out handoffAckOutput
+	if err := json.Unmarshal([]byte(ack.stdout), &out); err != nil {
+		t.Fatalf("decode ack: %v\n%s", err, ack.stdout)
+	}
+	if out.Handoff.AcknowledgedByAgentID == nil || *out.Handoff.AcknowledgedByAgentID != "clod" {
+		t.Fatalf("acknowledged by = %v, want clod", out.Handoff.AcknowledgedByAgentID)
+	}
+}
+
+// Without --to the self-scope guard still refuses a handoff filed under
+// another agent, and a same-author listing keeps its original columns.
+func TestHandoffCreateScopeStillRefusesAnotherAgent(t *testing.T) {
+	dbPath := newHandoffReadFixture(t)
+	refused := runHandoffCreateCLI(t, dbPath, "",
+		"handoff", "create", "--scope", "clod@rpccli-test-proj", "--title", "x", "--body", "y", "--json")
+	if refused.err == nil || !strings.Contains(refused.stderr, "self_scope_violation") {
+		t.Fatalf("cross-agent --scope: err=%v stderr=%s", refused.err, refused.stderr)
+	}
+	createHandoffForRead(t, dbPath, "own")
+	list := runHandoffCreateCLI(t, dbPath, "", "handoff", "list", "--scope", handoffReadScope, "--human")
+	if list.err != nil || strings.Contains(list.stdout, "From") {
+		t.Fatalf("self-authored listing: %v\n%s", list.err, list.stdout)
+	}
+}

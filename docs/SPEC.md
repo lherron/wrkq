@@ -438,7 +438,8 @@ restores, recursive tree behavior, or residency.
 ### Handoffs
 
 Handoffs are intentional context records that an agent leaves for a later
-session of the same agent. They are not tasks, comments, or memory.
+session, of the same agent or of a named successor. They are not tasks,
+comments, or memory.
 
 Handoffs are scoped to an agent/project canonical scope ref in v1, for example:
 
@@ -447,6 +448,14 @@ Handoffs are scoped to an agent/project canonical scope ref in v1, for example:
 Accepted input forms include full scope refs and compact handles such as
 `cody@wrkq`. Task/role variants may parse, but v1 normalizes storage to project
 scope for default handoff flows.
+
+A handoff's scope names its recipient; `created_by_*` names its author and
+`acknowledged_by_*` its consumer. `wrkq handoff create` files under the caller's
+own scope (`--scope` naming another agent is refused). `--to <agent@project>`
+is the one way to address a successor agent: the row lands in the successor's
+scope with the caller as author, so the successor lists and acknowledges it as
+itself. Human listings show a From column when the author differs from the
+recipient.
 
 Handoff statuses:
 

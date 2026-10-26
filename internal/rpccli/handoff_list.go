@@ -290,10 +290,28 @@ func writeHandoffPage(cmd *cobra.Command, mode handoffOutputMode, out handoffLis
 			return nil
 		}
 		tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "ID\tScope\tStatus\tCreated\tTitle")
+		// The From column appears only on pages holding a handoff another agent
+		// wrote (--to), so self-authored listings keep their original shape.
+		showFrom := false
 		for _, h := range out.Handoffs {
+			showFrom = showFrom || handoffFrom(h) != ""
+		}
+		if showFrom {
+			fmt.Fprintln(tw, "ID\tScope\tFrom\tStatus\tCreated\tTitle")
+		} else {
+			fmt.Fprintln(tw, "ID\tScope\tStatus\tCreated\tTitle")
+		}
+		for _, h := range out.Handoffs {
+			scopeCol := h.ScopeRef
+			if showFrom {
+				from := handoffFrom(h)
+				if from == "" {
+					from = "-"
+				}
+				scopeCol += "\t" + from
+			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
-				h.ID, h.ScopeRef, h.Status,
+				h.ID, scopeCol, h.Status,
 				style.FormatLocalTime(h.CreatedAt),
 				truncateHandoffTitle(h.Title, 60),
 			)
