@@ -12,8 +12,7 @@ import (
 )
 
 // doctorJSON runs `wrkqadm doctor --json --db <dbPath>` (plus extra argv) and
-// decodes the report. With --fix the fix summary precedes the JSON on stdout,
-// so decoding starts at the first '{'.
+// decodes the report, returning any non-JSON prefix so callers can reject it.
 func doctorJSON(t *testing.T, dbPath string, extra ...string) (doctorReportAdm, map[string]checkResultAdm, string) {
 	t.Helper()
 	args := append([]string{"doctor", "--json", "--db", dbPath}, extra...)
@@ -241,12 +240,15 @@ func TestDoctorReportsAndFixesSequenceDriftAfterExplicitIDInsert(t *testing.T) {
 		t.Fatalf("before --fix: sequence_drift = %+v; want error naming task_seq at 0 behind max_id 42", drift)
 	}
 
-	_, _, fixOutput := doctorJSON(t, dbPath, "--fix")
-	if !strings.Contains(fixOutput, "Fixed sqlite_sequence drift for 1 table(s)") {
-		t.Fatalf("doctor --fix output = %q; want it to report one repaired table", fixOutput)
+	report, checks, prefix := doctorJSON(t, dbPath, "--fix")
+	if prefix != "" {
+		t.Errorf("doctor --fix --json stdout contains non-JSON prefix: %q", prefix)
+	}
+	if got := checks["sequence_drift"]; got.Status != "ok" || report.Errors != 0 {
+		t.Errorf("fix report must reflect repaired state: %+v", report)
 	}
 
-	report, checks, _ := doctorJSON(t, dbPath)
+	report, checks, _ = doctorJSON(t, dbPath)
 	if got := checks["sequence_drift"]; got.Status != "ok" {
 		t.Fatalf("after --fix: sequence_drift = %+v; want ok", got)
 	}

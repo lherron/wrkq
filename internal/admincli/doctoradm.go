@@ -83,6 +83,19 @@ func runDoctorAdm(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	// Apply repairs before collecting the report so JSON and human output describe
+	// the same post-repair state.
+	if doctorAdmFix && database != nil {
+		applyFixesAdm(database, report)
+		report.Checks = append(checkDatabaseFileAdm(cfg.DBPath), checkDatabasePragmasAdm(database)...)
+		report.Checks = append(report.Checks, checkSchemaAdm(database)...)
+		report.Checks = append(report.Checks, checkRootContainerAdm(database)...)
+		report.Checks = append(report.Checks, checkDataIntegrityAdm(database)...)
+		report.Checks = append(report.Checks, checkSequenceDriftAdm(database)...)
+		report.Checks = append(report.Checks, checkAttachmentsAdm(database, cfg.AttachDir)...)
+		report.Checks = append(report.Checks, checkPerformanceAdm(database)...)
+	}
+
 	// Count warnings and errors
 	for _, check := range report.Checks {
 		switch check.Status {
@@ -96,11 +109,6 @@ func runDoctorAdm(cmd *cobra.Command, args []string) error {
 
 	if report.Warnings > 0 && report.OverallStatus == "ok" {
 		report.OverallStatus = "warning"
-	}
-
-	// Apply fixes if requested
-	if doctorAdmFix && database != nil {
-		applyFixesAdm(database, report)
 	}
 
 	// Output report
@@ -546,7 +554,7 @@ func applyFixesAdm(database *db.DB, report *doctorReportAdm) {
 		outputs = append(outputs, "No sqlite_sequence drift detected")
 	}
 
-	if len(outputs) > 0 {
+	if len(outputs) > 0 && !doctorAdmJSON {
 		fmt.Fprintln(os.Stdout, "\n--fix results")
 		fmt.Fprintln(os.Stdout, strings.Join(outputs, "\n"))
 	}
