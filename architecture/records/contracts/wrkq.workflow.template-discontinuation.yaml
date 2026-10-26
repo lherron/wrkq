@@ -50,7 +50,6 @@ required_tests:
   - TestTemplateDiscontinueSerializesWithAttachAcrossConnections
   - TestSameVersionSupersedePreservesDiscontinuedMarkerAndExistingInstance
   - TestWorkflowDiscontinueRPCAndAttachOverrideContract
-  - TestWorkflowDiscontinueMethodsAreInRegistry
   - bun test packages/client/test/workflow-template-discontinue-contract.test.ts
   - T-06357 isolated real-binary discontinue/refuse/override/reinstate smoke
 last_verified:

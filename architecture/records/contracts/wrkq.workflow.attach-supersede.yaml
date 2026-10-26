@@ -33,7 +33,6 @@ source:
   - internal/wrkqapi/workflow.go
   - internal/wrkfcli/task.go
   - packages/client/src/wrkq/workflow-binding.ts
-  - packages/client/test/wrkf-attach-supersede-contract.test.ts
 required_tests:
   - TestAttachTaskSupersedeReplacesLiveInstanceWithLineage
   - TestAttachTaskSupersedeRejectsStalePredecessorAfterReplacement
@@ -41,7 +40,6 @@ required_tests:
   - TestOperatorResolvedResumeAndCancelPaths
   - TestWatchInstanceClosedClassMapping
   - go test ./internal/workflow
-  - bun test packages/client/test/wrkf-attach-supersede-contract.test.ts
 last_verified:
   date: 2026-07-06
   evidence: "bun test packages/client/test/wrkf-attach-supersede-contract.test.ts and focused go test ./internal/workflow attach/operator/watch guards green during T-05822 implementation"

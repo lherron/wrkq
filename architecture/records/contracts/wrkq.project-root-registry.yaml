@@ -54,7 +54,6 @@ required_tests:
   - TestNormalizeRegisteredProjectRoot
   - TestNormalizeRegisteredProjectRootRejectsOtherUserTilde
   - TestProjectRootRegistryOverRealRPC
-  - TestProjectRootRegistryMethodIsRegistered
   - TestProjectRootSetRootStaleCASIsAtomic
   - TestProjectRootSetRootCanonicalAttributionAndInvalidIdentityNoOp
   - bun test packages/client/test/wrkq-container-facade.test.ts

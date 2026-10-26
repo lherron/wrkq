@@ -53,6 +53,8 @@ consumers:
   - "@wrkq/client"               # packages/client — owns its own compatibility obligation + tests
   - "github.com/lherron/wrkq/pkg/client" # public Go client — owns transport compatibility + typed helpers
 source:
+  - internal/workrpc/server_contract_test.go
+  - internal/workrpc/schema_identity_test.go
   - internal/wrkfapi/errors.go            # WRKF_NOT_FOUND, WRKF_VALIDATION, WRKF_STALE_REVISION, …
   - internal/workrpc/errors.go            # maps typed codes onto JSON-RPC
   - internal/workrpc/error_mapping_contract_test.go
@@ -81,7 +83,6 @@ source:
   - internal/wrkfapi/gaps.go
   - internal/wrkfapi/instance_cancel.go
   - internal/workflow/service.go
-  - internal/workflow/instances_test.go
   - internal/workflow/instance_cancel.go
   - internal/workflow/instance_terminalization.go
   - internal/workflow/terminal_disposition_test.go
@@ -110,17 +111,13 @@ source:
   - architecture/records/contracts/wrkq.project-root-registry.yaml
   - architecture/records/contracts/wrkq.workflow.template-discontinuation.yaml
 required_tests:
-  - TestCodec_RequestRoundtrip
-  - TestCodec_ResponseEncoding
-  - TestCodec_ErrorResponseEncoding
+  - TestProtocolSchemaHashPinned
+  - TestRetiredAndCrossOwnerMethodsAnswerMethodNotFound
   - TestCodec_MaxFrameSizeRejected
-  - TestErrorMapper_StaleRevision
   - TestErrorMapper_Table
   - TestErrorMapper_NonDomainError
   - TestWorkflowDiscontinueRPCAndAttachOverrideContract
-  - TestWorkflowDiscontinueMethodsAreInRegistry
   - TestProjectRootRegistryOverRealRPC
-  - TestProjectRootRegistryMethodIsRegistered
   - TestProjectRootSetRootStaleCASIsAtomic
   - TestProjectRootSetRootCanonicalAttributionAndInvalidIdentityNoOp
   - TestWrkfInstanceCancelUnsuspendedRevokesRunAndRejectsLateSettle
@@ -132,9 +129,7 @@ required_tests:
   - TestContainerTaskCountsCanonicalInclusionAndIdentity
   - TestContainerTaskCountsPaginationIndependentAndMatchesExhaustiveTaskList
   - TestContainerTaskCountsOverRealRPC
-  - TestInstancesReturnsAllGenerationsInInspectCompatibleOrder
   - TestWrkqWorkflowInstances_StableEnvelopeHistoryAndTypedAbsence
-  - TestProtocolSchemaHashIncludesWorkflowInstancesEnvelope
   - TestTaskInstancesCLIJSONParityAndInspectCompatibility
   - TestCommandAdapterImportGuard
   - TestLegacyDirectDBBootstrapCannotRegrow

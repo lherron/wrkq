@@ -30,8 +30,8 @@ source:
   - internal/workrpc/registry.go                # method + DTO catalog registration
 required_tests:
   - internal/rpccli/parity_test.go              # production contract attach-get/*, production contract attach-put-stdin/*
-  - internal/rpccli/transport_test.go           # TestTransportEquivalence_AttachmentBytes, TestStdoutPurity_AttachmentGetBytes
-  - internal/wrkqapi/catview_fingerprint_test.go # TestAttachmentBytesDTOFingerprint
+  - internal/rpccli/transport_test.go           # TestTransportEquivalence_AttachmentBytes
+  - internal/wrkqapi/catview_fingerprint_test.go # TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes
   - internal/workrpc/catview_catalog_test.go     # TestCatViewInCatalogs (getBytes/addBytes + DTOs)
 last_verified:
   date: 2026-06-22

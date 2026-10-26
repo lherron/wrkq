@@ -54,7 +54,7 @@ source:
   - internal/wrkqapi/handoffs.go               # server: HandoffCreate/Get/ListView/Acknowledge over EXPLICIT scope/principal; no ASP_* read
   - internal/workrpc/registry.go               # wrkq.handoff.* registration (shared wrkq + wrkf entrypoints via RegisterAPI)
 required_tests:
-  - internal/wrkqapi/catview_fingerprint_test.go        # TestHandoffDTOFingerprint (WrkqHandoff legacy field order pinned)
+  - internal/wrkqapi/catview_fingerprint_test.go        # TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes (WrkqHandoff legacy field order pinned)
   - internal/workrpc/catview_catalog_test.go            # TestCatViewInCatalogs (handoff methods + DTOs in both catalogs)
   - internal/workrpc/handoff_test.go                    # server create/get/list/ack + idempotent replay/mismatch + ack ifMatch CAS + dryRun no-write + already-acknowledged + event payloads + TestHandoffCreate_IncoherentScopeRejected (scopeRef vs agentId/projectId coherence → WRKQ_VALIDATION, no write/event)
   - internal/scope/resolve_test.go                      # AGENT_SCOPE_REF precedence + AGENT/ASP disagreement diagnostics

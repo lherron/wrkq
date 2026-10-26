@@ -53,7 +53,7 @@ required_tests:
   - internal/rpccli/parity_test.go              # production contract monitor/*, production contract watch/*
   - internal/rpccli/transport_test.go           # TestTransportEquivalence_InProcVsSubprocess (eventsView/stateView/tailView arms)
   - internal/wrkqapi/monitorview_test.go        # TestMonitorEventsView_* (incl. _LastNGapIndependent: --last N start cursor = MIN(id)-1 over last N existing rows, gap-independent) / TestMonitorStateView_* / TestHistoryTailView_*
-  - internal/wrkqapi/catview_fingerprint_test.go # TestMonitorViewDTOFingerprint, TestHistoryTailViewDTOFingerprint
+  - internal/wrkqapi/catview_fingerprint_test.go # TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes
   - internal/workrpc/catview_catalog_test.go     # TestCatViewInCatalogs (eventsView/stateView/tailView + DTOs)
   - internal/wrkfcli/watch_test.go               # wrkf bounded polling, cursor identity, and terminal behavior
 last_verified:

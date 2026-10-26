@@ -6,7 +6,7 @@ import "time"
 // reproduce the legacy `handoffJSON` (internal/rpccli/handoff.go) EXACTLY so
 // the mirror can render byte-identical output: snake_case keys, legacy struct
 // order, pointer/omitempty parity. This is the WrkqHandoff fingerprint pinned by
-// TestHandoffDTOFingerprint — any drift is a PROTOCOL CONTRACT change.
+// TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes — any drift is a PROTOCOL CONTRACT change.
 type WrkqHandoff struct {
 	UUID                       string     `json:"uuid"`
 	ID                         string     `json:"id"`

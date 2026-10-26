@@ -497,7 +497,7 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > The CLI owns ONLY byte rendering (json / ndjson / porcelain / forced
 > `--pretty`). The forced pretty renderer uses these same carriers; parity tests
 > pin `WRKQ_NOW` for relative `opened N ago` text while ANSI remains terminal-gated.
-> Cataloged + fingerprinted (TestTreeViewDTOFingerprint).
+> Cataloged + fingerprinted (TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes).
 
 > **`wrkq.history.listView`** is the CLI compatibility **history read model** for
 > `wrkq log`, **not** `wrkf.event.query`. It reads the generic `event_log` table
@@ -526,7 +526,7 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 > (prefixLogError preserves the domain code; the mirror strips the code prefix).
 > Project-root is CALLER-scoped (the mirror scopes the raw target before sending;
 > the view never reads project-root env/flags). Compat read model, not a canonical
-> resource. Cataloged + fingerprinted (TestHistoryListViewDTOFingerprint;
+> resource. Cataloged + fingerprinted (TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes;
 > registering it changes the method catalog and `protocolSchemaHash`).
 
 > **`wrkq.monitor.eventsView` / `wrkq.monitor.stateView` / `wrkq.history.tailView`**
@@ -580,8 +580,8 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 >   has a nullable `resource_uuid` (omitempty): `{ id, timestamp, actor_uuid?,
 >   actor_slug?, actor_id?, principal_ref?, scope_ref?, resource_type,
 >   resource_uuid?, resource_id?, event_type, etag?, payload? }`.
-> All three are cataloged + fingerprinted (`TestMonitorViewDTOFingerprint`,
-> `TestHistoryTailViewDTOFingerprint`; registering them changes the method catalog
+> All three are cataloged + fingerprinted
+> (`TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes`; registering them changes the method catalog
 > and `protocolSchemaHash`). Compat read models, not canonical resources.
 
 > **`wrkq.task.catView` is a CLI compatibility read model, not a domain
@@ -943,7 +943,7 @@ wrkq.handoff.acknowledge [new mutation method — server-owned etag CAS]
 > The `WrkqHandoff` DTO reproduces the legacy `handoffJSON` field ORDER + tags
 > EXACTLY (snake_case, pointer/omitempty parity) so the mirror re-marshals it into
 > byte-identical `wrkq handoff` output; cataloged + fingerprinted
-> (`TestHandoffDTOFingerprint`).
+> (`TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes`).
 >
 > - **`wrkq.handoff.create`** writes a pending handoff (`handoff.created`) or
 >   returns an idempotent replay (`idempotentReplay=true`); a same-key replay with a

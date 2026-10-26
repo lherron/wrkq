@@ -13,7 +13,6 @@ source:
   - internal/workrpc/server_contract_test.go
 required_tests:
   - TestStdoutPurity_HandlerMustNotCorruptStream
-  - TestStdoutPurity_OnlyRPCFrames_ShutdownNotification
 last_verified:
   date: 2026-07-12
   evidence: "go test ./internal/workrpc green; migrated stdout-purity tests exercise the unified server"

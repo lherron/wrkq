@@ -22,6 +22,7 @@ authority:
 consumers:
   - agent-control-plane ACP verify action launcher
 source:
+  - internal/workflow/action_impl_verify_test.go
   - internal/workflow/builtins/wrkq-simple-task.workflow.json
   - internal/workflow/effect_render.go
   - internal/workflow/action_verify_launch_intent_test.go
@@ -29,12 +30,11 @@ source:
   - hrcchat#10969
   - hrcchat#10974
 required_tests:
-  - TestImplementCompleteDoneWithoutAutomationFactDoesNotLaunchVerify
+  - TestCompletionReplayReturnsSameEvidenceAndDoesNotDuplicateEffects
   - TestImplementCompleteDoneWithAutomationFactCreatesPendingVerifyLaunch
   - TestImplementCompleteDoesNotLaunchVerifyForNonOptInEvidence
   - TestTransitionEffectMaterializesRevisionAndRunID
   - TestTransitionEffectUnresolvedTokenFailsAtomically
-  - TestImplementCompleteVerifyLaunchReplayIsIdempotent
   - go test ./internal/workflow
 last_verified:
   date: 2026-06-29

@@ -132,7 +132,6 @@ required_tests:
   - TestEnvelopeTTLDoesNotExpireAfterPresentationAndPresentGuardsTerminal
   - TestEnvelopeWithdrawBeforeAndAfterPresentationAndGroupPartialReport
   - TestManifestScopedReplyDischargesExactSetAtomically
-  - TestSayStoresTTLHoldAndIdempotencyAcrossFanout
   - TestWrkcAdmissionFlagsAndWithdrawWithNoHRCDaemon
   - packages/client/test/room-contract.test.ts
   - T-08401 implicit expiry boundaries, receipt-first and expiry-first serialization, explicit precedence, receipt exemptions, and one terminal failure event

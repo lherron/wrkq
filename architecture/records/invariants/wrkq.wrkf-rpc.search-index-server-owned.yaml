@@ -49,8 +49,8 @@ source:
   - internal/wrkqapi/label_filter_test.go              # exact/AND/case/duplicate/prose-separation + filtered paging semantics
   - internal/rpccli/label_filter_test.go               # local/authenticated-rpc CLI parity for find/search label flags
 required_tests:
-  - internal/wrkqapi/searchindex_test.go              # TestSearchIndex_RebuildStatusSearchLifecycle / TestSearchIndex_Disabled / TestSearchListView_InvalidSortIsValidation (server owns sidecar + EnsureLlamaReady; disabled → WRKQ_VALIDATION)
-  - internal/wrkqapi/catview_fingerprint_test.go      # TestSearchIndexViewDTOFingerprint (legacy struct-order field pins for search/result/status DTOs)
+  - internal/wrkqapi/searchindex_test.go              # TestSearchIndex_RebuildStatusSearchLifecycle / TestSearchListView_InvalidSortIsValidation (server owns sidecar + EnsureLlamaReady; disabled → WRKQ_VALIDATION is pinned at the CLI by internal/rpccli TestSearchDisabled_TransportError)
+  - internal/wrkqapi/catview_fingerprint_test.go      # TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes (golden key order of marshaled search/result/status responses)
   - internal/workrpc/catview_catalog_test.go          # TestCatViewInCatalogs (search/index methods + DTOs in BOTH catalogs → schema-hash input)
   - internal/rpccli/importguard_test.go               # TestCoreRuleImportGuard (mirror MUST NOT import internal/search subtree → cannot open sidecar / call EnsureLlamaReady)
   - internal/rpccli/searchindex_transport_test.go     # TestTransportEquivalence_SearchIndex / TestSearchDisabled_TransportError (in-proc + subprocess agree; disabled error surfaces)
