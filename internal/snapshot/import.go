@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -781,41 +782,22 @@ func Verify(db *sql.DB, inputPath string) (*VerifyResult, error) {
 		return nil, fmt.Errorf("failed to parse snapshot: %w", err)
 	}
 
-	// Store original snapshot_rev for comparison
 	origRev := origSnap.Meta.SnapshotRev
 
-	// Clear snapshot_rev and generated_at for comparison
-	// (these change on re-export)
-	origSnap.Meta.SnapshotRev = ""
-	origSnap.Meta.GeneratedAt = ""
-
-	// Re-export to canonical JSON
-	canonicalOrig, err := CanonicalJSON(&origSnap)
+	// A canonical snapshot is byte-identical to the canonical encoding of its
+	// own content; export writes exactly CanonicalJSON of the snapshot.
+	canonical, err := CanonicalJSON(&origSnap)
 	if err != nil {
-		return nil, fmt.Errorf("failed to canonicalize original: %w", err)
+		return nil, fmt.Errorf("failed to canonicalize snapshot: %w", err)
 	}
 
-	// Parse the canonical version
-	var reloadedSnap Snapshot
-	if err := json.Unmarshal(canonicalOrig, &reloadedSnap); err != nil {
-		return nil, fmt.Errorf("failed to parse canonicalized snapshot: %w", err)
-	}
-
-	// Re-export the reloaded snapshot
-	canonicalReloaded, err := CanonicalJSON(&reloadedSnap)
-	if err != nil {
-		return nil, fmt.Errorf("failed to re-canonicalize: %w", err)
-	}
-
-	// Compare bytes
-	if string(canonicalOrig) != string(canonicalReloaded) {
-		// Find first difference for diagnostics
-		diff := findFirstDiff(string(canonicalOrig), string(canonicalReloaded))
+	if !bytes.Equal(origData, canonical) {
+		diff := findFirstDiff(string(origData), string(canonical))
 		return &VerifyResult{
 			InputPath:   inputPath,
 			Valid:       false,
 			SnapshotRev: origRev,
-			Message:     fmt.Sprintf("round-trip failed: %s", diff),
+			Message:     fmt.Sprintf("snapshot is not canonical: %s", diff),
 		}, nil
 	}
 

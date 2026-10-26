@@ -76,3 +76,52 @@ func TestStateImportDryRunReportsCountsAndWritesNothing(t *testing.T) {
 		t.Fatalf("dry-run import wrote to the target: %s before, %s after", before, after)
 	}
 }
+
+// TestStateVerifyAcceptsCanonicalExportAndRefusesNonCanonicalOne: `wrkqadm
+// state verify` exits 0 on a canonical export and exits 4 on a snapshot whose
+// bytes are not the canonical encoding (a --no-canonical export of the same
+// ledger), as the command's help promises.
+func TestStateVerifyAcceptsCanonicalExportAndRefusesNonCanonicalOne(t *testing.T) {
+	source, sourcePath := migratedDB(t, "source.db")
+	proj := seedProject(t, source, "proj-uuid", "proj")
+	seedTask(t, source, "task-uuid", "", "task", proj)
+	dir := t.TempDir()
+
+	canonical := filepath.Join(dir, "canonical.json")
+	out, err := runAdm(t, "state", "export", "--db", sourcePath, "--json", "--out", canonical)
+	if err != nil {
+		t.Fatalf("wrkqadm state export: %v\n%s", err, out)
+	}
+	var exported struct {
+		SnapshotRev string `json:"snapshot_rev"`
+	}
+	if err := json.Unmarshal([]byte(out), &exported); err != nil || exported.SnapshotRev == "" {
+		t.Fatalf("decode export result (%v):\n%s", err, out)
+	}
+	out, err = runAdm(t, "state", "verify", "--db", sourcePath, "--json", canonical)
+	if err != nil {
+		t.Fatalf("verify of a canonical export: exit %d (%v)\n%s", ExitCodeForError(err), err, out)
+	}
+	var verified struct {
+		Valid       bool   `json:"valid"`
+		SnapshotRev string `json:"snapshot_rev"`
+	}
+	if err := json.Unmarshal([]byte(out), &verified); err != nil {
+		t.Fatalf("decode verify result: %v\n%s", err, out)
+	}
+	if !verified.Valid || verified.SnapshotRev != exported.SnapshotRev {
+		t.Fatalf("verify = %+v; want valid and the export's snapshot_rev %s", verified, exported.SnapshotRev)
+	}
+
+	pretty := filepath.Join(dir, "pretty.json")
+	if out, err := runAdm(t, "state", "export", "--db", sourcePath, "--no-canonical", "--out", pretty); err != nil {
+		t.Fatalf("wrkqadm state export --no-canonical: %v\n%s", err, out)
+	}
+	out, err = runAdm(t, "state", "verify", "--db", sourcePath, pretty)
+	if code := ExitCodeForError(err); code != 4 {
+		t.Fatalf("verify of a non-canonical snapshot: exit %d, want 4\n%s", code, out)
+	}
+	if !strings.Contains(out, "not canonical") {
+		t.Fatalf("verify of a non-canonical snapshot does not say why:\n%s", out)
+	}
+}
