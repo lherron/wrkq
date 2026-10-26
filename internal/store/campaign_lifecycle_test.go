@@ -176,8 +176,8 @@ func TestCampaignContainerDeleteAndPurgeRestrictEnrolledMembers(t *testing.T) {
 					testAttribution(f.actorUUID), f.campaignA, 0,
 				)
 			}
-			if err == nil || !strings.Contains(strings.ToLower(err.Error()), "foreign key") {
-				t.Fatalf("%s error = %v, want FK RESTRICT", name, err)
+			if err == nil || !strings.Contains(err.Error(), "external-enrollment") || strings.Contains(strings.ToLower(err.Error()), "foreign key") {
+				t.Fatalf("%s error = %v, want refusal naming external-enrollment", name, err)
 			}
 			var containerCount, enrollmentCount int
 			if err := f.db.QueryRow(

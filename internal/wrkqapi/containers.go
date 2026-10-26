@@ -658,6 +658,10 @@ func mapContainerStoreError(err error, selector string) error {
 	if errors.As(err, &mismatch) {
 		return NewConflictError("container etag precondition failed", map[string]any{"currentEtag": mismatch.Actual})
 	}
+	var enrolled *store.CampaignDeleteBlockedError
+	if errors.As(err, &enrolled) {
+		return NewValidationError(enrolled.Error(), map[string]any{"container": selector, "members": campaignDiagnosticsDTO(enrolled.Members)})
+	}
 	var impactMismatch *store.ContainerDeleteImpactMismatchError
 	if errors.As(err, &impactMismatch) {
 		return NewConflictError("container deleteRecursive impact changed", map[string]any{

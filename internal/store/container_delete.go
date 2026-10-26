@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/domain"
@@ -42,6 +43,52 @@ type ContainerDeleteImpactMismatchError struct {
 
 func (e *ContainerDeleteImpactMismatchError) Error() string {
 	return "container deleteRecursive expected impact does not match current impact"
+}
+
+// CampaignDeleteBlockedError names enrollments outside the selected residency
+// subtree. They survive the purge and must be unenrolled explicitly first.
+type CampaignDeleteBlockedError struct {
+	Members []CampaignMemberDiagnostic
+}
+
+func (e *CampaignDeleteBlockedError) Error() string {
+	names := make([]string, 0, len(e.Members))
+	for _, member := range e.Members {
+		names = append(names, member.ID+" ("+member.Path+")")
+	}
+	return "cannot delete campaign with enrolled members; unenroll them first: " + strings.Join(names, ", ")
+}
+
+func refuseExternalEnrollmentsTx(tx *sql.Tx, containerUUID string) error {
+	rows, err := tx.Query(`
+ WITH RECURSIVE selected(uuid) AS (
+  SELECT uuid FROM containers WHERE uuid = ?
+  UNION ALL SELECT c.uuid FROM containers c JOIN selected s ON c.parent_uuid = s.uuid
+ )
+ SELECT t.uuid, t.id, COALESCE(p.path, t.slug), t.state
+ FROM tasks t LEFT JOIN v_task_paths p ON p.uuid = t.uuid
+ WHERE t.campaign_uuid IN (SELECT uuid FROM selected)
+ AND t.project_uuid NOT IN (SELECT uuid FROM selected)
+ ORDER BY t.id`, containerUUID)
+	if err != nil {
+		return fmt.Errorf("failed to check campaign enrollments: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var members []CampaignMemberDiagnostic
+	for rows.Next() {
+		member := CampaignMemberDiagnostic{Membership: "enrolled"}
+		if err := rows.Scan(&member.UUID, &member.ID, &member.Path, &member.State); err != nil {
+			return err
+		}
+		members = append(members, member)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(members) > 0 {
+		return &CampaignDeleteBlockedError{Members: members}
+	}
+	return nil
 }
 
 // Delete hard-deletes an empty container.
@@ -87,6 +134,10 @@ func (cs *ContainerStore) DeleteWithAttribution(attr attribution.Attribution, co
 		}
 		if childCount > 0 {
 			return fmt.Errorf("container is not empty: has %d children", childCount)
+		}
+
+		if err := refuseExternalEnrollmentsTx(tx, containerUUID); err != nil {
+			return err
 		}
 
 		// Log event BEFORE deleting
@@ -155,6 +206,10 @@ func (cs *ContainerStore) DeleteRecursiveWithAttribution(attr attribution.Attrib
 		}
 		if !sameDeleteImpact(expected, *current) {
 			return &ContainerDeleteImpactMismatchError{Expected: expected, Current: *current}
+		}
+
+		if err := refuseExternalEnrollmentsTx(tx, containerUUID); err != nil {
+			return err
 		}
 
 		// Ownership survives logical deletion; physical container purge cannot
