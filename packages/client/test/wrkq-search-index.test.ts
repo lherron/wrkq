@@ -74,53 +74,30 @@ describe("wrkq search + index family (T-05114)", () => {
     expect(view.status!.searchable_chunk_count).toBe(3);
   });
 
-  test("index.status sends wrkq.index.status with no params", async () => {
-    const transport = new FakeTransport().onResult("wrkq.index.status", MOCK_STATUS);
-    const client = await clientWith(transport);
-
-    const status = await client.wrkq.index.status();
-
-    const frame = transport.capturedRequests[0]!;
-    expect(frame.method).toBe("wrkq.index.status");
-    expect(status.status).toBe("ready");
-    expect(status.stale_event_count).toBe(0);
-  });
-
-  test("index.rebuild forwards the lifecycle params and returns the map-alphabetical ack", async () => {
-    const transport = new FakeTransport().onResult("wrkq.index.rebuild", {
-      rebuilt: true,
-      status: MOCK_STATUS,
-    });
-    const client = await clientWith(transport);
-
-    const result = await client.wrkq.index.rebuild({ foreground: true });
-
-    const frame = transport.capturedRequests[0]!;
-    expect(frame.method).toBe("wrkq.index.rebuild");
-    expect(frame.params).toMatchObject({ foreground: true });
-    expect(result.rebuilt).toBe(true);
-    expect(result.status.searchable_chunk_count).toBe(3);
-  });
-
-  test("index.update / vacuum / pause / resume route to their methods", async () => {
+  test("index facade sends each lifecycle method with {} or the caller's params", async () => {
     const transport = new FakeTransport()
+      .onResult("wrkq.index.status", MOCK_STATUS)
+      .onResult("wrkq.index.rebuild", { rebuilt: true, status: MOCK_STATUS })
       .onResult("wrkq.index.update", { updated: true, status: MOCK_STATUS })
       .onResult("wrkq.index.vacuum", { vacuumed: true })
       .onResult("wrkq.index.pause", { status: "paused" })
       .onResult("wrkq.index.resume", { status: "ready" });
     const client = await clientWith(transport);
 
-    expect((await client.wrkq.index.update()).updated).toBe(true);
-    expect((await client.wrkq.index.vacuum()).vacuumed).toBe(true);
-    expect((await client.wrkq.index.pause()).status).toBe("paused");
-    expect((await client.wrkq.index.resume()).status).toBe("ready");
+    await client.wrkq.index.status();
+    await client.wrkq.index.rebuild({ foreground: true });
+    await client.wrkq.index.update();
+    await client.wrkq.index.vacuum();
+    await client.wrkq.index.pause();
+    await client.wrkq.index.resume();
 
-    const methods = transport.capturedRequests.map((r) => r.method);
-    expect(methods).toEqual([
-      "wrkq.index.update",
-      "wrkq.index.vacuum",
-      "wrkq.index.pause",
-      "wrkq.index.resume",
+    expect(transport.capturedRequests.map(({ method, params }) => ({ method, params }))).toEqual([
+      { method: "wrkq.index.status", params: {} },
+      { method: "wrkq.index.rebuild", params: { foreground: true } },
+      { method: "wrkq.index.update", params: {} },
+      { method: "wrkq.index.vacuum", params: {} },
+      { method: "wrkq.index.pause", params: {} },
+      { method: "wrkq.index.resume", params: {} },
     ]);
   });
 });

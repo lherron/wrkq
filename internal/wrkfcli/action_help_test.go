@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestActionResponseShapesAreDocumentedInHelp(t *testing.T) {
+func TestActionHelpDocumentsClaimSettleHeartbeatResponseFieldsAndFlagDefaults(t *testing.T) {
 	tests := []struct {
 		name string
 		cmd  *cobra.Command
@@ -25,6 +25,7 @@ func TestActionResponseShapesAreDocumentedInHelp(t *testing.T) {
 				"error.message",
 				"error.fix",
 				"error.predecessor.runId",
+				"Lease duration in milliseconds (default 300000)",
 			},
 		},
 		{
@@ -36,6 +37,7 @@ func TestActionResponseShapesAreDocumentedInHelp(t *testing.T) {
 				"transition (optional)",
 				"effects (optional)",
 				"obligations (optional)",
+				`Terminal settlement result (default "completed")`,
 			},
 		},
 		{

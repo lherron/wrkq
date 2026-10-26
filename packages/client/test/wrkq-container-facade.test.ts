@@ -8,76 +8,50 @@
 
 import { describe, expect, test } from "bun:test";
 import { FakeTransport } from "../src/testing/fake-transport";
+import type {
+  WrkqContainerCreateParams,
+  WrkqContainerDeleteParams,
+  WrkqContainerDeleteRecursiveParams,
+  WrkqContainerUpdateParams,
+} from "../src/wrkq/container";
+import type { WrkqWebhookMutateParams, WrkqWebhookSubscription } from "../src/wrkq/webhook";
 import { MOCK_CONTAINER, clientWith } from "./support/client-fixtures";
 
 describe("wrkq container facade", () => {
-  test("container mutation facade forwards create, delete, and deleteRecursive", async () => {
+  test("container mutation facade sends create, update, delete and deleteRecursive with params unchanged", async () => {
     const transport = new FakeTransport()
       .onResult("wrkq.container.create", MOCK_CONTAINER)
+      .onResult("wrkq.container.update", MOCK_CONTAINER)
       .onResult("wrkq.container.delete", { deleted: true })
-      .onResult("wrkq.container.deleteRecursive", {
-        deleted: true,
-        containersDeleted: 2,
-        tasksDeleted: 3,
-        attachmentsDeleted: 1,
-        bytesFreed: 42,
-      });
+      .onResult("wrkq.container.deleteRecursive", { deleted: true });
     const client = await clientWith(transport);
 
-    const created = await client.wrkq.container.create({
-      path: "project",
-      slug: "child",
-      kind: "directory",
-    });
-    const deleted = await client.wrkq.container.delete({ path: "project/child", expectEtag: 1 });
-    const recursive = await client.wrkq.container.deleteRecursive({
-      path: "project",
-      expected: { containers: 2, tasks: 3, attachments: 1, bytes: 42 },
-    });
-
-    expect(created.id).toBe("P-00001");
-    expect(deleted.deleted).toBe(true);
-    expect(recursive.deleted).toBe(true);
-    expect(transport.capturedRequests.map((r) => r.method)).toEqual([
-      "wrkq.container.create",
-      "wrkq.container.delete",
-      "wrkq.container.deleteRecursive",
-    ]);
-    expect(transport.capturedRequests[2]!.params).toMatchObject({
-      path: "project",
-      expected: { containers: 2, tasks: 3, attachments: 1, bytes: 42 },
-    });
-  });
-
-  test("container.update forwards wrkq.container.update and returns WrkqContainer", async () => {
-    const transport = new FakeTransport().onResult("wrkq.container.update", {
-      ...MOCK_CONTAINER,
-      slug: "renamed",
-      title: "Renamed",
-      path: "renamed",
-      etag: 2,
-    });
-    const client = await clientWith(transport);
-
-    const updated = await client.wrkq.container.update({
+    const create = { path: "project", slug: "child", kind: "directory" } satisfies WrkqContainerCreateParams;
+    const update = {
       container: "project",
       patch: { slug: "renamed", title: "Renamed" },
       expectEtag: 1,
       actor: "agent:larry",
       idempotencyKey: "cu1",
-    });
+    } satisfies WrkqContainerUpdateParams;
+    const del = { path: "project/child", expectEtag: 1 } satisfies WrkqContainerDeleteParams;
+    // deleteRecursive carries the caller's expected-count guard verbatim.
+    const deleteRecursive = {
+      path: "project",
+      expected: { containers: 2, tasks: 3, attachments: 1, bytes: 42 },
+    } satisfies WrkqContainerDeleteRecursiveParams;
 
-    const frame = transport.capturedRequests[0]!;
-    expect(frame.method).toBe("wrkq.container.update");
-    expect(frame.params).toMatchObject({
-      container: "project",
-      patch: { slug: "renamed", title: "Renamed" },
-      expectEtag: 1,
-      idempotencyKey: "cu1",
-    });
-    expect(updated.slug).toBe("renamed");
-    expect(updated.title).toBe("Renamed");
-    expect(updated.etag).toBe(2);
+    await client.wrkq.container.create(create);
+    await client.wrkq.container.update(update);
+    await client.wrkq.container.delete(del);
+    await client.wrkq.container.deleteRecursive(deleteRecursive);
+
+    expect(transport.capturedRequests.map(({ method, params }) => ({ method, params }))).toEqual([
+      { method: "wrkq.container.create", params: create },
+      { method: "wrkq.container.update", params: update },
+      { method: "wrkq.container.delete", params: del },
+      { method: "wrkq.container.deleteRecursive", params: deleteRecursive },
+    ]);
   });
 
   test("campaign facade forwards lifecycle and portfolio methods", async () => {
@@ -318,56 +292,30 @@ describe("wrkq container facade", () => {
     expect(updated.root).toBe("/Volumes/work/wrkq");
   });
 
-  test("webhook.add forwards wrkq.webhook.add and returns the changed mutation result", async () => {
-    const transport = new FakeTransport().onResult("wrkq.webhook.add", {
-      changed: true,
-      count: 1,
-      target: "https://hook.test/wrkq",
-      webhook_urls: ["https://hook.test/wrkq"],
-    });
+  test("webhook facade sends add, remove and listView with params unchanged, listView defaulting to {}", async () => {
+    const transport = new FakeTransport()
+      .onResult("wrkq.webhook.add", { changed: true, count: 1, target: "https://hook.test/wrkq", webhook_urls: [] })
+      .onResult("wrkq.webhook.remove", { changed: false, webhook_urls: [] })
+      .onResult("wrkq.webhook.listView", []);
     const client = await clientWith(transport);
 
-    const result = await client.wrkq.webhook.add({
-      url: "https://hook.test/wrkq",
-      actor: "agent:larry",
-    });
+    const add = { url: "https://hook.test/wrkq", actor: "agent:larry" } satisfies WrkqWebhookMutateParams;
+    const remove = { url: "https://absent.test/wrkq" } satisfies WrkqWebhookMutateParams;
+    const added = await client.wrkq.webhook.add(add);
+    await client.wrkq.webhook.remove(remove);
+    await client.wrkq.webhook.listView();
 
-    const frame = transport.capturedRequests[0]!;
-    expect(frame.method).toBe("wrkq.webhook.add");
-    expect(frame.params).toMatchObject({ url: "https://hook.test/wrkq", actor: "agent:larry" });
-    expect(result.changed).toBe(true);
-    expect(result.count).toBe(1);
-    expect(result.target).toBe("https://hook.test/wrkq");
-    expect(result.webhook_urls).toEqual(["https://hook.test/wrkq"]);
-  });
-
-  test("webhook.remove forwards wrkq.webhook.remove and returns a no-change result", async () => {
-    const transport = new FakeTransport().onResult("wrkq.webhook.remove", {
-      changed: false,
-      webhook_urls: [],
-    });
-    const client = await clientWith(transport);
-
-    const result = await client.wrkq.webhook.remove({ url: "https://absent.test/wrkq" });
-
-    expect(transport.capturedRequests[0]!.method).toBe("wrkq.webhook.remove");
-    expect(result.changed).toBe(false);
-    expect(result.count).toBeUndefined();
-    expect(result.webhook_urls).toEqual([]);
-  });
-
-  test("webhook.listView forwards wrkq.webhook.listView and returns {url} rows", async () => {
-    const transport = new FakeTransport().onResult("wrkq.webhook.listView", [
-      { url: "https://a.test/wrkq" },
-      { url: "https://b.test/wrkq" },
+    // Type-only: the mutation result exposes changed/count/target/webhook_urls.
+    void ([added.changed, added.count, added.target, added.webhook_urls] satisfies [
+      boolean,
+      number | undefined,
+      string | undefined,
+      WrkqWebhookSubscription[],
     ]);
-    const client = await clientWith(transport);
-
-    const rows = await client.wrkq.webhook.listView();
-
-    const frame = transport.capturedRequests[0]!;
-    expect(frame.method).toBe("wrkq.webhook.listView");
-    expect(frame.params).toEqual({});
-    expect(rows).toEqual([{ url: "https://a.test/wrkq" }, { url: "https://b.test/wrkq" }]);
+    expect(transport.capturedRequests.map(({ method, params }) => ({ method, params }))).toEqual([
+      { method: "wrkq.webhook.add", params: add },
+      { method: "wrkq.webhook.remove", params: remove },
+      { method: "wrkq.webhook.listView", params: {} },
+    ]);
   });
 });

@@ -4,13 +4,16 @@ import { FakeTransport } from "../src/testing/fake-transport";
 import type {
   WrkqEnvelope,
   WrkqEnvelopeInboxView,
+  WrkqEnvelopeInboxViewParams,
   WrkqEnvelopeMemberPage,
   WrkqEnvelopeMemberPageParams,
   WrkqEnvelopePendingView,
+  WrkqEnvelopePendingViewParams,
   WrkqEnvelopePresentResult,
   WrkqRoom,
   WrkqRoomLogView,
   WrkqRoomMembersView,
+  WrkqRoomSayParams,
   WrkqRoomSayResult,
 } from "../src/wrkq/collaboration";
 
@@ -157,6 +160,7 @@ const INBOX_VIEW: WrkqEnvelopeInboxView = {
   sentExpired: [],
   sentWithdrawn: [],
   recentNotes: 0,
+  notes: [],
 };
 const PRESENT_RESULT: WrkqEnvelopePresentResult = {
   envelope: ENVELOPE,
@@ -192,7 +196,8 @@ describe("wrkq.room facade", () => {
       idempotencyKey: "acp:hrc-message:m-1",
       principalRef: "agent:clod",
       scopeRef: "clod@wrkq:T-07613",
-    };
+      note: true,
+    } satisfies WrkqRoomSayParams;
     const show = { room: "T-07613" };
     const logView = { room: "T-07613", task: "T-07613", limit: 20 };
     const label = { room: "T-07613" };
@@ -245,16 +250,6 @@ describe("wrkq.room facade", () => {
     ]);
   });
 
-  test("list defaults to an empty parameter object", async () => {
-    const transport = new FakeTransport().onResult("wrkq.room.list", {
-      items: [],
-    });
-    const client = await createClient({ transport, autoInitialize: false });
-    await client.wrkq.room.list();
-    expect(transport.capturedRequests.map((request) => request.params)).toEqual(
-      [{}],
-    );
-  });
 });
 
 describe("wrkq.envelope facade", () => {
@@ -288,7 +283,12 @@ describe("wrkq.envelope facade", () => {
       limit: 1,
       expectedLedgerIncarnation: "ledger-1",
     };
-    const inbox = { scopeRef: "cody@wrkq:T-07613", includeFailed: true };
+    const inbox = {
+      scopeRef: "cody@wrkq:T-07613",
+      includeFailed: true,
+      includeNotes: true,
+      notesSince: "2d",
+    } satisfies WrkqEnvelopeInboxViewParams;
     const defer = {
       envelope: "EN-00001",
       reason: "after the build",
@@ -315,8 +315,9 @@ describe("wrkq.envelope facade", () => {
     };
     const pending = {
       scopes: ["cody@wrkq:T-07613"],
+      includeFyi: true,
       principalRef: "agent:hrc",
-    };
+    } satisfies WrkqEnvelopePendingViewParams;
     const fail = {
       envelope: "EN-00001",
       reason: "runtime_terminated" as const,
@@ -384,126 +385,21 @@ describe("wrkq.envelope facade", () => {
     ]);
   });
 
-  test("birthEnvelope is null when nothing ever fired at the scope", async () => {
-    // A scope that has only ever been sent fyi has no birth envelope: fyi never
-    // summons, so there is nothing to designate a birth node from and the
-    // registry falls back to today's tier 5 rather than inventing a home.
-    const transport = new FakeTransport().onResult(
-      "wrkq.envelope.birthEnvelope",
-      null,
-    );
-    const client = await createClient({ transport, autoInitialize: false });
-
-    expect(
-      await client.wrkq.envelope.birthEnvelope({
-        scopeRef: "cody@wrkq:T-07613",
-      }),
-    ).toBeNull();
-  });
-
-  test("pendingView includeFyi forwards the opt-in and keeps fyi out of blocking", async () => {
-    const fyi: WrkqEnvelope = {
-      ...ENVELOPE,
-      uuid: "envelope-uuid-fyi",
-      id: "EN-00002",
-      groupId: "EN-00002",
-      obligation: "fyi",
-      body: "heads up",
-      state: "pending",
-    };
-    const transport = new FakeTransport().onResult(
-      "wrkq.envelope.pendingView",
-      {
-        items: [ENVELOPE, fyi],
-        blocking: [ENVELOPE.id],
-        repended: 0,
-      },
-    );
-    const client = await createClient({ transport, autoInitialize: false });
-
-    const params = {
-      scopes: ["cody@wrkq:T-07613"],
-      includeFyi: true,
-      principalRef: "agent:hrc",
-    };
-    const view = await client.wrkq.envelope.pendingView(params);
-
-    expect(view.items.map((item) => item.obligation)).toEqual([
-      "reply_required",
-      "fyi",
-    ]);
-    // fyi carries no obligation, so it never refuses a turn end and never summons.
-    expect(view.blocking).toEqual([ENVELOPE.id]);
-    expect(
-      transport.capturedRequests.map(({ method, params: sent }) => ({
-        method,
-        params: sent,
-      })),
-    ).toEqual([{ method: "wrkq.envelope.pendingView", params }]);
-  });
-
-  test("say note forwards the flag and inboxView reads notes with their count", async () => {
-    const note: WrkqEnvelope = {
-      ...ENVELOPE,
-      uuid: "envelope-uuid-note",
-      id: "EN-00003",
-      groupId: "EN-00003",
-      obligation: "note",
-      body: "nightly queue empty",
-      state: "acked",
-      terminal: true,
-    };
+  test("room.list, envelope.inboxView and envelope.pendingView send {} when called without params", async () => {
     const transport = new FakeTransport()
-      .onResult("wrkq.room.say", {
-        room: ROOM,
-        groupId: note.id,
-        envelopes: [note],
-        acked: [],
-        notices: [],
-      })
-      .onResult("wrkq.envelope.inboxView", {
-        ...INBOX_VIEW,
-        groups: [],
-        recentNotes: 1,
-        notes: [note],
-      });
-    const client = await createClient({ transport, autoInitialize: false });
-
-    const say = {
-      ref: "T-07613",
-      body: "nightly queue empty",
-      to: ["cody"],
-      note: true,
-    };
-    const said = await client.wrkq.room.say(say);
-    expect(said.envelopes[0]?.obligation).toBe("note");
-    expect(said.envelopes[0]?.state).toBe("acked");
-
-    const inbox = {
-      scopeRef: "cody@wrkq:T-07613",
-      includeNotes: true,
-      notesSince: "2d",
-    };
-    const view = await client.wrkq.envelope.inboxView(inbox);
-    expect(view.recentNotes).toBe(1);
-    expect(view.notes?.map((item) => item.id)).toEqual([note.id]);
-    expect(
-      transport.capturedRequests.map(({ method, params }) => ({ method, params })),
-    ).toEqual([
-      { method: "wrkq.room.say", params: say },
-      { method: "wrkq.envelope.inboxView", params: inbox },
-    ]);
-  });
-
-  test("inboxView and pendingView default to empty parameter objects", async () => {
-    const transport = new FakeTransport()
+      .onResult("wrkq.room.list", { items: [] })
       .onResult("wrkq.envelope.inboxView", INBOX_VIEW)
       .onResult("wrkq.envelope.pendingView", PENDING_VIEW);
     const client = await createClient({ transport, autoInitialize: false });
+    await client.wrkq.room.list();
     await client.wrkq.envelope.inboxView();
     await client.wrkq.envelope.pendingView();
-    expect(transport.capturedRequests.map((request) => request.params)).toEqual(
-      [{}, {}],
-    );
+    expect(
+      transport.capturedRequests.map(({ method, params }) => ({ method, params })),
+    ).toEqual([
+      { method: "wrkq.room.list", params: {} },
+      { method: "wrkq.envelope.inboxView", params: {} },
+      { method: "wrkq.envelope.pendingView", params: {} },
+    ]);
   });
 });

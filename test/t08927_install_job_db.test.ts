@@ -52,13 +52,13 @@ describe("resolve-job-db", () => {
     expect(resolve(fixture("repo-plist-wrkq-server-env.txt")).out).toBe(stubDB);
   });
 
-  test.each([["--db=/x/a.db"], ["-db=/x/a.db"]])("Go flag form %s", (arg) => {
-    const print = mini.replace("\t\t--db\n\t\t/Users/lherron/.praesidium-data/wrkq/wrkq.db\n", `\t\t${arg}\n`);
-    expect(resolve(print).out).toBe("/x/a.db");
-  });
-
-  test("single-dash -db X", () => {
-    expect(resolve(mini.replace("\t\t--db\n", "\t\t-db\n")).out).toBe(miniDB);
+  // Every Go flag spelling of the database argument resolves (mini's own is `--db X`).
+  test.each([
+    ["--db=X", mini.replace("\t\t--db\n\t\t/Users/lherron/.praesidium-data/wrkq/wrkq.db\n", "\t\t--db=/x/a.db\n"), "/x/a.db"],
+    ["-db=X", mini.replace("\t\t--db\n\t\t/Users/lherron/.praesidium-data/wrkq/wrkq.db\n", "\t\t-db=/x/a.db\n"), "/x/a.db"],
+    ["-db X", mini.replace("\t\t--db\n", "\t\t-db\n"), miniDB],
+  ])("Go flag form %s", (_form, print, expected) => {
+    expect(resolve(print).out).toBe(expected);
   });
 
   test("--db argument outranks job environment", () => {

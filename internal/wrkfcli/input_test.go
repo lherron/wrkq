@@ -26,20 +26,9 @@ func TestActionSettleSummaryReadsStdinVerbatim(t *testing.T) {
 	}
 }
 
-func TestActionSettleRejectsMultipleStdinTextFlags(t *testing.T) {
-	cmd := actionSettleCmd()
-	cmd.SetIn(strings.NewReader("one input"))
-	for _, name := range []string{"summary", "terminal-summary"} {
-		if err := cmd.Flags().Set(name, "-"); err != nil {
-			t.Fatalf("set --%s: %v", name, err)
-		}
-	}
-
-	err := resolveStdinTextFlags(cmd)
-	if err == nil {
-		t.Fatal("expected stdin claim conflict")
-	}
-	if !strings.Contains(err.Error(), "stdin already claimed by --summary") {
-		t.Fatalf("error = %q, want first claimant", err)
-	}
+// Only one text flag may read stdin; the refusal names the first claimant and
+// is reached before any database or transport work.
+func TestTwoDashTextFlagsRefuseNamingFirstStdinClaimant(t *testing.T) {
+	res := runWrkf(t, "one input", nil, "action", "settle", "R-1", "--summary", "-", "--terminal-summary", "-")
+	requireWrkfRefusal(t, res, "stdin already claimed by --summary")
 }

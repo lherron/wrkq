@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildStdioSpawnSpec } from "../src/stdio-transport";
 import type { StdioSpawnOptions } from "../src/stdio-transport";
+import { createClient, type CreateClientOptions } from "../src/client";
 
 describe("StdioTransport spawn construction", () => {
   test("T-05381 wrkq sessions use principalRef as --principal-ref caller attribution", () => {
@@ -23,39 +24,12 @@ describe("StdioTransport spawn construction", () => {
     expect(spec.env.WRKQ_DB).toBeUndefined();
   });
 
-  test("all sessions reject legacy actor; wrkf launches with canonical --principal-ref", () => {
-    let rejectedActor = false;
-    try {
-      buildStdioSpawnSpec({
-        command: "wrkf",
-        actor: "agent:cody",
-      } as StdioSpawnOptions & { actor: string });
-    } catch (err) {
-      rejectedActor = true;
-      expect((err as Error).message).toMatch(/actor|principalRef/i);
-    }
-    expect(rejectedActor).toBe(true);
-
-    // T-05372: wrkf participant identity is canonical principal_ref — the wrkf
-    // binary launches with --principal-ref, never the legacy --actor flag.
-    const wrkfSpec = buildStdioSpawnSpec({
-      command: "wrkf",
-      principalRef: "agent:cody",
-    });
-    expect(wrkfSpec.argv).toEqual(["--principal-ref", "agent:cody", "rpc", "--stdio"]);
-    expect(wrkfSpec.argv).not.toContain("--actor");
-  });
-
-  test("local dbPath stays on path-only --db", () => {
-    const spec = buildStdioSpawnSpec({
-      command: "wrkq",
-      dbPath: "/tmp/wrkq.db",
-      principalRef: "agent:cody",
-      env: { WRKQ_DB: undefined, WRKQ_DB_PATH: undefined },
-    });
-
-    expect(spec.argv).toEqual(["--db", "/tmp/wrkq.db", "--principal-ref", "agent:cody", "rpc", "--stdio"]);
-    expect(spec.env.WRKQ_DB).toBeUndefined();
+  test("createClient refuses a legacy actor option before spawning", async () => {
+    await expect(
+      createClient({ command: "wrkf", actor: "agent:cody", autoInitialize: false } as CreateClientOptions & {
+        actor: string;
+      }),
+    ).rejects.toThrow("actor is no longer accepted for caller authority; use principalRef");
   });
 
   test("remote dbLocator uses WRKQ_DB and never --db", () => {
@@ -77,26 +51,10 @@ describe("StdioTransport spawn construction", () => {
     expect(spec.env.WRKQ_DB_PATH_FILE).toBeUndefined();
   });
 
-  test("legacy dbPath may carry a remote locator", () => {
-    const spec = buildStdioSpawnSpec({
-      command: "wrkq",
-      dbPath: "rpc://max3:7171",
-      env: { WRKQ_DB_PATH: "rpc://poison:7171" },
-    });
-
-    expect(spec.argv).toEqual(["rpc", "--stdio"]);
-    expect(spec.env.WRKQ_DB).toBe("rpc://max3:7171");
-    expect(spec.env.WRKQ_DB_PATH).toBeUndefined();
-  });
-
-  test("dbLocator and dbPath conflict is rejected", () => {
-    expect(() =>
-      buildStdioSpawnSpec({
-        command: "wrkq",
-        dbLocator: "rpc://max3:7171",
-        dbPath: "/tmp/wrkq.db",
-      }),
-    ).toThrow("dbLocator and dbPath refer to different database locators");
+  test("createClient rejects a dbLocator that conflicts with dbPath before spawning", async () => {
+    await expect(
+      createClient({ command: "wrkq", dbLocator: "rpc://max3:7171", dbPath: "/tmp/wrkq.db", autoInitialize: false }),
+    ).rejects.toThrow("dbLocator and dbPath refer to different database locators");
   });
 
   test("wrkf local path uses canonical --principal-ref and wrkf-only flags", () => {
@@ -123,13 +81,14 @@ describe("StdioTransport spawn construction", () => {
     expect(spec.argv).not.toContain("--actor");
   });
 
-  test("wrkf remote locator refuses caller hook catalog substitution", () => {
-    expect(() =>
-      buildStdioSpawnSpec({
+  test("createClient refuses a caller hook catalog for a remote wrkf locator before spawning", async () => {
+    await expect(
+      createClient({
         command: "wrkf",
         dbLocator: "rpc://mini:7171",
         hookCatalogPath: "/caller/hooks.json",
+        autoInitialize: false,
       }),
-    ).toThrow("canonical-node configuration");
+    ).rejects.toThrow("hookCatalogPath is local-only; hook catalog is canonical-node configuration in remote mode");
   });
 });

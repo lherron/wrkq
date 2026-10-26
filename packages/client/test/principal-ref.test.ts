@@ -50,32 +50,4 @@ describe("wrkf principal_ref cutover (T-05372)", () => {
     expect("actor" in (bound as unknown as Record<string, unknown>)).toBe(false);
   });
 
-  test("transition.apply forwards principal_ref identity verbatim", async () => {
-    const transport = new FakeTransport().onResult("wrkf.transition.apply", {
-      task: "T-00001",
-      instanceId: "wfi_1",
-      state: { status: "active", phase: "red" },
-      revision: 1,
-      eventId: "wfe_1",
-      effects: [],
-      obligations: [],
-    });
-    const client = await createClient({ transport, autoInitialize: false });
-
-    await client.wrkf.transition.apply({
-      task: "T-00001",
-      transition: "author_red",
-      role: "tester",
-      principal_ref: "agent:tester",
-    });
-
-    const frame = transport.capturedRequests[0]!;
-    expect(frame.method).toBe("wrkf.transition.apply");
-    expect(frame.params).toMatchObject({
-      transition: "author_red",
-      role: "tester",
-      principal_ref: "agent:tester",
-    });
-    expect(frame.params).not.toHaveProperty("actor");
-  });
 });

@@ -166,49 +166,21 @@ describe("FakeTransport idempotency", () => {
     expect(commentHandler.calls).toBe(1);
   });
 
-  test("missing and empty keys dispatch every request", async () => {
-    const handler = countingHandler();
-    const transport = new FakeTransport().onMethod("wrkq.comment.add", handler.handle);
+  test.each([
+    ["missing key", { task: "T-00001", body: "no key" }],
+    ["empty key", { task: "T-00001", body: "empty key", idempotencyKey: "" }],
+    ["transitionIdempotencyKey only", { actionRunId: "wfa_1", transitionIdempotencyKey: "transition-only" }],
+    ["nested evidence.idempotencyKey only", { actionRunId: "wfa_1", evidence: { idempotencyKey: "nested-evidence-only" } }],
+  ] as const)(
+    "only a non-empty top-level idempotencyKey is request-level idempotency: %s dispatches every request",
+    async (_shape, params) => {
+      const handler = countingHandler();
+      const transport = new FakeTransport().onMethod("wrkf.action.complete", handler.handle);
 
-    for (const params of [
-      { task: "T-00001", body: "no key" },
-      { task: "T-00001", body: "no key" },
-      { task: "T-00001", body: "empty key", idempotencyKey: "" },
-      { task: "T-00001", body: "empty key", idempotencyKey: "" },
-    ]) {
-      await transport.request({
-        jsonrpc: "2.0",
-        id: `request-${handler.calls}`,
-        method: "wrkq.comment.add",
-        params,
-      });
-    }
+      await transport.request({ jsonrpc: "2.0", id: 1, method: "wrkf.action.complete", params });
+      await transport.request({ jsonrpc: "2.0", id: 2, method: "wrkf.action.complete", params });
 
-    expect(handler.calls).toBe(4);
-  });
-
-  test("only a non-empty top-level idempotencyKey is request-level idempotency", async () => {
-    const handler = countingHandler();
-    const transport = new FakeTransport().onMethod("wrkf.action.complete", handler.handle);
-
-    const params = {
-      actionRunId: "wfa_1",
-      transitionIdempotencyKey: "transition-only",
-      evidence: { idempotencyKey: "nested-evidence-only" },
-    };
-    await transport.request({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "wrkf.action.complete",
-      params,
-    });
-    await transport.request({
-      jsonrpc: "2.0",
-      id: 2,
-      method: "wrkf.action.complete",
-      params,
-    });
-
-    expect(handler.calls).toBe(2);
-  });
+      expect(handler.calls).toBe(2);
+    },
+  );
 });

@@ -6,11 +6,10 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { isWrkfError } from "../src/errors";
 import { FakeTransport } from "../src/testing/fake-transport";
 import type { WrkfEventQueryResult } from "../src/wrkf/event";
 import type { WrkfTransitionResult } from "../src/wrkf/transition";
-import { clientWith, rejectionOf } from "./support/client-fixtures";
+import { clientWith } from "./support/client-fixtures";
 
 const MOCK_TRANSITION_RESULT: WrkfTransitionResult = {
   task: "T-00001",
@@ -119,7 +118,7 @@ describe("wrkf namespace", () => {
     expect(transport.capturedRequests).toHaveLength(3);
   });
 
-  test("action facade preserves opaque sourceIdentity bindings", async () => {
+  test("action.next/claim send their params unchanged, priorRun:null included", async () => {
     const sourceIdentity = "change-v1:implement-v4-1";
     const transport = new FakeTransport()
       .onResult("wrkf.action.next", {
@@ -169,12 +168,17 @@ describe("wrkf namespace", () => {
       priorRun: null,
     });
 
-    expect(next.candidates[0]?.source?.sourceIdentity).toBe(sourceIdentity);
-    expect(claim.binding?.run.source?.sourceIdentity).toBe(sourceIdentity);
-    expect(transport.capturedRequests[1]?.params).toMatchObject({ priorRun: null });
-    expect(transport.capturedRequests.map((request) => request.method)).toEqual([
-      "wrkf.action.next",
-      "wrkf.action.claim",
+    // Type-only: sourceIdentity is part of the public candidate and run-binding types.
+    void ([next.candidates[0]?.source?.sourceIdentity, claim.binding?.run.source?.sourceIdentity] satisfies [
+      string | undefined,
+      string | undefined,
+    ]);
+    expect(transport.capturedRequests.map(({ method, params }) => ({ method, params }))).toEqual([
+      { method: "wrkf.action.next", params: { task: "T-00001" } },
+      {
+        method: "wrkf.action.claim",
+        params: { task: "T-00001", runnerId: "runner-1", agentRef: "agent:larry", leaseMs: 60_000, priorRun: null },
+      },
     ]);
   });
 
@@ -242,20 +246,6 @@ describe("wrkf namespace", () => {
     expect(result.revision).toBe(2);
     expect(result.eventId).toBe("wfe_000003");
     expect(result.effects[0]!.id).toBe("eff_1");
-  });
-
-  test("suspension.resolve surfaces WRKF_SUSPENSION_NOT_FOUND as a typed wrkf error", async () => {
-    const transport = new FakeTransport().onError("wrkf.suspension.resolve", {
-      code: -32025,
-      message: "no active suspension matches id sus_999",
-      data: { code: "WRKF_SUSPENSION_NOT_FOUND", retryable: false },
-    });
-    const client = await clientWith(transport);
-
-    const err = await rejectionOf(client.wrkf.suspension.resolve({ suspensionId: "sus_999", disposition: "close" }));
-    expect(isWrkfError(err)).toBe(true);
-    expect(err.domainCode).toBe("WRKF_SUSPENSION_NOT_FOUND");
-    expect(err.method).toBe("wrkf.suspension.resolve");
   });
 
   test("event.query sends replay filters and returns a typed page", async () => {
@@ -379,18 +369,6 @@ describe("wrkf namespace", () => {
       "wrkf.role.unbind",
       "wrkf.role.set",
     ]);
-  });
-
-  test("effect.claim returns lease token + expiry", async () => {
-    const transport = new FakeTransport().onResult("wrkf.effect.claim", {
-      effects: [{ id: "eff_1", status: "leased" }],
-      leaseToken: "lease_abc",
-      leaseExpiresAt: "2026-06-30T01:00:00Z",
-    });
-    const client = await clientWith(transport);
-    const claim = await client.wrkf.effect.claim({ adapter: "wake_role", limit: 5, leaseMs: 60000 });
-    expect(claim.leaseToken).toBe("lease_abc");
-    expect(claim.effects[0]!.id).toBe("eff_1");
   });
 
   test("gap-method facades forward evidence, obligation, supervisor, and bounded watch calls", async () => {

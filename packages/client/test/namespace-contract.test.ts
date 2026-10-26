@@ -55,16 +55,10 @@ describe("public surface (runtime)", () => {
     ]) {
       expect(anyClient[forbidden]).toBeUndefined();
     }
-  });
 
-  test("T-05381 removes the legacy actor admin facade from the public client", async () => {
-    const client = await createClient({ transport: new FakeTransport(), autoInitialize: false });
-
-    const wrkq = client.wrkq as unknown as Record<string, unknown>;
-    const admin = wrkq.admin as Record<string, unknown> | undefined;
+    // T-05381: wrkq.admin stays, but the legacy actor facade (wrkq.admin.legacyActor) is gone.
+    const admin = (client.wrkq as unknown as Record<string, unknown>).admin as Record<string, unknown> | undefined;
     expect(admin).toBeDefined();
-
-    // T-05381 removes wrkq.admin.legacyActor.* as live actor scaffolding.
     expect(admin?.legacyActor).toBeUndefined();
   });
 });
@@ -92,9 +86,3 @@ function _typeNegatives(c: WorkClient) {
   // @ts-expect-error workflow attach is a wrkq verb, not wrkf
   c.wrkf.workflow.attach;
 }
-
-describe("type negatives compile-guard", () => {
-  test("the negative-type fixture exists (enforced by tsc)", () => {
-    expect(typeof _typeNegatives).toBe("function");
-  });
-});

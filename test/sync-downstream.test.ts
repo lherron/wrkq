@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+	chmodSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -11,7 +12,6 @@ import { join } from "node:path";
 import {
 	type LockProbe,
 	type SyncRunner,
-	dirtyLockSummary,
 	downstreamConsumers,
 	syncCommand,
 	syncDownstream,
@@ -125,42 +125,54 @@ describe("sync-downstream", () => {
 
 	// T-07629: an install here must not write git history in a repo it does not
 	// own. The sync leaves bun.lock dirty and names every repo it dirtied.
-	test("never runs git in a consumer checkout", async () => {
+	test("never runs git in a consumer checkout beyond a read-only bun.lock status", async () => {
 		const root = createFixture();
-		const commands: string[] = [];
-		const runner: SyncRunner = (_consumer, command) => {
-			commands.push(command.join(" "));
-			return { status: 0 };
-		};
-
-		await syncDownstream(root, runner, () => false);
-
-		expect(commands).toEqual([
-			"run sync:wrkq -- --pull",
-			"run sync:wrkq -- --pull",
-			"run sync:wrkq -- --pull",
-			"run sync:wrkq -- --pull",
-		]);
-		// The driver only ever spawns git read-only, to detect the dirty lock.
-		const source = readFileSync(
-			join(import.meta.dir, "..", "scripts", "sync-downstream.ts"),
-			"utf8",
+		const shimDir = mkdtempSync(join(tmpdir(), "wrkq-sync-downstream-git-"));
+		fixtureRoots.push(shimDir);
+		const gitLog = join(shimDir, "git.log");
+		writeFileSync(
+			join(shimDir, "git"),
+			'#!/bin/sh\nprintf \'%s|%s\\n\' "$(basename "$PWD")" "$*" >> "$WRKQ_TEST_GIT_LOG"\n',
 		);
-		expect(source).not.toMatch(/"commit"|"add"/);
-		expect(source.match(/spawnSync\("git", \[[^\]]*\]/g)).toEqual([
-			'spawnSync("git", ["status", "--porcelain", "--", "bun.lock"]',
+		chmodSync(join(shimDir, "git"), 0o755);
+
+		const saved = { PATH: process.env.PATH, WRKQ_TEST_GIT_LOG: process.env.WRKQ_TEST_GIT_LOG };
+		process.env.PATH = `${shimDir}:${process.env.PATH ?? ""}`;
+		process.env.WRKQ_TEST_GIT_LOG = gitLog;
+		try {
+			// Default lock probe: whatever git the driver spawns lands in the shim's log.
+			await syncDownstream(root, () => ({ status: 0 }));
+		} finally {
+			process.env.PATH = saved.PATH;
+			if (saved.WRKQ_TEST_GIT_LOG === undefined) delete process.env.WRKQ_TEST_GIT_LOG;
+			else process.env.WRKQ_TEST_GIT_LOG = saved.WRKQ_TEST_GIT_LOG;
+		}
+
+		expect(readFileSync(gitLog, "utf8").trimEnd().split("\n")).toEqual([
+			"hrc-runtime|status --porcelain -- bun.lock",
+			"agent-control-plane|status --porcelain -- bun.lock",
+			"taskboard|status --porcelain -- bun.lock",
+			"agent-loop|status --porcelain -- bun.lock",
 		]);
 	});
 
-	test("leaves the lockfile dirty and names each repo it dirtied", async () => {
+	test.each([
+		{
+			dirty: ["taskboard", "agent-loop"],
+			expected: [
+				"[sync-downstream] bun.lock updated in taskboard — commit it with your next landing",
+				"[sync-downstream] bun.lock updated in agent-loop — commit it with your next landing",
+			],
+		},
+		{ dirty: [], expected: [] },
+	])("leaves the lockfile dirty and names each repo it dirtied (dirty: $dirty)", async ({ dirty, expected }) => {
 		const root = createFixture();
 		const lines: string[] = [];
 		const log = console.log;
 		console.log = (line: string) => {
 			lines.push(line);
 		};
-		const probe: LockProbe = (consumer) =>
-			consumer.directory === "taskboard" || consumer.directory === "agent-loop";
+		const probe: LockProbe = (consumer) => dirty.includes(consumer.directory);
 
 		try {
 			await syncDownstream(root, () => ({ status: 0 }), probe);
@@ -168,27 +180,6 @@ describe("sync-downstream", () => {
 			console.log = log;
 		}
 
-		expect(lines).toEqual([
-			"[sync-downstream] bun.lock updated in taskboard — commit it with your next landing",
-			"[sync-downstream] bun.lock updated in agent-loop — commit it with your next landing",
-		]);
-	});
-
-	test("says nothing when no consumer lockfile changed", async () => {
-		const root = createFixture();
-		const lines: string[] = [];
-		const log = console.log;
-		console.log = (line: string) => {
-			lines.push(line);
-		};
-
-		try {
-			await syncDownstream(root, () => ({ status: 0 }), () => false);
-		} finally {
-			console.log = log;
-		}
-
-		expect(lines).toEqual([]);
-		expect(dirtyLockSummary([])).toEqual([]);
+		expect(lines).toEqual(expected);
 	});
 });

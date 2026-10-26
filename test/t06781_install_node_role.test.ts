@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -11,6 +12,12 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+// The install body runs for real, but hermetically: cwd is a scratch dir holding
+// only scripts/resolve-node-role.sh, HOME is a scratch home, and every command
+// that could reach the host (just, cp, git, uname, launchctl, codesign, go, bun,
+// wrkq, wrkqadm) is a PATH stub. uname reports a non-Darwin host, so the launchd
+// restart section (covered by t08927/t10825) is skipped; reaching launchctl or
+// codesign anyway is logged and fails the run.
 const repoRoot = process.cwd();
 const resolverPath = join(repoRoot, "scripts", "resolve-node-role.sh");
 const registryBaseline = '{"versions":["0.1.0-dev.canonical"],"latest":"0.1.0-dev.canonical"}\n';
@@ -24,6 +31,7 @@ type FixtureOptions = {
 type Fixture = {
   callsPath: string;
   cleanup: () => void;
+  cwd: string;
   env: Record<string, string>;
   registryPath: string;
 };
@@ -39,8 +47,11 @@ function createFixture(options: FixtureOptions = {}): Fixture {
   const stubs = join(root, "stubs");
   const callsPath = join(root, "just-calls");
   const registryPath = join(root, "registry-state.json");
+  const cwd = join(root, "checkout");
   mkdirSync(home, { recursive: true });
   mkdirSync(stubs, { recursive: true });
+  mkdirSync(join(cwd, "scripts"), { recursive: true });
+  copyFileSync(resolverPath, join(cwd, "scripts", "resolve-node-role.sh"));
   writeFileSync(callsPath, "");
   writeFileSync(registryPath, registryBaseline);
 
@@ -74,13 +85,22 @@ mkdir -p "$(dirname "$destination")"
   );
   writeExecutable(join(stubs, "hostname"), `#!/usr/bin/env bash\nprintf '%s\\n' '${options.hostIdentity ?? "fixture-host"}'\n`);
   writeExecutable(join(stubs, "uname"), `#!/usr/bin/env bash\nprintf '%s\\n' '${options.hostIdentity ?? "fixture-host"}'\n`);
+  // Not a work tree: the dirty-tree guard is out of scope here.
+  writeExecutable(join(stubs, "git"), "#!/usr/bin/env bash\nexit 128\n");
+  for (const hostCommand of ["launchctl", "codesign", "go", "bun", "wrkq", "wrkqadm"]) {
+    writeExecutable(
+      join(stubs, hostCommand),
+      `#!/usr/bin/env bash\nprintf '%s\\n' "UNEXPECTED ${hostCommand} $*" >> "$WRKQ_TEST_CALLS"\nexit 97\n`,
+    );
+  }
 
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] =>
         entry[1] !== undefined &&
         entry[0] !== "WRKQ_NODE_ROLE" &&
-        entry[0] !== "WRKQ_NODE_ROLE_FILE",
+        entry[0] !== "WRKQ_NODE_ROLE_FILE" &&
+        !entry[0].startsWith("GIT_"),
     ),
   );
   env.HOME = home;
@@ -99,12 +119,14 @@ mkdir -p "$(dirname "$destination")"
   return {
     callsPath,
     cleanup: () => rmSync(root, { force: true, recursive: true }),
+    cwd,
     env,
     registryPath,
   };
 }
 
-function renderInstallBody(noSync = ""): string {
+/** Renders `just install {flags}`; any other recipe variable fails loudly rather than rendering as text. */
+function renderInstallBody(flags: string): string {
   const dump = JSON.parse(
     execFileSync("just", ["--dump", "--dump-format", "json"], {
       cwd: repoRoot,
@@ -114,16 +136,19 @@ function renderInstallBody(noSync = ""): string {
   const render = (fragment: unknown): string => {
     if (typeof fragment === "string") return fragment;
     if (!Array.isArray(fragment)) return "";
-    if (fragment[0] === "variable" && fragment[1] === "no-sync") return noSync;
+    if (fragment[0] === "variable") {
+      if (fragment[1] === "flags") return flags;
+      throw new Error(`install body uses an unrendered recipe variable: ${String(fragment[1])}`);
+    }
     return fragment.map(render).join("");
   };
   return dump.recipes.install.body.map(render).join("\n");
 }
 
-function runInstall(fixture: Fixture, noSync = "") {
+function runInstall(fixture: Fixture, flags = "") {
   const result = Bun.spawnSync({
-    cmd: ["bash", "-c", renderInstallBody(noSync)],
-    cwd: repoRoot,
+    cmd: ["bash", "-c", renderInstallBody(flags)],
+    cwd: fixture.cwd,
     env: fixture.env,
     stdout: "pipe",
     stderr: "pipe",
@@ -140,7 +165,7 @@ function runInstall(fixture: Fixture, noSync = "") {
 function resolveRole(fixture: Fixture) {
   const result = Bun.spawnSync({
     cmd: ["bash", resolverPath],
-    cwd: repoRoot,
+    cwd: fixture.cwd,
     env: fixture.env,
     stdout: "pipe",
     stderr: "pipe",
@@ -158,14 +183,16 @@ describe("T-06781 install node-role gate", () => {
       { defaultRole: "producer", envRole: "consumer" },
       {},
       { defaultRole: "mini" },
+      // Host identity is ignored: HOST/HOSTNAME/WRKQ_NODE_ID=svc without a marker is the missing-role default.
+      { hostIdentity: "svc" },
     ]) {
       const fixture = createFixture(options);
       try {
         const install = runInstall(fixture);
         expect(install.status, install.output).toBe(0);
-        expect(install.calls).toEqual([]);
+        expect(install.calls).toEqual(["build"]);
         expect(install.registry).toBe(registryBaseline);
-        expect(install.output).toMatch(/consumer.*skip.*publish.*sync/i);
+        expect(install.output).toContain("[install] consumer node role; skipping client publish and downstream sync");
 
         const resolution = resolveRole(fixture);
         expect(resolution.status, resolution.output).toBe(0);
@@ -181,7 +208,7 @@ describe("T-06781 install node-role gate", () => {
     try {
       const install = runInstall(fileFixture);
       expect(install.status, install.output).toBe(0);
-      expect(install.calls).toEqual(["client-publish-dev", "sync-downstream"]);
+      expect(install.calls).toEqual(["build", "client-publish-dev", "sync-downstream"]);
       expect(install.registry).not.toBe(registryBaseline);
 
       const resolution = resolveRole(fileFixture);
@@ -193,26 +220,16 @@ describe("T-06781 install node-role gate", () => {
 
     const envFixture = createFixture({ envRole: "producer" });
     try {
-      const install = runInstall(envFixture, "1");
+      const install = runInstall(envFixture, "no-sync=1");
       expect(install.status, install.output).toBe(0);
-      expect(install.calls).toEqual(["client-publish-dev"]);
+      expect(install.calls).toEqual(["build", "client-publish-dev"]);
+      expect(install.output).toContain("[install] skipping downstream sync (no-sync=1)");
 
       const resolution = resolveRole(envFixture);
       expect(resolution.status, resolution.output).toBe(0);
       expect(resolution.role).toBe("producer");
     } finally {
       envFixture.cleanup();
-    }
-  });
-
-  test("host identity signals without an explicit marker still resolve consumer", () => {
-    const fixture = createFixture({ hostIdentity: "svc" });
-    try {
-      const resolution = resolveRole(fixture);
-      expect(resolution.status, resolution.output).toBe(0);
-      expect(resolution.role).toBe("consumer");
-    } finally {
-      fixture.cleanup();
     }
   });
 });

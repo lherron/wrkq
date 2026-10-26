@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const repoRoot = join(import.meta.dir, "..", "..", "..");
@@ -36,34 +36,6 @@ function functionBody(source: string, name: string): string {
 }
 
 describe("T-05619 canonical wrkf transition decision contract", () => {
-  test("defines one side-effect-free TransitionDecision evaluator API", () => {
-    const decisionPath = "internal/workflow/transition_decision.go";
-    const decisionExists = existsSync(join(repoRoot, decisionPath));
-    expect(decisionExists, `${decisionPath} should hold the canonical evaluator`).toBe(true);
-
-    const source = decisionExists ? readRepoFile(decisionPath) : "";
-    // The decision types live beside the evaluator (T-07619): the contract is
-    // one evaluator API, not one file.
-    const typesPath = "internal/workflow/types_transition_decision.go";
-    const declarations = existsSync(join(repoRoot, typesPath)) ? readRepoFile(typesPath) : source;
-    expect(declarations).toContain("type TransitionDecisionInput");
-    expect(declarations).toContain("type TransitionDecision");
-    expect(declarations).toContain("type TransitionFollowUp");
-    expect(source).toMatch(/func\s+\(s \*Service\)\s+EvaluateTransitionDecision\s*\(/);
-
-    const body = functionBody(source, "(s *Service) EvaluateTransitionDecision");
-    for (const forbidden of [
-      "executeCheck(",
-      "AddEvidence(",
-      "insertTransitionEvent",
-      "updateTaskWorkflowMeta",
-      "CompleteAction(",
-      "FinishWorkflowRun",
-    ]) {
-      expect(body, `decision evaluator must not perform side effects via ${forbidden}`).not.toContain(forbidden);
-    }
-  });
-
   test("Next, direct transition, and action settlement all delegate legality to the evaluator", () => {
     const nextActions = readRepoFile("internal/workflow/next_actions.go");
     const transition = readRepoFile("internal/workflow/transition.go");

@@ -4,8 +4,8 @@
  *
  * Compares protocolVersion, protocolSchemaHash, capabilities, and the full
  * method catalog. The only permitted difference is the diagnostic
- * `server.entrypoint` field. Also re-runs a minimal business flow through the
- * `wrkf` entrypoint to confirm behavior parity.
+ * `server.entrypoint` field. Business-flow parity through the `wrkf`
+ * entrypoint is the wrkf row of lifecycle.integration.test.ts.
  *
  * Binary discovery: env WRKQ_BIN / WRKF_BIN / WRKQADM_BIN, else PATH.
  */
@@ -130,15 +130,6 @@ describe("entrypoint equivalence", () => {
     }
   });
 
-  test("task.create behaves the same through the wrkf entrypoint", async () => {
-    const task = await wrkfClient!.wrkq.task.create({
-      title: "via wrkf entrypoint",
-      kind: "task",
-      state: "open",
-    });
-    expect(task.id).toBe("T-00001");
-    expect(task.state).toBe("open");
-  });
 });
 
 // ── initialize-shape (daedalus acceptance) ────────────────────────────────────
