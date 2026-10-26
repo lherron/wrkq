@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Operation represents a bulk operation configuration
@@ -129,15 +130,19 @@ func (op *Operation) executeParallel(items []string, fn ItemFunc, workers int) *
 
 	// Progress reporter
 	var progressDone chan struct{}
+	var progressStop chan struct{}
 	if op.ShowProgress && isatty(os.Stdout) {
 		progressDone = make(chan struct{})
+		progressStop = make(chan struct{})
 		go func() {
 			defer close(progressDone)
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-progressDone:
+				case <-progressStop:
 					return
-				default:
+				case <-ticker.C:
 					c := atomic.LoadInt32(&completed)
 					s := atomic.LoadInt32(&succeeded)
 					f := atomic.LoadInt32(&failed)
@@ -198,7 +203,7 @@ func (op *Operation) executeParallel(items []string, fn ItemFunc, workers int) *
 
 	// Stop progress reporter
 	if progressDone != nil {
-		progressDone <- struct{}{}
+		close(progressStop)
 		<-progressDone
 		fmt.Fprintf(os.Stderr, "\r\033[K") // Clear line
 	}
