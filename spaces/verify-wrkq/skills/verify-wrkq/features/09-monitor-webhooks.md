@@ -24,7 +24,8 @@ downward) or global, on the internal root. Code: `internal/rpccli/monitor.go`, `
 - **Container webhooks.** `wrkq container set <c> --webhook-url URL [--webhook-events task|workflow|container|<name>]`,
   plus `--add-webhook-url`, `--remove-webhook-url`, `--webhook-urls '<json>'` and `--all`. `{ticket_id}` in a URL
   expands to the task id and `{project_id}` to the subscribing container's `P-<n>`. The body carries `event`,
-  `ticket_id`, `event_seq` and more. A comment on a task posts `comment_added` to the `task` class.
+  `ticket_id`, `event_seq` and more. Every POST carries `User-Agent: wrkq/<version>` (0655f69; all 15 sink rows
+  read `wrkq/v0.1.0-479-g7350485`, driven 2026-10-26, T-11873). A comment on a task posts `comment_added` to the `task` class.
   `--webhook-events` without a URL is refused. `--webhook-url` replaces the container's whole list, and
   `--add-webhook-url` appends. Without `--webhook-events` the result lists plain URL strings, with it
   `{url, events}` objects (driven 2026-10-20, T-11374).
@@ -36,7 +37,7 @@ downward) or global, on the internal root. Code: `internal/rpccli/monitor.go`, `
 ## How to get to it
 
 Run `eval "$(wv env <name>)"`. For webhooks, start a throwaway HTTP sink on a free loopback port that appends
-each POST to a file under `$WV_STATE`. The 10-line Python sink is `~/praesidium/wrkq/spaces/verify-wrkq/fixtures/sink.py`. Subscribe a scratch
+each POST to a file under `$WV_STATE` as `{path, user_agent, body}`. The 10-line Python sink is `~/praesidium/wrkq/spaces/verify-wrkq/fixtures/sink.py`. Subscribe a scratch
 container to it.
 
 Live, read only: `wrkq webhook list --output json` shows the global sinks: ACP on loopback and on the tailnet,
@@ -54,7 +55,7 @@ wrkq monitor watch --raw --timeout 3s | jq -c 'select(.id) | {id,event_type}' | 
 python3 ~/praesidium/wrkq/spaces/verify-wrkq/fixtures/sink.py <port> "$WV_STATE/sink.jsonl" &
 wrkq container set inbox --webhook-url "http://127.0.0.1:<port>/hook/{ticket_id}" --webhook-events task
 wrkq touch inbox/wv-hook -t "WV webhook target"; wrkq set inbox/wv-hook --priority 1; sleep 3
-jq -c '{path, body: (.body|fromjson|{event, ticket_id, event_seq})}' "$WV_STATE/sink.jsonl"
+jq -c '{path, user_agent, body: (.body|fromjson|{event, ticket_id, event_seq})}' "$WV_STATE/sink.jsonl"
 kill %2   # stop the sink before wv down
 ```
 
@@ -76,5 +77,5 @@ for a state that never arrives. `watch --raw` streams event rows. With the conta
 and then updating a task in it POSTs exactly two `task` events (`created`, `updated`) to `/hook/<task id>`, with
 increasing `event_seq` (a comment adds a third, `comment_added`).
 
-Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/09-monitor-webhooks/drive.txt`
-and `sink.jsonl`. Live read of the global sinks (three): `live/reads.txt`.
+Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/09-monitor-webhooks/drive.txt`
+and `sink.jsonl` (with `user_agent`). Live read of the global sinks (three): `live/reads.txt`.

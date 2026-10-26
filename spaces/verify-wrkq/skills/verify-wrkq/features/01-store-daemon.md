@@ -20,6 +20,18 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
   `{"auth":"unauthorized","status":"ok"}` plus a stderr notice that the daemon rejected the caller's token, so
   check `auth`, not the exit code. `wrkq server status` reports this node's launchd job and pid
   file, plus `binaryStale`.
+- **Request log.** `wrkqd` writes one JSON line per HTTP request on **stdout**
+  (`internal/wrkqd/request_log.go`, a01fa92..e36728f): `{level, component: "http", event: "http.request",
+  data: {method, path, route, listener, client, status, durationMs, remote, op?, suppressed?, code?, message?}, ts}`,
+  plus one `http.listen` line per listener at startup. `client` is the User-Agent's leading `<name>/<version>`
+  (`unknown` without one). Every wrkq binary, and the stdio bridge that `@wrkq/client` spawns, sends
+  `wrkq/<version>`, so the caller's `rpc.initialize` `clientInfo` never reaches the log. A `/v1/rpc` line names
+  its JSON-RPC method as `op`. A frame that fails inside HTTP 200 logs `warn` with the JSON-RPC `code` and
+  `message`, and a non-2xx logs `warn` (`error` at 5xx) with the body's message (`unauthorized` for a 401).
+  Successful polls (`rpc.initialize`, `wrkq.envelope.pendingView`, monitor, timeline, history and `wrkf.watch.*`
+  views) log at most once per `-poll-sample-window` (default 1m) per client, remote and op, and the next admitted
+  line carries `suppressed: N`. Diagnostics stay on stderr. On mini, launchd sends stdout to
+  `var/logs/wrkq/wrkqd.log` and stderr to `var/logs/wrkq/wrkqd.err.log`. Driven 2026-10-26, T-11873.
 - **Locator and auth precedence.** CLI flags, then env, then `./.env.local`, then `~/praesidium/.env.local`,
   then `~/.config/wrkq/config.yaml`. A client with no token is refused with a message naming both token inputs.
   An unreachable locator is refused with "nothing reached the daemon, so retrying is safe" and the
@@ -46,6 +58,8 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
 
 - Scratch: `wv up --name <task>` (it runs `wrkqadm init` and `wrkqd` for you), then `eval "$(wv env <name>)"`.
   The state root is `$WV_STATE`: `wrkq.db`, `wrkqd.log`, `hooks.json`, `node-tokens`, `token`, `token-wv2`.
+  `wv up` sends the daemon's stdout and stderr both to `wrkqd.log`, so the request log's JSON lines are
+  interleaved with plain stderr diagnostics. Read it with `jq -R -c 'fromjson? | ...'`.
 - Live, read only: `wrkq whoami`, `wrkq server health --addr mini:7171`, and an `rpc.initialize` frame through
   `wrkq rpc --stdio` (feature 10). Its `server.revision` is the canonical daemon's build.
 
@@ -79,6 +93,18 @@ wrkqadm $D patch create --from "$WV_STATE/s0.json" --to "$WV_STATE/s1.json" --ou
 wrkqadm $D patch summarize --patch "$WV_STATE/p01.json" && wrkqadm $D patch validate --base "$WV_STATE/s0.json" --patch "$WV_STATE/p01.json"
 ```
 
+The request log, after the other features have driven traffic:
+
+```bash
+L="$WV_STATE/wrkqd.log"
+jq -R -c 'fromjson? | select(.event=="http.listen")' "$L"
+jq -R -c 'fromjson? | select(.event=="http.request") | .data.client' "$L" | sort | uniq -c      # wrkq/<version>, curl/<v>
+jq -R -c 'fromjson? | select(.level!="info") | .data | {route,status,op,code,message}' "$L"     # rpc errors as warn
+jq -R -c 'fromjson? | select(.data.suppressed) | {op: .data.op, suppressed: .data.suppressed}' "$L"
+curl -sS -o /dev/null -A "" -H "Authorization: Bearer $(cat "$WRKQD_TOKEN_FILE")" "http://127.0.0.1:${WRKQ_DB##*:}/v1/nope"
+tail -1 "$L" | jq -c '.data | {client, route, status}'                                          # unknown, unmatched, 404
+```
+
 Never migrate, restart or bootout the canonical daemon in a verification drive.
 
 ## Gotchas
@@ -91,7 +117,8 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
   Pass `--db "$WV_STATE/wrkq.db"` to every `wrkqadm` verb (2026-10-20, T-11374).
 - **`wrkqadm config doctor` misreports the principal.** In a seat it says `Principal: (not set) ... ✗ Not
   configured` although `wrkq whoami` resolves one from the seat scope, and `WRKQ_PRINCIPAL_REF` beats `--as`.
-  Read the principal from `wrkq whoami`. Product task T-11431 (2026-10-20, T-11374 `01-store-daemon/drive.txt`).
+  Read the principal from `wrkq whoami`. Product task T-11431 (2026-10-20, T-11374 `01-store-daemon/drive.txt`; still
+  reproduces at 7350485, 2026-10-26).
 - Doctor's `sequence_drift` checks `event_log` against its own AUTOINCREMENT row in `sqlite_sequence`
   (named `event_log`). Before T-10327 it read the dead `event_seq` row and flagged every store with an event.
 - Doctor's `attach_dir_exists` needs `WRKQ_ATTACH_DIR` (or `attach_dir` in config) on the **caller's** side.
@@ -114,10 +141,14 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 
 On a fresh `wv up`, health is ok with the token and 401 without it, a tokenless client gets the token refusal,
 a dead locator gets the "retrying is safe" refusal, `whoami` names the scratch locator, doctor reports every row
-ok, `migrate --status` lists every migration as applied (000070 last at 95b3340), and `migrate` refuses
+ok, `migrate --status` lists every migration as applied (000070 last at 7350485), and `migrate` refuses
 the serving store. `WRKQ_PROFILE=1` prints the breakdown, and the snapshot, `state verify` and `patch validate`
-reads succeed on the scratch file. On the canonical daemon, read only: health is ok and `rpc.initialize` names a revision.
+reads succeed on the scratch file. The daemon log has an `http.listen` line and one `http.request` line per request
+with `client: wrkq/<installed version>` and an `op`, the refusals as `warn` lines with their code and message, and
+sampled polls with a `suppressed` count. On the canonical daemon, read only: health is ok and `rpc.initialize`
+names a revision.
 
-Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/01-store-daemon/drive.txt`,
-`evidence/t-11374/`, live reads in `live/reads.txt` (canonical serves 95b3340). Each file's drift drives follow its
-`NOTE drift drives` line.
+Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/01-store-daemon/drive.txt`,
+`evidence/t-11873/`, live reads in `live/reads.txt` (canonical serves 7350485). Every feature's drive.txt starts with
+a replay of T-11374's drives (each entry after a `NOTE replay T-11374 ...` line, diffed in `replay/compare.txt`),
+then its drift drives after a `NOTE drift drives` line.

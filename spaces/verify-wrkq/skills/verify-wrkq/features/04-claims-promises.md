@@ -78,5 +78,5 @@ feed (`wrkq monitor watch --raw`, feature 9) shows both `task.claimed` events, t
 `take_over: true`, then `task.claim_released`. A due promise appears in `ready`, a stale etag is refused, renewing
 it drops it from `ready`, and resolving it leaves `state: resolved` with three `promise.*` events in its log.
 
-Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/04-claims-promises/drive.txt`.
-The five claim refusals before its first NOTE line are a zsh driver error (see Gotchas), re-driven after it.
+Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/04-claims-promises/drive.txt`.
+T-11374's five zsh driver-error claims (see Gotchas) were not replayed.

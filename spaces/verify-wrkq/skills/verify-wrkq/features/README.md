@@ -5,7 +5,7 @@ and Proven when. The last lines of each file name the drive that last proved it 
 
 | # | Feature | File | Drive on |
 | --- | --- | --- | --- |
-| 1 | Store and daemon (`wrkqadm init/migrate/doctor`, `wrkqd` serve and auth, health, locator precedence, whoami, `WRKQ_PROFILE`, offline `config`/`db`/`state`/`patch`) | [01-store-daemon.md](01-store-daemon.md) | scratch; health and initialize read-only on canonical |
+| 1 | Store and daemon (`wrkqadm init/migrate/doctor`, `wrkqd` serve and auth, request log, health, locator precedence, whoami, `WRKQ_PROFILE`, offline `config`/`db`/`state`/`patch`) | [01-store-daemon.md](01-store-daemon.md) | scratch; health and initialize read-only on canonical |
 | 2 | Tasks and containers (create, cat, etag set, ls/tree/find/search, mv, cp, rm/restore, container archive, rmdir, rename, named subtasks, relations, apply, diff, ack, check-inbox, timeline, log) | [02-tasks-containers.md](02-tasks-containers.md) | scratch |
 | 3 | Comments, attachments and handoffs (comment add/ls, attach put/ls/get, handoff create/list/acknowledge) | [03-comments-attachments-handoffs.md](03-comments-attachments-handoffs.md) | scratch |
 | 4 | Claims and promises (node-authenticated claim, takeover, release; promise add/ready/renew/resolve) | [04-claims-promises.md](04-claims-promises.md) | scratch |

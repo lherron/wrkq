@@ -98,5 +98,5 @@ posts a `git.commit` (sha, branch, author, `files_changed`, plus node, insertion
 just's exit code passes through (3). An unfiltered `wrkp log` shows a new task's `task.created` but not its
 `task.edited` or `task.moved`.
 
-Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/07-project-facts/drive.txt`.
-Live reads: `live/reads.txt` (`wrkp types wrkq`; the T-10349 `verify.upkeep` fact).
+Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/07-project-facts/drive.txt`.
+Live reads: `live/reads.txt` (`wrkp types wrkq`; the T-11374 `verify.upkeep` fact).

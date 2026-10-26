@@ -50,6 +50,11 @@ Drive every feature on every pass (ten today), even when no wrkq commit landed s
 comes from what wrkq runs on and with: the HRC session env, the `just` shim, the published `@wrkq/client`, and
 the Go and Bun toolchains. The source reads in step 2 don't see those.
 
+The cheapest full drive is to replay the last pass. Its `drive.txt` files rerun as written, so run every command
+in their global timestamp order on the fresh scratch, renamed to this pass's scratch, then diff each output
+against the last pass's. Matching ids make the outputs comparable, and every difference gets triaged. The
+T-11873 pass did this with `parse.py`, `gen.py` and `compare.py` in its `artifact_dir/replay/`.
+
 Run Doctor first, and again after any surprise. Drive each feature's "Driving it" section on the scratch, **plus
 every drift or new behavior that step 2 flagged**, with `wv rec` into `NN-<feature>/drive.txt`. Do the canonical
 read-only reads (SKILL.md "Launch") into `live/`. Check each result against "Proven when". Run

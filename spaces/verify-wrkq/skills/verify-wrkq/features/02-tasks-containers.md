@@ -14,10 +14,13 @@ its cascade, named subtasks, relations, the edit round trip (`cat --output raw` 
   attributed to `--as`/`WRKQ_PRINCIPAL_REF` (`created_by_principal_ref`).
 - **Read.** `wrkq cat <sel> --json --one` (one object; without `--one`, JSON `cat` returns an array),
   `--output raw` (the task as Markdown), and `wrkq stat`.
-- **Bare numbers.** A bare 1-4 digit number names the **highest existing** task with those low four digits
-  (`639` tries T-90639 down to T-00639). A 5-digit number is the literal id. With no match it reports
-  `task not found: 99`. `wrkf` task selectors resolve the same way (5f10780; driven 2026-10-20, T-11374:
-  `wrkq cat 2`, `wrkf task inspect 9`).
+- **Bare numbers.** A bare 1-4 digit number names the numerically **highest task whose id ends in exactly those
+  digits**, and leading zeros count (7350485, T-11807). On a store holding T-00002 and T-00012, `2` and `12` select
+  T-00012, while `02`, `002` and `0002` select T-00002. On canonical, `498` is T-11498 and `0498` is T-10498. Five
+  digits is the literal id. With no match the verbs report the raw token, `task not found: 4242`. `cat`, `set`,
+  `stat`, `comment ls`, `diff`, `monitor wait`, `wrkp log --task`, `wrkf` task selectors, `wrkc` room refs
+  (feature 6) and a raw `wrkq.task.show` all follow this rule. `wrkq log` doesn't (see Gotchas). Driven 2026-10-26,
+  T-11873.
 - **Update.** `wrkq set <sel> --state ... --priority ... [--if-match <etag>]`. A stale etag fails with
   `task etag precondition failed` (exit 1).
 - **List.** `wrkq ls <container> --type t`, `wrkq tree` (JSON lines when stdout is not a TTY), and
@@ -96,14 +99,22 @@ wrkq index update && wrkq search alpha --state all --json | jq -c '[.results[].r
 - **A one-character slug fails with a raw store error.** `wrkq touch inbox/x -t x` returns `WRKQ_ERROR`
   `CHECK constraint failed: slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' ...`, because that GLOB needs
   two characters. Use slugs of two or more characters. Product task T-10355 (2026-10-05, T-10349
-  `02-tasks-containers/drive.txt`; still reproduces at 95b3340, 2026-10-20, T-11374).
+  `02-tasks-containers/drive.txt`; still reproduces at 7350485, 2026-10-26, T-11873).
+
+- **A bare number names the newest task with that suffix, not the T-1xxxx one.** On canonical (2026-10-26),
+  `wrkq cat 7` is T-11867, not T-10007, and `07` is T-11807. An agent's "7 means T-10007" shorthand has to pass
+  `T-10007` to the CLI (2026-10-26, T-11873 `live/reads.txt`).
+- **`wrkq log` doesn't expand bare numbers.** `wrkq log 2` fails `failed to resolve resource: resource not found: 2`
+  (exit 1), while `wrkq cat 2` works. Pass `T-<n>` or a path. SPEC.md also promises a padded `task not found: T-04242`
+  that no verb prints. Product task T-11874 (2026-10-26, T-11873 `02-tasks-containers/drive.txt`).
 
 ## Proven when
 
 On the scratch, the created task carries your principal, an etag-guarded set refuses a stale etag, `find` hides
 the completed task until `--state all`, `rm`/`restore` moves the task between `archived` and `open`, the
 container archive cascades to `cancelled` and `unarchive` reverses exactly that change, a named subtask raises
-`open_subtask_count`, and `log <ID>` and `log <path>` show `task.created` and `task.updated` attributed to you.
+`open_subtask_count`, `log <ID>` and `log <path>` show `task.created` and `task.updated` attributed to you, and a
+bare `2` selects T-00012 once it exists, while `02` selects T-00002.
 
-Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/02-tasks-containers/drive.txt`
-(baseline, then the drift drives after the NOTE line).
+Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/02-tasks-containers/drive.txt`
+(the T-11374 replay, then the bare-number drives after the NOTE line). T-10355 still reproduces at 7350485.

@@ -66,4 +66,4 @@ path and shows `membership: enrolled`. `find --campaign` returns both the reside
 (`wrkq log camp1` works by path) has `container.campaign_state_changed` for each move and a
 `container.campaign_close_nudged`.
 
-Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/05-campaigns/drive.txt`.
+Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/05-campaigns/drive.txt`.

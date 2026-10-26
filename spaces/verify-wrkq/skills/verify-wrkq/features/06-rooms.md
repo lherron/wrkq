@@ -13,7 +13,8 @@ hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.
 - **Routing.** `wrkc say <ref>` routes by ref. `R-`/`EN-` names the room (an envelope resolves to its room).
   `T-` names the task's campaign room when the task is in a campaign, and otherwise the task room. A container
   routes to its campaign or project room. `agent@project[:task]` with no ref uses the work context of both
-  parties.
+  parties. A bare number is a task ref by feature 2's suffix rule: once T-00017 exists, `wrkc say 7` and
+  `wrkc log 7` name T-00017's room and `07` names T-00007's (driven 2026-10-26, T-11873).
 - **Body source.** The ref is the one required positional. The body is exactly one of `-m <literal|@file>` or a
   positional `-` with the body on stdin (`- <<'EOF'` or a pipe); wrkc reads stdin only after `-` (ab8aed4,
   T-11007). Usage refusals, exit 2: a second positional (`say takes one positional, the ref`), no body source
@@ -50,7 +51,7 @@ hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.
 - **Reads.** `wrkc show <EN|R>`, `wrkc log <room>`, `wrkc members <room>` (`items[].memberRef`, `source`),
   `wrkc ls` (a bare JSON array of rooms), and `hide`/`unhide`, `join`/`leave`/`invite`. `wrkc ack` is labelled
   operator-only, but the daemon doesn't enforce it: an agent scope acked an envelope (`terminalActor: agent:cody`).
-  Product task T-10358 (2026-10-05, T-10349 `06-rooms/drive.txt`; still reproduces at 95b3340, 2026-10-20).
+  Product task T-10358 (2026-10-05, T-10349 `06-rooms/drive.txt`; still reproduces at 7350485, 2026-10-26).
   `wrkc ack --output json` returns an array.
 
 ## How to get to it
@@ -99,6 +100,9 @@ wrkc say T-00004 --note -m x --as agent:clod --scope-ref $CL; echo $?           
 - Inbox groups carry `.items`, not `.envelopes`. Say results carry `.envelopes` and `.acked`. Members carry
   `.items[].memberRef`.
 - The default `reply_required` makes the addressee owe a reply. Use `--fyi` for probes you don't want answered.
+- **A bare-number ref moves as tasks are created.** `wrkc say 7` wrote EN-00009 into T-00017's new room once
+  T-00017 existed, although the conversation was in T-00007's room. Reply by `EN-` id or a full `T-<n>`
+  (2026-10-26, T-11873 `06-rooms/drive.txt`).
 - An enrolled task's key coalesces to its campaign room at say time. Reply by `EN-` id so that reply-is-ack
   fires in the right room.
 
@@ -112,5 +116,6 @@ written acked and terminal with `note_recorded`, shows only in the addressee's `
 shows every envelope with its sender and addressee. Live, read only: your own `wrkc inbox` matches what you
 know you owe.
 
-Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/06-rooms/drive.txt`.
-Notes, body-source and T-10358 drives follow the NOTE lines. Live inbox read: `live/reads.txt`.
+Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/06-rooms/drive.txt`
+(the T-11374 replay with its notes, body-source and T-10358 drives, then the bare-ref drives). T-10358 still
+reproduces at 7350485. Live inbox read: `live/reads.txt`.

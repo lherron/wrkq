@@ -78,10 +78,10 @@ T-10349 `08-workflows/drive.txt`).
 - After the instance closes, the task's `meta.workflow.state` reads `closed`/`completed` while its `state` stays
   `open`.
 - **A transition on a closed instance returns `WRKF_INTERNAL "internal error"`.** The from-state refusal is
-  uncoded, so the cause is lost. Product task T-10356 (still reproduces at 95b3340, 2026-10-20).
+  uncoded, so the cause is lost. Product task T-10356 (still reproduces at 7350485, 2026-10-26).
 - **`wrkf ledger append` over `rpc://` is refused even with `--principal-ref`** (`requires an explicit canonical
   agent:<id> principal`). The same call in local mode succeeds. The wrkf remote transport doesn't send the
-  principal. Product task T-10357 (still reproduces at 95b3340, 2026-10-20; `ledger append` also needs
+  principal. Product task T-10357 (still reproduces at 7350485, 2026-10-26; `ledger append` also needs
   `--about`, or it refuses `--task, --kind, --about, and --body are required` first).
 - A remote client can't pass `--hook-catalog`. The catalog belongs to the canonical node, and `@wrkq/client`
   throws `hookCatalogPath is local-only` in remote mode. The wrkf CLI refuses with `--hook-catalog is local-only;
@@ -96,5 +96,5 @@ names the missing evidence. The transition is refused until that evidence exists
 `finish --run-checks` leave the instance `closed`/`completed` at revision 2, with a timeline of attached plus
 two transitioned events.
 
-Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/08-workflows/drive.txt`,
-both fixtures, on T-00009 (pass) and T-00010 (fail). Live read: `wrkf workflow list --json` (35 templates, 18 active) in `live/reads.txt`.
+Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/08-workflows/drive.txt`,
+both fixtures, on T-00009 (pass) and T-00010 (fail); bare `9`/`09` select T-00009 and `0` selects T-00010 (feature 2's suffix rule). Live read: `wrkf workflow list --json` (35 templates, 18 active) in `live/reads.txt`.

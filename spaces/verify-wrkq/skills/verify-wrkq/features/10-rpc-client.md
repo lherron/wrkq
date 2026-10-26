@@ -69,6 +69,9 @@ cd "$WV_STATE/client" && bun --env-file=/dev/null run client-drive.ts
   Against a wrkqd older than T-10328 the header is ignored and the write is refused
   `WRKQ_VALIDATION: principalRef is required`; if you see that over `rpc://`, check the serving revision
   before calling it a defect. A malformed header value is refused `WRKQ_VALIDATION`, never ignored.
+- **The daemon's request log never names your `clientInfo`.** The client and a raw `wrkq rpc --stdio` both reach
+  wrkqd through the stdio bridge, which sends `User-Agent: wrkq/<version>`. A frame initialized with
+  `client: {name: "wvprobe"}` left no `wvprobe` in the log (2026-10-26, T-11873 `10-rpc-client/drive.txt`; feature 1).
 - `dbPath` and `dbLocator` must not disagree, and the client refuses `actor` as a session option. Pass
   `principalRef`.
 - The repo's `packages/client/dist` may not be what consumers run. Drive the published version and record it
@@ -83,6 +86,6 @@ On the scratch, raw frames return the protocol hash, `-32601` for an unknown met
 `idempotencyKey`, refuses a stale `expectEtag` with `WRKQ_CONFLICT`, and applies a correct CAS update (etag +1).
 Live: `rpc.initialize` names the canonical revision.
 
-Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/10-rpc-client/drive.txt`, published
-`@wrkq/client@0.1.0-dev.20261017091821` with `spaces/verify-wrkq/fixtures/client-drive.ts` (run twice). Live: `live/reads.txt`
-(canonical serves 95b3340, hash `sha256:3d3ffa73...`).
+Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/10-rpc-client/drive.txt`, published
+`@wrkq/client@0.1.0-dev.20261025102633` with `spaces/verify-wrkq/fixtures/client-drive.ts` (run three times). Live: `live/reads.txt`
+(canonical serves 7350485, hash still `sha256:3d3ffa73...`).

@@ -73,4 +73,4 @@ The comment comes back attributed to you, both attachments are listed and `get` 
 files exist under the daemon's attachment dir, a stale-etag acknowledge is refused, the right one moves the
 handoff to `acknowledged` with your note, and the pending list is empty afterwards.
 
-Driven 2026-10-20 on wv `t-11374` (T-11374 upkeep) with installed 95b3340: `var/wrkq-artifacts/T-11374/03-comments-attachments-handoffs/drive.txt`.
+Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/03-comments-attachments-handoffs/drive.txt`.
