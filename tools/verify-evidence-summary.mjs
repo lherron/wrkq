@@ -13,6 +13,8 @@ const predicates = [
   "surface-guard",
   "doc-links",
   "architecture-records",
+  "sync-downstream-test",
+  "install-probe-test",
   "verify-rpc",
 ];
 
