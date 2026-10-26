@@ -100,8 +100,16 @@ func Rebase(opts RebaseOptions) (*RebaseResult, error) {
 		codeRewrites["comments"] = rewrites
 	}
 
-	// Compute rebased patch: diff(new-base, rebased branch state)
-	rebasedPatch := DiffSnapshots(&newBase, branchState)
+	// Replay the branch's own changes (old-base → renumbered branch) onto the
+	// new base, then diff against the new base. Diffing the new base against
+	// the branch state directly would remove everything the new base gained
+	// since the old base. A change whose target the new base no longer has
+	// fails here as a conflict instead of being dropped.
+	rebasedState, err := ApplyToSnapshot(&newBase, DiffSnapshots(&oldBase, branchState))
+	if err != nil {
+		return nil, fmt.Errorf("patch conflicts with new base: %w", err)
+	}
+	rebasedPatch := DiffSnapshots(&newBase, rebasedState)
 
 	// Save rebased patch
 	if err := rebasedPatch.Save(opts.OutputPath); err != nil {

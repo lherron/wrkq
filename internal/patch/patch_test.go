@@ -350,9 +350,11 @@ func TestPatchRebaseRenumbersCollidingFriendlyIDs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load rebased patch: %v", err)
 			}
-			// Only the adds are asserted: the rebased patch is diff(new base,
-			// patch applied to old base), which today also removes whatever the
-			// new base gained since the old base (reported, not pinned here).
+			// The rebased patch carries only the patch's own changes: tasks the
+			// new base gained since the old base are never removed.
+			if len(rebased) != len(tt.wantIDs) || result.RemoveCount != 0 || result.ReplaceCount != 0 {
+				t.Fatalf("rebased patch = %q; want only the %d patch adds", opsOf(rebased), len(tt.wantIDs))
+			}
 			adds := 0
 			for _, op := range rebased {
 				if op.Op != "add" {
@@ -369,6 +371,26 @@ func TestPatchRebaseRenumbersCollidingFriendlyIDs(t *testing.T) {
 				t.Fatalf("rebased patch has %d adds (AddCount %d); want %d: %q", adds, result.AddCount, len(tt.wantIDs), opsOf(rebased))
 			}
 		})
+	}
+}
+
+// A patch that edits a task the new base has since deleted is a conflict,
+// never a silent drop or a resurrection.
+func TestPatchRebaseRefusesEditToTaskTheNewBaseDeleted(t *testing.T) {
+	proj := map[string]snapshot.ContainerEntry{"container-1": containerEntry("P-00001", "proj", "")}
+	oldBase := ledger(proj, map[string]snapshot.TaskEntry{"task-x": taskEntry("T-00001", "task-x", "container-1")})
+	newBase := ledger(proj, map[string]snapshot.TaskEntry{})
+	edited := taskValue("T-00001", "task-x", "container-1")
+	edited["title"] = "edited"
+	dir := t.TempDir()
+	_, err := Rebase(RebaseOptions{
+		PatchPath:   savePatch(t, dir, Patch{{Op: "replace", Path: "/tasks/task-x", Value: edited}}),
+		OldBasePath: writeJSONFile(t, dir, "old-base.json", oldBase),
+		NewBasePath: writeJSONFile(t, dir, "new-base.json", newBase),
+		OutputPath:  filepath.Join(dir, "rebased.json"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "patch conflicts with new base") {
+		t.Fatalf("Rebase err = %v; want a conflict", err)
 	}
 }
 
