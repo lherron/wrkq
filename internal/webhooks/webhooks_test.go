@@ -252,3 +252,64 @@ func TestResolveWebhookTargets_ContainerClassIsolatedFromTaskCatchAll(t *testing
 		t.Fatalf("task event targets\nexpected: %v\nactual:   %v", want, taskURLs)
 	}
 }
+
+// TestResolveWebhookTargets_ACPTaskWorkflowSubscription pins the subscription
+// ACP's POST /v1/webhooks/wrkq is registered with (T-12175). That route ingests
+// only the schema_version=2 task-shaped body (task + workflow events). The
+// envelope.*, promise.* and container.* families have their own typed bodies
+// without schema_version, and ACP rejected them with 400 while it was a bare
+// subscriber. Narrowed to task,workflow, it receives exactly the v2 families.
+func TestResolveWebhookTargets_ACPTaskWorkflowSubscription(t *testing.T) {
+	database := setupTestDB(t)
+	actorUUID := setupTestActor(t, database)
+	s := store.New(database)
+
+	root, err := s.Containers.Create(actorUUID, store.ContainerCreateParams{Slug: "acp-sub", Kind: "project"})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	const acp = "http://acp.example/v1/webhooks/wrkq"
+	rootJSON := `[{"url":"` + acp + `","events":["task","workflow"]}]`
+	if _, err := s.Containers.UpdateFields(actorUUID, root.UUID, map[string]interface{}{"webhook_urls": rootJSON}, 0); err != nil {
+		t.Fatalf("set webhook urls: %v", err)
+	}
+
+	// The payload interface is unexported, so dispatch on the concrete types.
+	reaches := func(t *testing.T, name string, payload interface{}, want bool) {
+		t.Helper()
+		var urls []string
+		var rerr error
+		switch p := payload.(type) {
+		case webhooks.Payload:
+			urls, rerr = webhooks.ResolveWebhookTargets(database, root.UUID, p)
+		case webhooks.PromisePayload:
+			urls, rerr = webhooks.ResolveWebhookTargets(database, root.UUID, p)
+		case webhooks.EnvelopePayload:
+			urls, rerr = webhooks.ResolveWebhookTargets(database, root.UUID, p)
+		case webhooks.CampaignPayload:
+			urls, rerr = webhooks.ResolveWebhookTargets(database, root.UUID, p)
+		default:
+			t.Fatalf("%s: unexpected payload type %T", name, payload)
+		}
+		if rerr != nil {
+			t.Fatalf("%s: resolve: %v", name, rerr)
+		}
+		got := len(urls) == 1 && urls[0] == acp
+		if got != want || (!want && len(urls) != 0) {
+			t.Fatalf("%s: targets=%v, want ACP delivery=%v", name, urls, want)
+		}
+	}
+
+	for _, ev := range []string{"created", "updated", "comment_added", "moved", "archived", "purged"} {
+		reaches(t, ev, webhooks.Payload{SchemaVersion: 2, Event: ev, TicketID: "T-00001", ProjectID: root.ID}, true)
+	}
+	for _, ev := range []string{webhooks.EventWorkflowAttached, webhooks.EventWorkflowTransitioned} {
+		reaches(t, ev, webhooks.Payload{SchemaVersion: 2, Event: ev, TicketID: "T-00001", ProjectID: root.ID}, true)
+	}
+	reaches(t, "envelope.created", webhooks.EnvelopePayload{Event: "envelope.created"}, false)
+	for _, ev := range []string{"promise.created", "promise.renewed", "promise.resolved"} {
+		reaches(t, ev, webhooks.PromisePayload{Event: ev}, false)
+	}
+	reaches(t, webhooks.EventContainerCampaignStateChanged,
+		webhooks.CampaignPayload{Event: webhooks.EventContainerCampaignStateChanged, CampaignID: root.ID}, false)
+}
