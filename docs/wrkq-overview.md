@@ -14,8 +14,9 @@ wrkq is a local-first task-management system for humans and coding agents: a
 filesystem-flavored CLI over a SQLite database. This page orients a reader
 inside the `wrkq` repository (binaries, storage layout, data model, execution
 modes). It complements the platform-level system-boundary doc; for the
-canonical, most-current spec of CLI/daemon behavior, `docs/SPEC.md` in this
-repo wins over any other markdown when they conflict.
+current CLI/daemon contract, see [docs/SPEC.md](docs/SPEC.md). Active
+[architecture records](architecture/README.md) take precedence over documentation
+when they conflict.
 
 ## Shipped binaries
 
@@ -43,9 +44,18 @@ entities:
   is a direct child of `root`.
 - **Tasks** — the primary work item. Kinds: `task`, `subtask`, `spike`, `bug`,
   `chore`. Priority is `1`–`4` (`1` highest). A task with `--parent-task` is
-  stored as kind `subtask` unless `--kind` overrides it; parent links are
-  task-graph edges that may cross container boundaries, and subtasks cannot
-  themselves have subtasks.
+  an ordinary **child task**, default kind `task` unless `--kind` overrides it;
+  parent links are bounded task-graph edges that may cross container boundaries.
+  Legacy `kind=subtask` labels remain valid and do not imply named ownership.
+- **Named subtasks** — assignments created with
+  `wrkq touch T-12345.render --subtask`. Their immutable ID is the owner ID
+  plus a local slug; they consume no global task number. `subtask_owner_uuid` distinguishes ownership from the
+  child-task edge. They share owner residency and its effective room, while
+  keeping independent claims, scopes and completion. They cannot own tasks,
+  enroll in campaigns or attach a workflow. Default container views exclude
+  them; `find --subtasks` and `ls T-12345 --subtasks` opt in. Owner completion
+  reports unfinished subtasks without changing them; archived/deleted owners
+  refuse creation and new claims. See contract `wrkq.named-subtasks.v1`.
 - **States** — `idea`, `draft`, `open`, `in_progress`, `blocked`, `completed`,
   `cancelled`, `archived`, `deleted`. Common path is
   `idea -> draft -> open -> in_progress -> completed`; the validator otherwise
@@ -65,12 +75,13 @@ entities:
 - **Causal lineage (`caused_by`)** — a distinct, multi-valued edge set
   (`task_causes` table) recording which prior task(s) a defect/rework task
   traces back to. It does not participate in blocker checks, `relation`
-  output, or parent/subtask nesting. Input is comma-separated `T-#####` IDs;
+  output, or parent/subtask nesting. Input is comma-separated task IDs, including named-subtask IDs;
   hard-purging a task with surviving `caused_by` dependents is rejected unless
   they are purged together or their lineage is cleared first.
-- **Handoffs** — intentional context records an agent leaves for its own
-  future session, scoped to `agent:<id>:project:<proj>` (see
-  `/docs/wrkq/concepts`).
+- **Handoffs** — context records for an agent's future session or an explicit
+  successor, scoped to `agent:<id>:project:<proj>`. `handoff create --to`
+  addresses another agent; the author and recipient remain distinct. See
+  [handoffs in the spec](docs/SPEC.md#handoffs).
 - **Task claims** — atomic single-holder claim state (holder principal, exact
   scope, server-derived node, timestamp, monotonic generation, one-time claim
   token) recorded on the task row itself, distinct from relations/lineage.
@@ -80,12 +91,18 @@ entities:
 Every task and container can be addressed by:
 
 - **Path** — slash-separated container/task slugs, e.g. `wrkq/inbox/docs-spec-cleanup`.
-- **Friendly ID** — `T-#####` (task), `P-#####` (project), `C-#####` (container),
+- **Friendly ID** — `T-#####` (ordinary task), `T-#####.slug` (named subtask),
+  `P-#####` (container, including projects), `C-#####` (comment),
   `A-#####` (actor), `H-#####` (handoff).
 - **UUID** — the full database UUID.
 - **Typed selector** — `t:T-02017`, `c:P-00061`.
 
-Slugs are normalized: lowercased, spaces/underscores become hyphens, invalid
+Named subtasks resolve by composite ID, UUID or full owner path; a bare slug
+does not select one. Their slug starts with a lowercase letter, ends with a
+letter or digit, and keeps the full composite ID within 64 characters
+(`internal/id/id.go`).
+
+Ordinary slugs are normalized: lowercased, spaces/underscores become hyphens, invalid
 characters dropped, leading/trailing hyphens trimmed, must start with
 `[a-z0-9]`, match `^[a-z0-9][a-z0-9-]*$`, max 255 bytes.
 
@@ -141,7 +158,8 @@ Admin/daemon path-owning surfaces are intentionally local-only and reject
   the repo, database and RPC protocol but keeps its own workflow tables;
   `tasks.state` is plain wrkq lifecycle state, not a projection of workflow
   state.
-- Not authn/authz — principal refs are attribution, not authentication.
+- Not a team authorization system — principal refs provide attribution; remote
+  transport uses bearer-token authentication and task claims fence holders.
 - Not a cloud/sync service — local-first, no hosted multi-tenant mode, not a
   real filesystem (no FUSE).
 - Not a web UI — `wrkqd` exposes selected HTTP endpoints; rendering is a

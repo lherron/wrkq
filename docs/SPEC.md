@@ -292,8 +292,10 @@ including an open subtask under a deleted owner.
 `--parent-task` creates an ordinary **child task**, default kind `task`, with a
 global task ID and independent residency. Parent links remain bounded task-graph
 edges and may cross project/container boundaries. Existing legacy `kind=subtask`
-labels remain valid. See [the approved named-subtask design](docs/named-subtasks-proposal.md)
-and contract `wrkq.named-subtasks.v1` for the complete behavior.
+labels remain valid. See [contract `wrkq.named-subtasks.v1`](architecture/records/contracts/wrkq.named-subtasks.v1.yaml)
+for the complete behavior. The approved revision 5 proposal is preserved as
+attachment `ATT-00415` on authoring task `T-09873`; retrieve it with
+`wrkq attach get ATT-00415`.
 
 ### Task event selectors
 

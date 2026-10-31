@@ -4,8 +4,9 @@ status: active
 owner_project: wrkq
 scope: named subtask identity, ownership, residency, collaboration and campaign context
 predicate: >
-  Named subtasks follow docs/named-subtasks-proposal.md revision 5, approved
-  against f1310d9 in R-00240 on 2026-09-30. This record carries the approved
+  Named subtasks follow proposal revision 5, approved against f1310d9 in
+  R-00240 on 2026-09-30, preserved as attachment ATT-00415 on T-09873
+  (retrieve with wrkq attach get ATT-00415). This record carries the approved
   design. The delivered slice enforces this contract; fleet activation and
   consumer pins remain a separately coordinated rollout.
 
@@ -72,7 +73,11 @@ enforced_by: >
   owner-folded campaign projections, RPC catalogs and Go/TypeScript clients;
   scratch built-binary acceptance in var/wrkq-artifacts/T-09897/VALIDATION.md.
 source:
-  - docs/named-subtasks-proposal.md
+  - docs/SPEC.md
+  - internal/db/migrations/000066_named_subtasks.sql
+  - internal/id/id.go
+  - internal/store/tasks.go
+  - internal/wrkqapi/task_create.go
   - architecture/records/invariants/wrkq.task-hierarchy.cross-project-parents.yaml
   - architecture/records/invariants/wrkq.collaboration-ledger.authority.yaml
   - architecture/records/invariants/wrkq.task-view.caller-state-selection.yaml
