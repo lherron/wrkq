@@ -235,6 +235,10 @@ install *flags:
   chmod +x ~/.local/bin/wrkp
   chmod +x ~/.local/bin/wrkqadm
   chmod +x ~/.local/bin/wrkqd
+  # launchd runs wrkqd from this fixed path; a stable signature keeps its TCC
+  # grants across rebuilds (T-12226). A signing failure is reported but does not
+  # stop the install: the ad-hoc binary still runs.
+  bash scripts/codesign-local.sh ~/.local/bin/wrkqd com.praesidium.wrkqd || true
   # The just shim hands every `just` to `wrkp just`, which posts run.settled
   # for justfiles carrying `# wrkp: run.settled` and otherwise execs the real
   # just (T-08917). ~/.local/bin must precede the real just on PATH.
