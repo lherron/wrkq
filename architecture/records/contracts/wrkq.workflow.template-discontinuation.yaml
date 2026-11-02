@@ -42,7 +42,6 @@ source:
   - packages/client/src/wrkq/workflow-binding.ts
   - packages/client/test/workflow-template-discontinue-contract.test.ts
   - docs/wrkq-wrkf-rpc.md
-  - docs/wrkq-wrkf-rpc-client-forward-spec.md
   - hrcchat#14596
 required_tests:
   - TestTemplateDiscontinueGuardOverrideReinstateAndReadback

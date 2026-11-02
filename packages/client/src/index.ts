@@ -5,7 +5,7 @@
  * also available via the `./wrkq` and `./wrkf` subpaths, and test doubles via
  * `./testing`.
  *
- * Contract: docs/wrkq-wrkf-rpc.md. Spec: docs/wrkq-wrkf-rpc-client-forward-spec.md §4, §7.
+ * Contract: docs/wrkq-wrkf-rpc.md. Usage: packages/client/README.md.
  */
 
 export { createClient } from "./client.js";

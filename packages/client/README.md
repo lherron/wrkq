@@ -15,8 +15,7 @@ namespaces (`client.task`, `client.workflow`, … are intentionally absent).
 The client speaks **only** the unified stdio JSON-RPC protocol. It never calls
 `wrkqd` HTTP and never parses human/JSON CLI output.
 
-Contract: [`docs/wrkq-wrkf-rpc.md`](../../docs/wrkq-wrkf-rpc.md) ·
-Spec: [`docs/wrkq-wrkf-rpc-client-forward-spec.md`](../../docs/wrkq-wrkf-rpc-client-forward-spec.md)
+Contract: [`docs/wrkq-wrkf-rpc.md`](../../docs/wrkq-wrkf-rpc.md)
 
 ## Requirements
 

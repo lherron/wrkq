@@ -6,8 +6,7 @@ wrkq and wrkf share one JSON-RPC protocol (`protocolVersion` `2026-06-30`, pinne
 (`--db path`) or bridged to a daemon (`rpc://`). `@wrkq/client` is the Bun TypeScript client. It spawns that
 stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rides the same protocol. Code:
 `internal/workrpc/` (catalog, codec, errors), `internal/rpccli/rpc.go`, and `packages/client/`
-(`src/client.ts`, `src/stdio-transport.ts`, `src/wrkq/`, `src/wrkf/`). Contract: `docs/wrkq-wrkf-rpc.md`, plus
-`docs/wrkq-wrkf-rpc-client-forward-spec.md` and `packages/client/README.md`.
+(`src/client.ts`, `src/stdio-transport.ts`, `src/wrkq/`, `src/wrkf/`). Contract: `docs/wrkq-wrkf-rpc.md`; client usage: `packages/client/README.md`.
 
 ## Sub-features
 

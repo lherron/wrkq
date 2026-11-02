@@ -16,7 +16,7 @@ a session. This page carries the detail that guide deliberately leaves out:
 room kinds and projections, the full routing table, obligation lifecycle,
 identity and bare-name resolution, and the operator verbs. It is descriptive —
 run `wrkc <command> --help` for the exhaustive current flag list, and see
-[docs/SPEC.md](https://github.com/lherron/wrkq/blob/main/docs/SPEC.md) for the contract of record.
+[docs/SPEC.md](docs/SPEC.md) for the contract of record.
 
 ## Model
 
@@ -49,7 +49,9 @@ Three rules govern the surface:
 | project | the project container id/path | the project |
 | ad-hoc | `R-xxxxx` | nothing |
 
-Rooms are created lazily on the first `say`. They are readable by any principal:
+Reads of entitled task, campaign, and project selectors derive an empty room
+without creating a row. `say` and state-adding membership verbs materialize it.
+An unknown ad-hoc room stays not-found. Rooms are readable by any principal:
 membership is identity and attendance, never an ACL.
 An ad-hoc room's identity is its members; a topic is a task — say into it.
 
@@ -65,14 +67,18 @@ time, and neither can refuse anything:
   `stale` if work is terminal and last activity is older than 4h, else `active`
   under 24h, else `quiet`.
 
-Everything reads that one value. `wrkc ls` omits `stale`; `--all` shows every
-room. A say into a `stale` room writes and prints a one-line **notice** on
-stderr naming the terminal transition and the age — never an error, and there is
+Everything reads that one value. `wrkc ls` omits `stale` and hidden rooms;
+`--all` shows both. A say into a `stale` room writes and prints a one-line
+**notice** on stderr naming the terminal transition and the age — never an error, and there is
 no override flag, because the say already happened.
 
 `wrkc hide|unhide <room>` sets a `hidden` label. It is a label, not a state: it
 removes the room from the default `wrkc ls` and changes nothing else. Any
 principal may set it.
+
+If a task joins a campaign after its task room exists, reads of that task
+keep its original room and expose a `coalesced_into` link; new says route to
+the campaign room. The histories are linked, never merged.
 
 Terminal work stays reachable on purpose. Messaging the seat on a completed task
 — a grading follow-up, a late question — is intended, and that seat is summoned
@@ -244,8 +250,10 @@ wrkc info
 Your principal comes from `--as` / `--principal-ref` / `WRKQ_PRINCIPAL_REF`, the
 same as wrkq. Your **scope** comes from `HRC_SESSION_REF` (override with
 `--scope-ref`); wrkq parses it as a scope handle and knows nothing else about it.
-A scope handle is `agent:<id>:project:<project>`, optionally followed by
-`:task:<T-xxxxx>` or `:role:<role>`; no other trailing segment parses.
+The room API accepts shorthand handles (`cody@wrkq:T-12267`) and canonical
+ScopeRefs (`agent:cody:project:wrkq:task:T-12267`), normalizing them to
+shorthand for storage and replies. A runtime lane suffix on a canonical
+ScopeRef is tolerated and stripped; it does not create another counterparty.
 
 Humans are ordinary principals with no scope: `agent:lance` is a valid
 addressee, member, and caller. A scope-less principal is never kicked or
@@ -285,11 +293,12 @@ wrkq monitor watch R-00012
 wrkq monitor wait EN-00042 --until terminal
 ```
 
-`--until acked` and `--until terminal` (= acked | failed) take `EN-` selectors. An
-`EN-` id that is a fan-out group head covers every envelope of that group, which
-is exactly what `wrkc say --wait` blocks on. A failed member prints
-`failed:<reason>` and makes `--wait` exit non-zero. A wait that runs out of
-`--timeout` exits non-zero with `monitor wait ended: timeout`, which is neither a
+`--until acked` and `--until terminal` take `EN-` selectors. Terminal means
+acked, failed, expired, or withdrawn. An `EN-` id that is a fan-out group head
+covers every envelope of that group, which
+is exactly what `wrkc say --wait` blocks on. A failed, expired, or withdrawn
+member prints its state/reason and makes `--wait` exit non-zero. A wait that
+runs out of `--timeout` exits non-zero with a timeout diagnostic, which is neither a
 delivery failure nor a completed request. `--state-only` still emits only task
 lifecycle changes.
 

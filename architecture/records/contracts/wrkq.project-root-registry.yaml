@@ -47,7 +47,7 @@ source:
   - packages/client/src/wrkq/facade.ts
   - packages/client/src/wrkq/project.ts
   - packages/client/test/wrkq-container-facade.test.ts
-  - docs/wrkq-wrkf-rpc-client-forward-spec.md
+  - docs/wrkq-wrkf-rpc.md
   - architecture/records/invariants/wrkq.attribution.caller-principal-exact.yaml
   - hrcchat#14672
 required_tests:

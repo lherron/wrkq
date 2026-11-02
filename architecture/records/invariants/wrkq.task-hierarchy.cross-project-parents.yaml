@@ -91,7 +91,6 @@ source:
   - internal/workrpc/taskmove_test.go
   - docs/SPEC.md
   - docs/wrkq-wrkf-rpc.md
-  - docs/wrkq-wrkf-rpc-client-forward-spec.md
 reopen_when:
   - task parent depth changes beyond max depth 1
   - parent_task_uuid becomes containment rather than backlink across project_uuid boundaries

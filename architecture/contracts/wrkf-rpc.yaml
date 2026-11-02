@@ -107,7 +107,6 @@ source:
   - packages/client/test/workflow-template-discontinue-contract.test.ts
   - docs/wrkf-rpc.md                      # explanatory projection (companion)
   - docs/wrkq-wrkf-rpc.md
-  - docs/wrkq-wrkf-rpc-client-forward-spec.md
   - architecture/records/contracts/wrkq.project-root-registry.yaml
   - architecture/records/contracts/wrkq.workflow.template-discontinuation.yaml
 required_tests:
