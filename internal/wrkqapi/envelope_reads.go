@@ -85,17 +85,17 @@ func (a *API) EnvelopeInboxView(ctx context.Context, p EnvelopeInboxViewParams) 
 	if err != nil {
 		return nil, err
 	}
+	target, err := normalizeRoomScopeRef(p.ScopeRef)
+	if err != nil {
+		return nil, err
+	}
+	attr.ScopeRef = target
 	if _, err := a.store.Rooms.ExpireDueEnvelopes(attr); err != nil {
 		return nil, NewInternalError(err)
 	}
 	if _, err := a.store.Rooms.RependDueDeferrals(attr); err != nil {
 		return nil, NewInternalError(err)
 	}
-	target, err := normalizeRoomScopeRef(p.ScopeRef)
-	if err != nil {
-		return nil, err
-	}
-
 	base := store.EnvelopeListParams{Obligations: []domain.EnvelopeObligation{domain.EnvelopeObligationReplyRequired}}
 	if target != "" {
 		base.ToScopeRef = target
@@ -258,6 +258,13 @@ func (a *API) EnvelopePendingView(ctx context.Context, p EnvelopePendingViewPara
 	if err != nil {
 		return nil, err
 	}
+	own, err := normalizeRoomScopeRef(p.ScopeRef)
+	if err != nil {
+		return nil, err
+	}
+	// Scopes selects recipients; only ScopeRef identifies the caller writing
+	// the sweep, including when the read spans other agents' scopes.
+	attr.ScopeRef = own
 	if _, err := a.store.Rooms.ExpireDueEnvelopes(attr); err != nil {
 		return nil, NewInternalError(err)
 	}
@@ -280,10 +287,6 @@ func (a *API) EnvelopePendingView(ctx context.Context, p EnvelopePendingViewPara
 	if len(scopes) > 0 {
 		addressee.ToScopeRefs = scopes
 	} else {
-		own, oerr := normalizeRoomScopeRef(p.ScopeRef)
-		if oerr != nil {
-			return nil, oerr
-		}
 		if own != "" {
 			addressee.ToScopeRef = own
 		} else {
