@@ -83,7 +83,8 @@ import (
 // T-10158 removes retired room verbs, section data and inert workflow fields.
 // T-11305 adds say note, and inbox includeNotes/notesSince/recentNotes/notes.
 // T-12263 adds database incarnation and event-log head to history.tailView.
-const pinnedProtocolSchemaHash = "sha256:ba19de980994ec3e45fc6b8efe78248c9dd99ada2c887beeb237806664a8cdf3"
+// T-12264 adds the side-effect-free envelope.listView and its two DTOs.
+const pinnedProtocolSchemaHash = "sha256:a3ae5e21c542aa9535be8db679c75aa1d9c02a4d922559e4f0a527851a6657c3"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -102,9 +103,9 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"methods", len(MethodCatalog()), 182},
+		{"methods", len(MethodCatalog()), 183},
 		{"errorCodes", len(ErrorCodeCatalog()), 27},
-		{"dtos", len(dtoCatalog), 157},
+		{"dtos", len(dtoCatalog), 159},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

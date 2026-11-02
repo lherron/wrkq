@@ -403,3 +403,12 @@ describe("wrkq.envelope facade", () => {
     ]);
   });
 });
+
+test("envelope.listView forwards bounded replay selectors without caller identity", async () => {
+  const result = { items: [ENVELOPE], nextCursor: "opaque" };
+  const transport = new FakeTransport().onResult("wrkq.envelope.listView", result);
+  const client = await createClient({ transport, autoInitialize: false });
+  const params = { ids: [ENVELOPE.uuid], states: ["acked" as const], limit: 500, cursor: "previous" };
+  expect(await client.wrkq.envelope.listView(params)).toEqual(result);
+  expect(transport.capturedRequests.map(({method,params})=>({method,params}))).toEqual([{ method: "wrkq.envelope.listView", params }]);
+});

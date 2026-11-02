@@ -41,6 +41,14 @@ func TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes(t *testing.T) {
 	api := newReadModelGoldenAPI(t)
 	f := seedReadModelGolden(t, api)
 
+	// Use a real collaboration fixture so optional receipt and terminal fields
+	// are represented in the new view's wire fingerprint.
+	envelopes := newRoomFixture(t)
+	liveEnvelope := envelopes.say(t, RoomSayParams{Ref: envelopes.loneTaskID, To: []string{"cody"}, Body: "wire", PrincipalRef: "agent:clod"}).Envelopes[0]
+	_, presentErr := envelopes.api.EnvelopePresent(ctx, EnvelopePresentParams{Envelope: liveEnvelope.ID, PrincipalRef: "agent:hrc", Node: "mini", RuntimeID: "wire", Generation: "1", RunID: "wire"})
+	if presentErr != nil {
+		t.Fatal(presentErr)
+	}
 	var out bytes.Buffer
 	row := func(name string, v any, err error) {
 		t.Helper()
@@ -124,6 +132,8 @@ func TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes(t *testing.T) {
 	row("wrkq.webhook.add (no change)", f.webhookNoChange, nil)
 	v25, err := api.WebhookListView(ctx, WebhookListViewParams{})
 	row("wrkq.webhook.listView", v25, err)
+	envelopePage, envelopeErr := envelopes.api.EnvelopeListView(ctx, EnvelopeListViewParams{Limit: envelopeViewLimit(1)})
+	row("wrkq.envelope.listView", envelopePage, envelopeErr)
 
 	if *updateReadModelWireGolden {
 		if err := os.MkdirAll(filepath.Dir(readModelWireGoldenPath), 0o755); err != nil {

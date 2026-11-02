@@ -511,3 +511,15 @@ export interface WrkqEnvelopeFailParams {
   principalRef?: string;
   scopeRef?: string;
 }
+
+/** A bounded, side-effect-free read of stored envelope state. */
+export interface WrkqEnvelopeListViewParams {
+  states?: WrkqEnvelopeState[];
+  ids?: string[];
+  limit?: number;
+  cursor?: string;
+}
+export interface WrkqEnvelopeListView {
+  items: WrkqEnvelope[];
+  nextCursor?: string;
+}

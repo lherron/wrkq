@@ -233,6 +233,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.envelope.show", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeShowParams) (any, error) {
 		return wq.EnvelopeShow(ctx, p)
 	}))
+	s.Register("wrkq.envelope.listView", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeListViewParams) (any, error) {
+		return wq.EnvelopeListView(ctx, p)
+	}))
 	s.Register("wrkq.envelope.memberPage", apiHandler(func(ctx context.Context, p wrkqapi.EnvelopeMemberPageParams) (any, error) {
 		return wq.EnvelopeMemberPage(ctx, p)
 	}))

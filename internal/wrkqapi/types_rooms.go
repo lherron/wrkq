@@ -460,3 +460,17 @@ type WrkqEnvelopeBirth struct {
 	Seq  int64             `json:"seq"`
 	From WrkqEnvelopeParty `json:"from"`
 }
+
+// EnvelopeListViewParams selects a bounded, side-effect-free ledger page.
+type EnvelopeListViewParams struct {
+	States []string `json:"states,omitempty"`
+	IDs    []string `json:"ids,omitempty"`
+	Limit  *int     `json:"limit,omitempty"`
+	Cursor string   `json:"cursor,omitempty"`
+}
+
+// WrkqEnvelopeListView contains ordinary envelope.show items in sequence order.
+type WrkqEnvelopeListView struct {
+	Items      []WrkqEnvelope `json:"items"`
+	NextCursor string         `json:"nextCursor,omitempty"`
+}

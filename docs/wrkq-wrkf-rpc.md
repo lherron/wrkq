@@ -359,6 +359,20 @@ $/cancelRequest
 
 ### 6.2 wrkq namespace
 
+#### Envelope bootstrap read
+
+`wrkq.envelope.listView { states?, ids?, limit?, cursor? }` returns
+`{ items: WrkqEnvelope[], nextCursor? }`. It is a pure read with no principal
+or expiry sweep; overdue envelopes retain their stored state. Items match
+`wrkq.envelope.show`, including `presentedTo`. Without `ids`, states default
+to `pending`, `presented`, and `deferred`; with `ids` (up to 500 EN- IDs or
+UUIDs), all states are eligible unless `states` is supplied. Unknown IDs are
+omitted; an empty selector array matches nothing. Unknown states and limits
+outside 1..500 are `WRKQ_VALIDATION`. Limit defaults to 500. Pages use numeric
+message sequence ascending and an opaque keyset cursor; `nextCursor` is
+omitted on the last page. Room lookups are batched per page. This additive
+surface follows invariant `wrkq.collaboration-ledger.authority`.
+
 #### Task methods
 
 ```

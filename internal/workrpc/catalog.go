@@ -100,6 +100,7 @@ var methodCatalog = []string{
 	"wrkq.room.membersView",
 	"wrkq.envelope.show",
 	"wrkq.envelope.memberPage",
+	"wrkq.envelope.listView",
 	"wrkq.envelope.inboxView",
 	"wrkq.envelope.defer",
 	"wrkq.envelope.withdraw",
@@ -267,6 +268,7 @@ var dtoCatalog = []string{
 	"WrkqRoomSayResult",
 	"WrkqEnvelope",
 	"WrkqEnvelopeMemberPage",
+	"WrkqEnvelopeListView",
 	"WrkqEnvelopeParty",
 	"WrkqEnvelopePresentation",
 	"WrkqEnvelopeInboxGroup",
@@ -284,6 +286,7 @@ var dtoCatalog = []string{
 	"WrkqRoomMembersViewParams",
 	"WrkqEnvelopeShowParams",
 	"WrkqEnvelopeMemberPageParams",
+	"WrkqEnvelopeListViewParams",
 	"WrkqEnvelopeBirthEnvelopeParams",
 	"WrkqEnvelopeBirth", // birth envelope read model: lowest-seq reply_required to one scope, any state (T-07655)
 	"WrkqEnvelopeInboxViewParams",

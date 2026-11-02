@@ -41,6 +41,10 @@ func (rs *RoomStore) GetEnvelope(selector string) (*domain.Envelope, error) {
 // EnvelopeListParams selects envelopes for `wrkc log`, `wrkc inbox`, and the
 // HRC-facing wake set.
 type EnvelopeListParams struct {
+	// IDs, when non-nil, restrict to friendly IDs or UUIDs (empty matches nothing).
+	IDs []string
+	// AfterMessageSeq enables ascending numeric EN sequence keyset paging.
+	AfterMessageSeq  *int64
 	RoomUUID         string
 	GroupID          string
 	FromScopeRef     string
@@ -80,6 +84,22 @@ const stillOwedSQL = `obligation = 'reply_required' AND (
 func (rs *RoomStore) ListEnvelopes(ctx context.Context, params EnvelopeListParams) ([]domain.Envelope, error) {
 	clauses := []string{"1 = 1"}
 	args := []interface{}{}
+	if params.IDs != nil {
+		if len(params.IDs) == 0 {
+			return []domain.Envelope{}, nil
+		}
+		marks := strings.TrimSuffix(strings.Repeat("?,", len(params.IDs)), ",")
+		clauses = append(clauses, "(id IN ("+marks+") OR uuid IN ("+marks+"))")
+		for i := 0; i < 2; i++ {
+			for _, selector := range params.IDs {
+				args = append(args, selector)
+			}
+		}
+	}
+	if params.AfterMessageSeq != nil {
+		clauses = append(clauses, "CAST(SUBSTR(id, 4) AS INTEGER) > ?")
+		args = append(args, *params.AfterMessageSeq)
+	}
 	if params.RoomUUID != "" {
 		clauses = append(clauses, "room_uuid = ?")
 		args = append(args, params.RoomUUID)
@@ -154,7 +174,12 @@ func (rs *RoomStore) ListEnvelopes(ctx context.Context, params EnvelopeListParam
 	if params.NewestFirst {
 		order = "ORDER BY id DESC"
 	}
-	query := "SELECT " + envelopeColumns + " FROM envelopes WHERE " + strings.Join(clauses, " AND ") + " " + order
+	table := "envelopes"
+	if params.AfterMessageSeq != nil {
+		table += " INDEXED BY envelopes_message_seq_idx"
+		order = "ORDER BY CAST(SUBSTR(id, 4) AS INTEGER)"
+	}
+	query := "SELECT " + envelopeColumns + " FROM " + table + " WHERE " + strings.Join(clauses, " AND ") + " " + order
 	if params.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", params.Limit)
 	}

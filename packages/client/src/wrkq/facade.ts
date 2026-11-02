@@ -35,6 +35,8 @@ import type {
   WrkqEnvelopeInboxView,
   WrkqEnvelopeInboxViewParams,
   WrkqEnvelopeMemberPage,
+  WrkqEnvelopeListView,
+  WrkqEnvelopeListViewParams,
   WrkqEnvelopeMemberPageParams,
   WrkqEnvelopePendingView,
   WrkqEnvelopePendingViewParams,
@@ -384,6 +386,7 @@ export interface WrkqRoomFacade {
  */
 export interface WrkqEnvelopeFacade {
   show(params: WrkqEnvelopeShowParams): Promise<WrkqEnvelope>;
+  listView(params?: WrkqEnvelopeListViewParams): Promise<WrkqEnvelopeListView>;
   /** Bounded cross-room reverse history / forward catch-up for one exact member. */
   memberPage(
     params: WrkqEnvelopeMemberPageParams,
