@@ -81,6 +81,7 @@ var methodCatalog = []string{
 	"wrkq.promise.add",
 	"wrkq.promise.show",
 	"wrkq.promise.list",
+	"wrkq.promise.listView",
 	"wrkq.promise.ready",
 	"wrkq.promise.edit",
 	"wrkq.promise.renew",
@@ -155,6 +156,7 @@ var methodCatalog = []string{
 	"wrkq.workflow.attach",
 	"wrkq.workflow.inspect",
 	"wrkq.workflow.instances",
+	"wrkq.workflow.instancesView",
 	"wrkq.workflow.timeline",
 	"wrkq.workflow.refresh",
 	"wrkq.workflow.syncMeta",
@@ -250,6 +252,8 @@ var dtoCatalog = []string{
 	"WrkqPromise",
 	"WrkqPromiseSubjectRef",
 	"WrkqPromiseListResult",
+	"WrkqPromiseListView",
+	"WrkqPromiseListViewParams",
 	"WrkqPromiseAddParams",
 	"WrkqPromiseShowParams",
 	"WrkqPromiseListParams",
@@ -360,6 +364,8 @@ var dtoCatalog = []string{
 	"WrkqWorkflowAttachResult",
 	"WrkqWorkflowInspectResult",
 	"WrkqWorkflowInstancesResult",
+	"WrkqWorkflowInstancesView",
+	"WrkqWorkflowInstancesViewParams",
 	"WrkqWorkflowSyncMetaResult",
 	"WrkqHandoff",              // handoff resource DTO (legacy handoffJSON field order)
 	"WrkqHandoffCreateResult",  // wrkq.handoff.create envelope (handoff + idempotentReplay)

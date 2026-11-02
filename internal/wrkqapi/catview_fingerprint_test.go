@@ -116,6 +116,16 @@ func TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes(t *testing.T) {
 	row("wrkq.tree.view", v18, err)
 	v19, err := api.PromiseList(ctx, PromiseListParams{Task: f.ownerID, State: "all"})
 	row("wrkq.promise.list", v19, err)
+	// Promise UUIDs are random; give the optional-field row a distinct stored
+	// timestamp so a one-item fingerprint never depends on a UUID tie-break.
+	if _, err := api.db.Exec("UPDATE promises SET created_at = CASE WHEN review_question IS NOT NULL THEN '2000-01-01T00:00:00Z' ELSE '2001-01-01T00:00:00Z' END"); err != nil {
+		t.Fatal(err)
+	}
+	promiseView, err := api.PromiseListView(ctx, PromiseListViewParams{Limit: envelopeViewLimit(1)})
+	row("wrkq.promise.listView (paged)", promiseView, err)
+	instanceAPI, _ := newInstancesViewFixture(t)
+	instanceView, err := instanceAPI.WorkflowInstancesView(ctx, WorkflowInstancesViewParams{Limit: envelopeViewLimit(1)})
+	row("wrkq.workflow.instancesView (paged, suspended)", instanceView, err)
 	v20, err := api.SearchListView(ctx, SearchListViewParams{Query: "golden", Explain: true})
 	row("wrkq.search.listView", v20, err)
 	v21, err := api.IndexStatus(ctx, IndexStatusParams{})

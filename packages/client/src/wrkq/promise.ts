@@ -105,3 +105,14 @@ export interface WrkqPromiseDeleteParams {
 export interface WrkqPromiseListResult {
   items: WrkqPromise[];
 }
+
+/** Read-only bootstrap across all promise owners; defaults to open. */
+export interface WrkqPromiseListViewParams {
+  states?: ("open" | "resolved" | "abandoned")[];
+  limit?: number;
+  cursor?: string;
+}
+export interface WrkqPromiseListView {
+  items: WrkqPromise[];
+  nextCursor?: string;
+}

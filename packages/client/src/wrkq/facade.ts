@@ -114,6 +114,8 @@ import type {
   WrkqPromiseAddParams,
   WrkqPromiseDeleteParams,
   WrkqPromiseEditParams,
+  WrkqPromiseListViewParams,
+  WrkqPromiseListView,
   WrkqPromiseListParams,
   WrkqPromiseListResult,
   WrkqPromiseReadyParams,
@@ -170,6 +172,8 @@ import type {
   WrkqWorkflowAttachResult,
   WrkqWorkflowInspectParams,
   WrkqWorkflowInspectResult,
+  WrkqWorkflowInstancesViewParams,
+  WrkqWorkflowInstancesView,
   WrkqWorkflowInstancesParams,
   WrkqWorkflowInstancesResult,
   WrkqWorkflowRefreshParams,
@@ -220,6 +224,7 @@ export interface WrkqRelationFacade {
 export interface WrkqPromiseFacade {
   add(params: WrkqPromiseAddParams): Promise<WrkqPromise>;
   show(params: WrkqPromiseShowParams): Promise<WrkqPromise>;
+  listView(params?: WrkqPromiseListViewParams): Promise<WrkqPromiseListView>;
   list(params?: WrkqPromiseListParams): Promise<WrkqPromiseListResult>;
   ready(params?: WrkqPromiseReadyParams): Promise<WrkqPromiseListResult>;
   edit(params: WrkqPromiseEditParams): Promise<WrkqPromise>;
@@ -293,6 +298,7 @@ export interface WrkqWorkflowFacade {
   inspect(
     params: WrkqWorkflowInspectParams,
   ): Promise<WrkqWorkflowInspectResult>;
+  instancesView(params?: WrkqWorkflowInstancesViewParams): Promise<WrkqWorkflowInstancesView>;
   instances(
     params: WrkqWorkflowInstancesParams,
   ): Promise<WrkqWorkflowInstancesResult>;

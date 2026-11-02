@@ -805,3 +805,15 @@ func splitNotFound(msg string) (kind string, ref string) {
 	}
 	return kind, ref
 }
+
+// TaskInstancesPage is the bounded read-only counterpart of TaskInstances.
+func (api *API) TaskInstancesPage(ctx context.Context, statuses, taskUUIDs []string, afterCreated, afterID string, limit int) ([]*workflow.Instance, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	items, err := api.service.InstancesPage(ctx, statuses, taskUUIDs, afterCreated, afterID, limit)
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	return items, nil
+}

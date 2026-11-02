@@ -67,3 +67,15 @@ export interface WrkqWorkflowSyncMetaParams {
 export interface WrkqWorkflowSyncMetaResult {
   synced: number;
 }
+
+/** Read-only bootstrap across tasks; defaults to non-closed statuses. */
+export interface WrkqWorkflowInstancesViewParams {
+  statuses?: ("open" | "active" | "waiting" | "closed")[];
+  tasks?: string[];
+  limit?: number;
+  cursor?: string;
+}
+export interface WrkqWorkflowInstancesView {
+  items: WrkfInstance[];
+  nextCursor?: string;
+}

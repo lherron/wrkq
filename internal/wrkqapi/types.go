@@ -868,3 +868,16 @@ type WrkqContainerDeleteRecursiveResult struct {
 	BytesFreed         *int64         `json:"bytesFreed,omitempty"`
 	FileCleanupErrors  []string       `json:"fileCleanupErrors,omitempty"`
 }
+
+// WorkflowInstancesViewParams selects a read-only cross-task bootstrap page.
+type WorkflowInstancesViewParams struct {
+	Statuses []string `json:"statuses,omitempty"`
+	Tasks    []string `json:"tasks,omitempty"`
+	Limit    *int     `json:"limit,omitempty"`
+	Cursor   string   `json:"cursor,omitempty"`
+}
+
+type WrkqWorkflowInstancesView struct {
+	Items      []*workflow.Instance `json:"items"`
+	NextCursor string               `json:"nextCursor,omitempty"`
+}

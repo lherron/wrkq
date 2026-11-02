@@ -373,6 +373,27 @@ message sequence ascending and an opaque keyset cursor; `nextCursor` is
 omitted on the last page. Room lookups are batched per page. This additive
 surface follows invariant `wrkq.collaboration-ledger.authority`.
 
+#### Promise and workflow instance bootstrap reads
+
+`wrkq.promise.listView { states?, limit?, cursor? }` returns
+`{ items: WrkqPromise[], nextCursor? }`. It reads every owner, defaults to
+`states: ["open"]`, and accepts `open`, `resolved`, and `abandoned`. Items
+match `wrkq.promise.show`; `ready` and `readyFor` are computed at read time.
+The order is `(created_at, uuid)` ascending.
+
+`wrkq.workflow.instancesView { statuses?, tasks?, limit?, cursor? }` returns
+`{ items: Instance[], nextCursor? }`. Statuses default to `open`, `active`,
+and `waiting`; `closed` is also accepted. Optional `tasks` selects up to 500
+task selectors; an unresolved selector is `WRKQ_NOT_FOUND`. Items match
+`wrkq.workflow.instances`, including suspension and lineage. The order is
+`(created_at, id)` ascending; the existing per-task accessor retains its order.
+
+Both methods are pure reads with no principal or writes. Empty filter arrays
+match nothing. Limits default to 500 and must be 1..500; invalid limits,
+states/statuses, or cursors return `WRKQ_VALIDATION`. Pages use opaque keyset
+cursors with a limit+1 probe; `nextCursor` is omitted on the last page.
+`@wrkq/client` exposes both methods under the matching wrkq namespaces.
+
 #### Task methods
 
 ```

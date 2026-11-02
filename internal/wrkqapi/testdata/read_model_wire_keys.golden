@@ -624,6 +624,54 @@ items[].updatedAt: string
 items[].createdByPrincipalRef: string
 items[].updatedByPrincipalRef: string
 
+## wrkq.promise.listView (paged)
+$: object
+items: array
+items[]: object
+items[].uuid: string
+items[].id: string
+items[].ownerPrincipalRef: string
+items[].subject: string
+items[].reviewQuestion: string
+items[].subjectRef: object
+items[].subjectRef.type: string
+items[].subjectRef.uuid: string
+items[].subjectRef.id: string
+items[].subjectRef.path: string
+items[].reviewAt: string
+items[].ready: bool
+items[].state: string
+items[].meta: object
+items[].etag: number
+items[].createdAt: string
+items[].updatedAt: string
+items[].createdByPrincipalRef: string
+items[].updatedByPrincipalRef: string
+nextCursor: string
+
+## wrkq.workflow.instancesView (paged, suspended)
+$: object
+items: array
+items[]: object
+items[].id: string
+items[].taskUuid: string
+items[].taskRef: string
+items[].templateId: string
+items[].templateVersion: string
+items[].templateHash: string
+items[].status: string
+items[].revision: number
+items[].taskDocEtag: string
+items[].taskDocHash: string
+items[].createdAt: string
+items[].updatedAt: string
+items[].suspension: object
+items[].suspension.id: string
+items[].suspension.reason: string
+items[].suspension.at: string
+items[].suspension.causeRef: string
+nextCursor: string
+
 ## wrkq.search.listView
 $: object
 query: string

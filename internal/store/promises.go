@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -680,4 +681,34 @@ func retargetPromisesForPurge(tx *sql.Tx, ew *events.Writer, attr attribution.At
 		}
 	}
 	return nil
+}
+
+// ListPage returns a bounded keyset page for cross-owner bootstrap reads.
+func (ps *PromiseStore) ListPage(ctx context.Context, states []string, afterCreated, afterUUID string, limit int) ([]domain.Promise, error) {
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(states)), ",")
+	args := make([]interface{}, 0, len(states)+3)
+	for _, state := range states {
+		args = append(args, state)
+	}
+	query := "SELECT " + promiseColumns + " FROM promises WHERE state IN (" + marks + ")"
+	if afterCreated != "" {
+		query += " AND (created_at,uuid) > (?,?)"
+		args = append(args, afterCreated, afterUUID)
+	}
+	query += " ORDER BY created_at,uuid LIMIT ?"
+	args = append(args, limit)
+	rows, err := ps.store.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := []domain.Promise{}
+	for rows.Next() {
+		item, err := scanPromise(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, *item)
+	}
+	return items, rows.Err()
 }

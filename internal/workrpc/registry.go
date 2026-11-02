@@ -173,6 +173,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.promise.show", apiHandler(func(ctx context.Context, p wrkqapi.PromiseShowParams) (any, error) {
 		return wq.PromiseShow(ctx, p)
 	}))
+	s.Register("wrkq.promise.listView", apiHandler(func(ctx context.Context, p wrkqapi.PromiseListViewParams) (any, error) {
+		return wq.PromiseListView(ctx, p)
+	}))
 	s.Register("wrkq.promise.list", apiHandler(func(ctx context.Context, p wrkqapi.PromiseListParams) (any, error) {
 		return wq.PromiseList(ctx, p)
 	}))
@@ -397,6 +400,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	}))
 	s.Register("wrkq.workflow.inspect", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowTaskParams) (any, error) {
 		return wq.WorkflowInspect(ctx, p)
+	}))
+	s.Register("wrkq.workflow.instancesView", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowInstancesViewParams) (any, error) {
+		return wq.WorkflowInstancesView(ctx, p)
 	}))
 	s.Register("wrkq.workflow.instances", apiHandler(func(ctx context.Context, p wrkqapi.WorkflowTaskParams) (any, error) {
 		return wq.WorkflowInstances(ctx, p)

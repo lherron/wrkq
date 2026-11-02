@@ -3,6 +3,7 @@
 package workflow
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -672,4 +673,53 @@ func (s *Service) lineageRefFromEvent(instanceID, eventType, field string) (*Ins
 		return nil, err
 	}
 	return &ref, nil
+}
+
+// InstancesPage reuses the canonical instance projection and lineage hydration
+// for bounded cross-task bootstrap reads. Task selectors are resolved upstream.
+func (s *Service) InstancesPage(ctx context.Context, statuses, taskUUIDs []string, afterCreated, afterID string, limit int) ([]*Instance, error) {
+	query := "SELECT " + instanceSelectColumns + " FROM workflow_instances WHERE status IN (" + placeholders(len(statuses)) + ")"
+	args := []interface{}{}
+	for _, status := range statuses {
+		args = append(args, status)
+	}
+	if taskUUIDs != nil {
+		query += " AND task_uuid IN (" + placeholders(len(taskUUIDs)) + ")"
+		for _, uuid := range taskUUIDs {
+			args = append(args, uuid)
+		}
+	}
+	if afterCreated != "" {
+		query += " AND (created_at,id) > (?,?)"
+		args = append(args, afterCreated, afterID)
+	}
+	query += " ORDER BY created_at,id LIMIT ?"
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	items := []*Instance{}
+	for rows.Next() {
+		inst, err := scanInstanceRow(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		items = append(items, inst)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, inst := range items {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := s.populateInstanceLineage(inst); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
 }

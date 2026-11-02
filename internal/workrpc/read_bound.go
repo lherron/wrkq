@@ -120,6 +120,8 @@ var boundedReadMethods = map[string]struct{}{
 	"wrkq.room.membersView":            {},
 	"wrkq.envelope.show":               {},
 	"wrkq.envelope.memberPage":         {},
+	"wrkq.promise.listView":            {},
+	"wrkq.workflow.instancesView":      {},
 	"wrkq.envelope.listView":           {},
 	"wrkq.envelope.inboxView":          {},
 	"wrkq.envelope.pendingView":        {},

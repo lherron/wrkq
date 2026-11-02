@@ -82,11 +82,22 @@ const stillOwedSQL = `obligation = 'reply_required' AND (
 // ListEnvelopes returns envelopes ordered by insertion (id) unless the caller
 // asked for the newest first.
 func (rs *RoomStore) ListEnvelopes(ctx context.Context, params EnvelopeListParams) ([]domain.Envelope, error) {
+	query, args, err := envelopeListQuery(params)
+	if err != nil {
+		return nil, err
+	}
+	if query == "" {
+		return []domain.Envelope{}, nil
+	}
+	return rs.queryEnvelopes(ctx, query, args...)
+}
+
+func envelopeListQuery(params EnvelopeListParams) (string, []interface{}, error) {
 	clauses := []string{"1 = 1"}
 	args := []interface{}{}
 	if params.IDs != nil {
 		if len(params.IDs) == 0 {
-			return []domain.Envelope{}, nil
+			return "", nil, nil
 		}
 		marks := strings.TrimSuffix(strings.Repeat("?,", len(params.IDs)), ",")
 		clauses = append(clauses, "(id IN ("+marks+") OR uuid IN ("+marks+"))")
@@ -140,7 +151,7 @@ func (rs *RoomStore) ListEnvelopes(ctx context.Context, params EnvelopeListParam
 		placeholders := make([]string, 0, len(params.States))
 		for _, state := range params.States {
 			if err := domain.ValidateEnvelopeState(state); err != nil {
-				return nil, err
+				return "", nil, err
 			}
 			placeholders = append(placeholders, "?")
 			args = append(args, state)
@@ -151,7 +162,7 @@ func (rs *RoomStore) ListEnvelopes(ctx context.Context, params EnvelopeListParam
 		placeholders := make([]string, 0, len(params.Obligations))
 		for _, obligation := range params.Obligations {
 			if err := domain.ValidateEnvelopeObligation(obligation); err != nil {
-				return nil, err
+				return "", nil, err
 			}
 			placeholders = append(placeholders, "?")
 			args = append(args, obligation)
@@ -176,14 +187,18 @@ func (rs *RoomStore) ListEnvelopes(ctx context.Context, params EnvelopeListParam
 	}
 	table := "envelopes"
 	if params.AfterMessageSeq != nil {
-		table += " INDEXED BY envelopes_message_seq_idx"
+		// Full-ledger bootstrap follows the expression index. Explicit ID
+		// replay must use the id/uuid unique indexes instead.
+		if params.IDs == nil {
+			table += " INDEXED BY envelopes_message_seq_idx"
+		}
 		order = "ORDER BY CAST(SUBSTR(id, 4) AS INTEGER)"
 	}
 	query := "SELECT " + envelopeColumns + " FROM " + table + " WHERE " + strings.Join(clauses, " AND ") + " " + order
 	if params.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", params.Limit)
 	}
-	return rs.queryEnvelopes(ctx, query, args...)
+	return query, args, nil
 }
 
 // CountEnvelopes returns how many envelopes match, without materializing them.

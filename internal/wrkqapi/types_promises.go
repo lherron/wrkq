@@ -116,3 +116,15 @@ type PromiseDeleteParams struct {
 	IfMatch      int64  `json:"ifMatch,omitempty"`
 	PrincipalRef string `json:"principalRef,omitempty"`
 }
+
+// PromiseListViewParams selects a read-only bootstrap page across all owners.
+type PromiseListViewParams struct {
+	States []string `json:"states,omitempty"`
+	Limit  *int     `json:"limit,omitempty"`
+	Cursor string   `json:"cursor,omitempty"`
+}
+
+type WrkqPromiseListView struct {
+	Items      []WrkqPromise `json:"items"`
+	NextCursor string        `json:"nextCursor,omitempty"`
+}
