@@ -22,19 +22,76 @@ import (
 
 // Task edits under the etag CAS: patch fields in place, or move the task.
 
-// TaskUpdate applies a patch with an atomic expectEtag CAS (§8.1).
+const nsTaskUpdate = "wrkq.task.update"
+
+// TaskUpdate checks the owner receipt before current-state validation. Receipt,
+// original result snapshot and mutation share the store's writer transaction.
 func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	uuid, err := a.resolveTaskUUID(p.Task)
+	attr, err := a.attributionForScope(ctx, p.Actor, p.ScopeRef)
+	if err != nil {
+		return nil, err
+	}
+	requestHash := ""
+	if p.IdempotencyKey != "" {
+		hp := p
+		hp.IdempotencyKey = ""
+		node, _ := nodeauth.FromContext(ctx)
+		// Bind the receipt to the effective caller as well as the complete request,
+		// including claim credentials and its original optimistic fence.
+		requestHash = canonicalRequestHash(struct {
+			Request TaskUpdateParams
+			Caller  attribution.Attribution
+			Node    string
+		}{hp, attr, node})
+	}
+	var result *WrkqTask
+	err = a.store.Tasks.WithUpdateTransaction(attr, "rpc", func(tx *sql.Tx, update store.TaskFieldUpdate) error {
+		if p.IdempotencyKey != "" {
+			raw, found, err := idempotentReplayOn(tx, nsTaskUpdate, p.IdempotencyKey, requestHash)
+			if err != nil {
+				return err
+			}
+			if found {
+				var original WrkqTask
+				if err := json.Unmarshal(raw, &original); err != nil {
+					return NewInternalError(err)
+				}
+				result = &original
+				return nil
+			}
+		}
+		var err error
+		result, err = a.taskUpdateTx(ctx, p, attr, tx, update)
+		if err != nil {
+			return err
+		}
+		if p.IdempotencyKey != "" {
+			return idempotentStoreOn(tx, nsTaskUpdate, p.IdempotencyKey, requestHash, result)
+		}
+		return nil
+	})
+	if err != nil {
+		var domainErr Error
+		if errors.As(err, &domainErr) {
+			return nil, err
+		}
+		return nil, mapStoreError(err, p.Task)
+	}
+	return result, nil
+}
+
+func (a *API) taskUpdateTx(ctx context.Context, p TaskUpdateParams, attr attribution.Attribution, tx *sql.Tx, update store.TaskFieldUpdate) (*WrkqTask, error) {
+	uuid, err := resolveTaskUUIDOn(tx, p.Task)
 	if err != nil {
 		return nil, err
 	}
 
 	// Read current etag atomically against the CAS precondition. A supplied
 	// expectEtag of 0 is a real (stale) precondition, not "skip".
-	currentEtag, err := a.taskEtag(uuid, p.Task)
+	currentEtag, err := taskEtagOn(tx, uuid, p.Task)
 	if err != nil {
 		return nil, err
 	}
@@ -45,12 +102,12 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 		})
 	}
 
-	fields, ferr := a.patchFields(p.Patch)
+	fields, ferr := a.patchFieldsOn(tx, p.Patch)
 	if ferr != nil {
 		return nil, ferr
 	}
 
-	if err := a.validateCoversPatch(uuid, fields, p.Patch.Covers); err != nil {
+	if err := validateCoversPatchOn(tx, uuid, fields, p.Patch.Covers); err != nil {
 		return nil, err
 	}
 
@@ -64,14 +121,14 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 		}
 	}
 	if len(fields) == 0 {
-		return a.loadTask(ctx, uuid)
+		return loadTaskOn(ctx, tx, uuid)
 	}
 	// A new requester principal without a scope drops a stored scope that
 	// names a different agent, keeping the pair consistent.
 	if principal, ok := fields["requester_principal_ref"].(string); ok {
 		if _, scopeSet := fields["requester_scope_ref"]; !scopeSet {
 			var stored sql.NullString
-			if qerr := a.db.QueryRow("SELECT requester_scope_ref FROM tasks WHERE uuid = ?", uuid).Scan(&stored); qerr != nil {
+			if qerr := tx.QueryRow("SELECT requester_scope_ref FROM tasks WHERE uuid = ?", uuid).Scan(&stored); qerr != nil {
 				return nil, NewInternalError(qerr)
 			}
 			if stored.Valid && requesterScopeAgent(stored.String) != principal {
@@ -80,10 +137,6 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 		}
 	}
 
-	attr, aerr := a.attributionForScope(ctx, p.Actor, p.ScopeRef)
-	if aerr != nil {
-		return nil, aerr
-	}
 	var claimPrecondition func(*sql.Tx) error
 	if state, ok := fields["state"].(string); ok && state == string(domain.StateCompleted) {
 		claimPrecondition = func(tx *sql.Tx) error {
@@ -104,7 +157,7 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 			return nil
 		}
 	}
-	_, err = a.store.Tasks.UpdateFieldsWithViaAttributionAndPrecondition(attr, uuid, fields, currentEtag, "rpc", claimPrecondition)
+	_, err = update(uuid, fields, currentEtag, claimPrecondition)
 	if err != nil {
 		var extErr *store.ExtError
 		if errors.As(err, &extErr) {
@@ -118,11 +171,11 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 		}
 		return nil, mapStoreError(err, p.Task)
 	}
-	return a.loadTask(ctx, uuid)
+	return loadTaskOn(ctx, tx, uuid)
 }
 
 // patchFields converts a TaskPatch into the store field map (DB column names).
-func (a *API) patchFields(patch TaskPatch) (map[string]any, error) {
+func (a *API) patchFieldsOn(q taskQueryer, patch TaskPatch) (map[string]any, error) {
 	fields := map[string]any{}
 	if patch.Slug != nil {
 		normalized, err := paths.NormalizeSlug(*patch.Slug)
@@ -188,7 +241,7 @@ func (a *API) patchFields(patch TaskPatch) (map[string]any, error) {
 				fields["kind"] = "task"
 			}
 		} else {
-			parentUUID, _, err := selectors.ResolveTask(a.db, parentRef)
+			parentUUID, _, err := selectors.ResolveTask(q, parentRef)
 			if err != nil {
 				return nil, NewNotFoundError(parentRef, "task")
 			}
@@ -257,7 +310,7 @@ func (a *API) patchFields(patch TaskPatch) (map[string]any, error) {
 		if campaign == "" {
 			fields["campaign_uuid"] = nil
 		} else {
-			uuid, _, err := selectors.ResolveContainer(a.db, campaign)
+			uuid, _, err := selectors.ResolveContainer(q, campaign)
 			if err != nil {
 				return nil, NewNotFoundError(campaign, "campaign")
 			}
@@ -265,7 +318,7 @@ func (a *API) patchFields(patch TaskPatch) (map[string]any, error) {
 		}
 	}
 	if patch.CausedBy != nil {
-		refs, cerr := causedby.ResolveTokens(a.db, *patch.CausedBy, "")
+		refs, cerr := causedby.ResolveTokens(q, *patch.CausedBy, "")
 		if cerr != nil {
 			return nil, NewValidationError(cerr.Error(), map[string]any{"field": "causedBy"})
 		}
@@ -387,9 +440,10 @@ func (a *API) taskProjectUUID(taskUUID string) (string, error) {
 
 // taskEtag reads a task's current etag, the CAS precondition update and move
 // compare against.
-func (a *API) taskEtag(uuid, selector string) (int64, error) {
+func (a *API) taskEtag(uuid, selector string) (int64, error) { return taskEtagOn(a.db, uuid, selector) }
+func taskEtagOn(q taskQueryer, uuid, selector string) (int64, error) {
 	var etag int64
-	if err := a.db.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", uuid).Scan(&etag); err != nil {
+	if err := q.QueryRow("SELECT etag FROM tasks WHERE uuid = ?", uuid).Scan(&etag); err != nil {
 		if err == sql.ErrNoRows {
 			return 0, NewNotFoundError(selector, "task")
 		}

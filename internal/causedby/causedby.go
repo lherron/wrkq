@@ -25,7 +25,7 @@ func Resolve(database *db.DB, input, selfFriendlyID string) ([]store.CausedByRef
 
 // ResolveTokens is Resolve over a pre-split token list (used by the RPC server,
 // which receives a JSON array rather than a comma string).
-func ResolveTokens(database *db.DB, tokens []string, selfFriendlyID string) ([]store.CausedByRef, error) {
+func ResolveTokens(database interface{ QueryRow(string, ...any) *sql.Row }, tokens []string, selfFriendlyID string) ([]store.CausedByRef, error) {
 	refs := []store.CausedByRef{}
 	seen := make(map[string]bool, len(tokens))
 	for _, raw := range tokens {

@@ -20,7 +20,7 @@ import (
 // duplicating the SQL pattern in command implementations.
 //
 // Returns (uuid, friendlyID, error). For empty paths, returns ("", "", nil) indicating root.
-func WalkContainerPath(database *db.DB, path string) (string, string, error) {
+func WalkContainerPath(database rowQueryer, path string) (string, string, error) {
 	segments := paths.SplitPath(path)
 	if len(segments) == 0 {
 		// Empty path means root
@@ -65,7 +65,7 @@ func WalkContainerPath(database *db.DB, path string) (string, string, error) {
 //
 // This is useful for commands like touch/mkdir that need to find the parent
 // container before creating a new resource.
-func ResolveParentContainer(database *db.DB, path string) (*string, string, string, error) {
+func ResolveParentContainer(database rowQueryer, path string) (*string, string, string, error) {
 	segments := paths.SplitPath(path)
 	if len(segments) == 0 {
 		return nil, "", "", fmt.Errorf("invalid path: empty")
@@ -95,7 +95,7 @@ func ResolveParentContainer(database *db.DB, path string) (*string, string, stri
 // WalkContainerSegment resolves a single container segment relative to a parent.
 // parentUUID should be nil for root-level containers.
 // Returns (uuid, friendlyID, error).
-func WalkContainerSegment(database *db.DB, slug string, parentUUID *string) (string, string, error) {
+func WalkContainerSegment(database rowQueryer, slug string, parentUUID *string) (string, string, error) {
 	normalizedSlug, err := paths.NormalizeSlug(slug)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid slug %q: %w", slug, err)
@@ -124,7 +124,7 @@ func WalkContainerSegment(database *db.DB, slug string, parentUUID *string) (str
 
 // LookupContainerSegment checks if a container exists without returning an error for not found.
 // Returns (uuid, friendlyID, exists). Use this when you want to check existence before creating.
-func LookupContainerSegment(database *db.DB, slug string, parentUUID *string) (string, string, bool) {
+func LookupContainerSegment(database rowQueryer, slug string, parentUUID *string) (string, string, bool) {
 	normalizedSlug, err := paths.NormalizeSlug(slug)
 	if err != nil {
 		return "", "", false
@@ -151,7 +151,7 @@ func LookupContainerSegment(database *db.DB, slug string, parentUUID *string) (s
 // ResolveTaskByPath resolves a task by its container path + task slug.
 // The path should be in format "container/subcontainer/task-slug".
 // Returns (uuid, friendlyID, error).
-func ResolveTaskByPath(database *db.DB, path string) (string, string, error) {
+func ResolveTaskByPath(database rowQueryer, path string) (string, string, error) {
 	segments := paths.SplitPath(path)
 	if len(segments) == 0 {
 		return "", "", fmt.Errorf("invalid path: empty")
@@ -240,7 +240,7 @@ func ExpandBareTaskID(q rowQueryer, token string) (string, bool, error) {
 // ResolveTask resolves a task selector to its UUID.
 // Supports friendly IDs (T-00001), UUIDs, and paths (container/task-slug).
 // Returns (uuid, friendlyID, error).
-func ResolveTask(database *db.DB, selector string) (string, string, error) {
+func ResolveTask(database rowQueryer, selector string) (string, string, error) {
 	parsed := Parse(selector)
 
 	// Validate type
@@ -292,7 +292,7 @@ func ResolveTask(database *db.DB, selector string) (string, string, error) {
 // ResolveContainer resolves a container selector to its UUID.
 // Supports friendly IDs (P-00001), UUIDs, and paths (project/subproject).
 // Returns (uuid, friendlyID, error).
-func ResolveContainer(database *db.DB, selector string) (string, string, error) {
+func ResolveContainer(database rowQueryer, selector string) (string, string, error) {
 	parsed := Parse(selector)
 
 	// Validate type (currently containers don't have a c: prefix, that's for comments)

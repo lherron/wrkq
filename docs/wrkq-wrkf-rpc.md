@@ -2564,6 +2564,7 @@ These wrkq mutations enforce replay when a non-empty `idempotencyKey` is supplie
 
 ```
 wrkq.task.create
+wrkq.task.update
 wrkq.task.copy
 wrkq.comment.add
 wrkq.attachment.add
@@ -2582,10 +2583,23 @@ same namespace + same key + different canonical request hash → WRKQ_CONFLICT
 
 Workflow-attach replay returns the stored task/instance with `attached: false`.
 
-`wrkq.task.update` currently accepts the DTO field `idempotencyKey` but its
-handler does not implement replay; use `expectEtag` for update concurrency
-control. Do not assume a field accepted by a request DTO guarantees replay.
-See `internal/wrkqapi/task_update.go` and the per-method mutation handlers.
+`wrkq.task.update` checks its owner receipt before resolving the task selector
+or evaluating its current etag. Repeating the same key and canonical request,
+including the original `expectEtag`, returns the original committed task DTO,
+even after later edits. A fresh key with a stale fence still refuses
+`WRKQ_CONFLICT`; changing any request field under an existing key also refuses
+`WRKQ_CONFLICT`. Effective caller principal, scope and authenticated node bind
+the receipt; claim credentials remain part of the request hash. Attribution is
+validated before replay. A new claimed-task completion still checks the current
+holder inside the mutation transaction.
+
+Task-update receipt lookup, mutation, event rows, result snapshot and receipt
+storage share one `BEGIN IMMEDIATE` transaction. Concurrent identical requests
+perform one mutation, and any failure rolls back both receipt and mutation.
+Replay produces no extra event or webhook. Other methods retain their individual
+transaction/replay mechanisms; an accepted DTO field alone does not establish
+atomic replay for another method. See `internal/wrkqapi/task_update.go` and
+`internal/store/task_update.go`.
 
 ### 8.3 wrkf transition CAS
 

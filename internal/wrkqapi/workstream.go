@@ -13,6 +13,9 @@ func coversKindError() error {
 }
 
 func (a *API) validateCovers(kind string, covers *TaskCovers) (*string, error) {
+	return validateCoversOn(a.db, kind, covers)
+}
+func validateCoversOn(q taskQueryer, kind string, covers *TaskCovers) (*string, error) {
 	if covers == nil {
 		return nil, nil
 	}
@@ -24,7 +27,7 @@ func (a *API) validateCovers(kind string, covers *TaskCovers) (*string, error) {
 		if !strings.HasPrefix(covers.Container, "P-") {
 			return nil, NewNotFoundError(covers.Container, "container")
 		}
-		if err := a.db.QueryRow("SELECT id FROM containers WHERE id=?", covers.Container).Scan(&found); err != nil {
+		if err := q.QueryRow("SELECT id FROM containers WHERE id=?", covers.Container).Scan(&found); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, NewNotFoundError(covers.Container, "container")
 			}
@@ -36,7 +39,7 @@ func (a *API) validateCovers(kind string, covers *TaskCovers) (*string, error) {
 		if !strings.HasPrefix(task, "T-") {
 			return nil, NewNotFoundError(task, "task")
 		}
-		if err := a.db.QueryRow("SELECT id FROM tasks WHERE id=?", task).Scan(&found); err != nil {
+		if err := q.QueryRow("SELECT id FROM tasks WHERE id=?", task).Scan(&found); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, NewNotFoundError(task, "task")
 			}
@@ -51,7 +54,7 @@ func (a *API) validateCovers(kind string, covers *TaskCovers) (*string, error) {
 	return &value, nil
 }
 
-func (a *API) validateCoversPatch(uuid string, fields map[string]any, raw json.RawMessage) error {
+func validateCoversPatchOn(q taskQueryer, uuid string, fields map[string]any, raw json.RawMessage) error {
 	if len(raw) == 0 {
 		if _, ok := fields["kind"]; !ok {
 			return nil
@@ -59,7 +62,7 @@ func (a *API) validateCoversPatch(uuid string, fields map[string]any, raw json.R
 	}
 	var kind string
 	var old sql.NullString
-	if err := a.db.QueryRow("SELECT kind,covers FROM tasks WHERE uuid=?", uuid).Scan(&kind, &old); err != nil {
+	if err := q.QueryRow("SELECT kind,covers FROM tasks WHERE uuid=?", uuid).Scan(&kind, &old); err != nil {
 		return NewInternalError(err)
 	}
 	if next, ok := fields["kind"].(string); ok {
@@ -70,7 +73,7 @@ func (a *API) validateCoversPatch(uuid string, fields map[string]any, raw json.R
 		if err := json.Unmarshal(raw, &covers); err != nil {
 			return NewValidationError("invalid covers: "+err.Error(), map[string]any{"field": "covers"})
 		}
-		value, err := a.validateCovers(kind, covers)
+		value, err := validateCoversOn(q, kind, covers)
 		if err != nil {
 			return err
 		}

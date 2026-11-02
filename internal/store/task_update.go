@@ -59,12 +59,43 @@ func (ts *TaskStore) UpdateFieldsWithViaAttribution(attr attribution.Attribution
 // seam for authority checks whose truth must not change between validation and
 // write (for example, generation-fenced task-claim completion).
 func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribution.Attribution, taskUUID string, fields map[string]interface{}, ifMatch int64, via string, precondition func(*sql.Tx) error) (int64, error) {
+	var newETag int64
+	err := ts.WithUpdateTransaction(attr, via, func(_ *sql.Tx, update TaskFieldUpdate) error {
+		var err error
+		newETag, err = update(taskUUID, fields, ifMatch, precondition)
+		return err
+	})
+	return newETag, err
+}
+
+// TaskFieldUpdate applies a task edit using the transaction passed to
+// WithUpdateTransaction. Call it only within that transaction's callback.
+type TaskFieldUpdate func(taskUUID string, fields map[string]any, ifMatch int64, precondition func(*sql.Tx) error) (int64, error)
+
+// WithUpdateTransaction binds preparation, mutation and result/receipt storage
+// to one BEGIN IMMEDIATE. Webhooks are dispatched only after its commit, and
+// a replay that never invokes update dispatches none.
+func (ts *TaskStore) WithUpdateTransaction(attr attribution.Attribution, via string, fn func(*sql.Tx, TaskFieldUpdate) error) error {
 	if err := requireAttribution(attr); err != nil {
-		return 0, err
+		return err
 	}
 	if via == "" {
 		via = "cli"
 	}
+	var pending []pendingWebhook
+	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
+		update := func(taskUUID string, fields map[string]any, ifMatch int64, precondition func(*sql.Tx) error) (int64, error) {
+			return ts.updateFieldsTx(tx, ew, attr, taskUUID, fields, ifMatch, via, precondition, &pending)
+		}
+		return fn(tx, update)
+	})
+	if err == nil {
+		dispatchTaskWebhooks(ts.store.db, pending)
+	}
+	return err
+}
+
+func (ts *TaskStore) updateFieldsTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, taskUUID string, fields map[string]any, ifMatch int64, via string, precondition func(*sql.Tx) error, pending *[]pendingWebhook) (int64, error) {
 	// caused_by is a non-column task field: extract it before the scalar UPDATE is
 	// built so it never becomes a `caused_by = ?` set clause. Its rows are replaced
 	// in the same transaction below.
@@ -81,9 +112,7 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 		return 0, err
 	}
 	var newETag int64
-	var webhooksToDispatch []pendingWebhook
-
-	err := ts.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
+	err := func() error {
 		// Get current etag and state
 		var currentETag int64
 		var currentState string
@@ -244,7 +273,7 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 		if stateChanged {
 			transition = &webhooks.Transition{From: stringPtr(currentState), To: stringPtr(newState)}
 		}
-		webhooksToDispatch = append(webhooksToDispatch, pendingWebhook{
+		*pending = append(*pending, pendingWebhook{
 			taskUUID: taskUUID,
 			ctx: webhooks.EventContext{
 				Metadata:     meta,
@@ -261,7 +290,7 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 		if err != nil {
 			return err
 		}
-		webhooksToDispatch = append(webhooksToDispatch, unblockHooks...)
+		*pending = append(*pending, unblockHooks...)
 
 		if transitioningToCompletion {
 			if err := maybeLogCampaignCloseNudgeForTask(tx, ew, attr, taskUUID); err != nil {
@@ -269,11 +298,7 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 			}
 		}
 		return nil
-	})
-
-	if err == nil {
-		dispatchTaskWebhooks(ts.store.db, webhooksToDispatch)
-	}
+	}()
 	return newETag, err
 }
 

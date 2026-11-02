@@ -45,19 +45,34 @@ const taskPresenceTrimCharsSQL = "char(9)||char(10)||char(11)||char(12)||char(13
 // resolveTaskUUID resolves a task selector to its UUID, returning WRKQ_NOT_FOUND
 // when the task does not exist.
 func (a *API) resolveTaskUUID(selector string) (string, error) {
+	return resolveTaskUUIDOn(a.db, selector)
+}
+func resolveTaskUUIDOn(q taskQueryer, selector string) (string, error) {
 	if strings.TrimSpace(selector) == "" {
 		return "", NewValidationError("task selector is required", map[string]any{"field": "task"})
 	}
-	uuid, _, err := selectors.ResolveTask(a.db, selector)
+	uuid, _, err := selectors.ResolveTask(q, selector)
 	if err != nil {
 		return "", NewNotFoundError(selector, "task")
 	}
 	return uuid, nil
 }
 
+// taskQueryer is implemented by the database and its owner transaction.
+type taskQueryer interface {
+	QueryRow(string, ...any) *sql.Row
+	Query(string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
 // loadTask reads a task by UUID into a WrkqTask DTO.
 func (a *API) loadTask(ctx context.Context, uuid string) (*WrkqTask, error) {
-	row := a.db.QueryRowContext(ctx, taskSelectSQL(taskBodyColumns)+" WHERE t.uuid = ?", uuid)
+	return loadTaskOn(ctx, a.db, uuid)
+}
+
+func loadTaskOn(ctx context.Context, q taskQueryer, uuid string) (*WrkqTask, error) {
+	row := q.QueryRowContext(ctx, taskSelectSQL(taskBodyColumns)+" WHERE t.uuid = ?", uuid)
 	task, _, err := scanTaskRow(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -65,11 +80,11 @@ func (a *API) loadTask(ctx context.Context, uuid string) (*WrkqTask, error) {
 		}
 		return nil, NewInternalError(err)
 	}
-	if err := a.loadCausedBy(task); err != nil {
+	if err := loadCausedByOn(q, task); err != nil {
 		return nil, err
 	}
 	if task.SubtaskOwnerUUID == "" {
-		rows, err := a.db.QueryContext(ctx, "SELECT id,slug,title,state,COALESCE(claimed_by_principal_ref,'') FROM tasks WHERE subtask_owner_uuid=? ORDER BY slug", uuid)
+		rows, err := q.QueryContext(ctx, "SELECT id,slug,title,state,COALESCE(claimed_by_principal_ref,'') FROM tasks WHERE subtask_owner_uuid=? ORDER BY slug", uuid)
 		if err != nil {
 			return nil, NewInternalError(err)
 		}
@@ -105,8 +120,9 @@ func taskSelectSQL(bodyColumns string) string {
 }
 
 // loadCausedBy attaches the ids of the tasks that caused this one.
-func (a *API) loadCausedBy(task *WrkqTask) error {
-	causedBy, err := store.CausedByIDs(a.db, task.UUID)
+func (a *API) loadCausedBy(task *WrkqTask) error { return loadCausedByOn(a.db, task) }
+func loadCausedByOn(q taskQueryer, task *WrkqTask) error {
+	causedBy, err := store.CausedByIDs(q, task.UUID)
 	if err != nil {
 		return NewInternalError(err)
 	}

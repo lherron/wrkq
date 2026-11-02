@@ -129,8 +129,11 @@ func canonicalRequestHash(v any) string {
 // (nil, false, nil) when no row exists, and a WRKQ_CONFLICT error when a row
 // exists with a different canonical request hash.
 func (a *API) idempotentReplay(namespace, key, requestHash string) (json.RawMessage, bool, error) {
+	return idempotentReplayOn(a.db, namespace, key, requestHash)
+}
+func idempotentReplayOn(q interface{ QueryRow(string, ...any) *sql.Row }, namespace, key, requestHash string) (json.RawMessage, bool, error) {
 	var storedHash, resultJSON string
-	err := a.db.QueryRow(
+	err := q.QueryRow(
 		"SELECT request_hash, result_json FROM wrkq_rpc_idempotency WHERE namespace = ? AND idempotency_key = ?",
 		namespace, key,
 	).Scan(&storedHash, &resultJSON)
@@ -150,11 +153,16 @@ func (a *API) idempotentReplay(namespace, key, requestHash string) (json.RawMess
 
 // idempotentStore persists the committed result for (namespace, key).
 func (a *API) idempotentStore(namespace, key, requestHash string, result any) error {
+	return idempotentStoreOn(a.db, namespace, key, requestHash, result)
+}
+func idempotentStoreOn(q interface {
+	Exec(string, ...any) (sql.Result, error)
+}, namespace, key, requestHash string, result any) error {
 	b, err := json.Marshal(result)
 	if err != nil {
 		return NewInternalError(err)
 	}
-	_, err = a.db.Exec(
+	_, err = q.Exec(
 		"INSERT INTO wrkq_rpc_idempotency (namespace, idempotency_key, request_hash, result_json) VALUES (?, ?, ?, ?)",
 		namespace, key, requestHash, string(b),
 	)
