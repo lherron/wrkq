@@ -50,10 +50,15 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
   serving scratch store. `wrkqadm config doctor` prints the effective DB, attachment dir, project root and
   principal, with the source of each. `wrkqadm db snapshot --out F [--json]` takes an online-backup copy.
   `wrkqadm state export --out F` writes the canonical task-ledger JSON snapshot (containers, tasks, comments,
-  promises, links; not rooms, handoffs, workflows or events), and `state verify F` checks it round-trips.
-  `wrkqadm patch create --from S0 --to S1 --out P`, `patch summarize --patch P` and
-  `patch validate --base S0 --patch P` diff two snapshots as RFC 6902. `patch apply`/`rebase` and `state import`
-  write the store, so a verification drive doesn't run them.
+  promises, links; not rooms, handoffs, workflows or events), and `state verify F` checks the file is
+  byte-identical to the canonical encoding of its content: a `state export --no-canonical` file or a `jq -S`
+  reformat fails `✗ snapshot is not canonical: difference at byte N`, exit 4 (8bc0075; before it, every
+  parseable file passed). `wrkqadm patch create --from S0 --to S1 --out P`, `patch summarize --patch P` and
+  `patch validate --base S0 --patch P` diff two snapshots as RFC 6902. `patch rebase --old-base S0 --new-base S3
+  --patch P --out P2 --json` writes only the `--out` file: it replays P's own changes onto the new base and
+  renumbers clashing friendly ids (`code_rewrites`), so it never emits `remove` ops for what the new base gained
+  (23f102a; driven 2026-11-02, T-12309: `removes: 0`, and P2 validates against S3). `patch apply` and
+  `state import` write the store, so a verification drive doesn't run them.
 
 ## How to get to it
 
@@ -92,6 +97,11 @@ wrkqadm $D state export --out "$WV_STATE/s0.json" && wrkqadm $D state verify "$W
 wrkqadm $D state export --out "$WV_STATE/s1.json"
 wrkqadm $D patch create --from "$WV_STATE/s0.json" --to "$WV_STATE/s1.json" --out "$WV_STATE/p01.json" --json
 wrkqadm $D patch summarize --patch "$WV_STATE/p01.json" && wrkqadm $D patch validate --base "$WV_STATE/s0.json" --patch "$WV_STATE/p01.json"
+wrkqadm $D state export --no-canonical --out "$WV_STATE/s2nc.json"; wrkqadm $D state verify "$WV_STATE/s2nc.json"   # not canonical, exit 4
+wrkqadm $D state export --out "$WV_STATE/s3.json"
+wrkqadm $D patch rebase --old-base "$WV_STATE/s0.json" --new-base "$WV_STATE/s3.json" --patch "$WV_STATE/p01.json" \
+  --out "$WV_STATE/p01-rebased.json" --json | jq -c '{ops,adds,replaces,removes}'                                 # removes 0
+wrkqadm $D patch validate --base "$WV_STATE/s3.json" --patch "$WV_STATE/p01-rebased.json"
 ```
 
 The request log, after the other features have driven traffic:
@@ -119,7 +129,7 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 - **`wrkqadm config doctor` misreports the principal.** In a seat it says `Principal: (not set) ... ✗ Not
   configured` although `wrkq whoami` resolves one from the seat scope, and `WRKQ_PRINCIPAL_REF` beats `--as`.
   Read the principal from `wrkq whoami`. Product task T-11431 (2026-10-20, T-11374 `01-store-daemon/drive.txt`; still
-  reproduces at 7350485, 2026-10-26).
+  reproduces at 5fbf10c, 2026-11-02).
 - Doctor's `sequence_drift` checks `event_log` against its own AUTOINCREMENT row in `sqlite_sequence`
   (named `event_log`). Before T-10327 it read the dead `event_seq` row and flagged every store with an event.
 - Doctor's `attach_dir_exists` needs `WRKQ_ATTACH_DIR` (or `attach_dir` in config) on the **caller's** side.
@@ -142,14 +152,15 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 
 On a fresh `wv up`, health is ok with the token and 401 without it, a tokenless client gets the token refusal,
 a dead locator gets the "retrying is safe" refusal, `whoami` names the scratch locator, doctor reports every row
-ok, `migrate --status` lists every migration as applied (000070 last at 7350485), and `migrate` refuses
-the serving store. `WRKQ_PROFILE=1` prints the breakdown, and the snapshot, `state verify` and `patch validate`
-reads succeed on the scratch file. The daemon log has an `http.listen` line and one `http.request` line per request
+ok, `migrate --status` lists every migration as applied (000070 last at 5fbf10c), and `migrate` refuses
+the serving store. `WRKQ_PROFILE=1` prints the breakdown, the snapshot, `state verify` and `patch validate`
+reads succeed on the scratch file, `state verify` refuses a `--no-canonical` export (exit 4), and `patch rebase`
+emits no `remove` ops. The daemon log has an `http.listen` line and one `http.request` line per request
 with `client: wrkq/<installed version>` and an `op`, the refusals as `warn` lines with their code and message, and
 sampled polls with a `suppressed` count. On the canonical daemon, read only: health is ok and `rpc.initialize`
 names a revision.
 
-Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/01-store-daemon/drive.txt`,
-`evidence/t-11873/`, live reads in `live/reads.txt` (canonical serves 7350485). Every feature's drive.txt starts with
-a replay of T-11374's drives (each entry after a `NOTE replay T-11374 ...` line, diffed in `replay/compare.txt`),
-then its drift drives after a `NOTE drift drives` line.
+Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/01-store-daemon/drive.txt`,
+`evidence/t-12309/`, live reads in `live/reads.txt` (canonical serves 5fbf10c). Every feature's drive.txt starts with
+a replay of T-11873's drives (each entry after a `NOTE replay T-11873 ...` line, diffed in `replay/compare.txt`,
+triaged in `replay/triage.md`), then its drift drives after a `NOTE drift drives` line.

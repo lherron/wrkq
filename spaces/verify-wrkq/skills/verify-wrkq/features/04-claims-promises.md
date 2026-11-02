@@ -28,6 +28,9 @@ It is renewed, resolved or abandoned after review. Code: `internal/rpccli/claim.
   `promise attach|detach|edit` also exist. `wrkq log PR-<n>` gives the history. `--subject` defaults to the
   task's title. Only the owner sees a promise in `ready` or can change it (others get `WRKQ_FORBIDDEN: only the
   promise owner may mutate it`, driven 2026-10-20).
+- **Bootstrap page.** The RPC-only `wrkq.promise.listView {states?, limit?, cursor?}` (5fbf10c, no CLI verb) pages
+  every owner's promises in `(created_at, uuid)` order, `open` only by default. Feature 10 has its shape and
+  refusals. Driven 2026-11-02, T-12309: `limit 1` returned clod's PR-00002 with a cursor, the next page cody's PR-00003.
 
 ## How to get to it
 
@@ -78,5 +81,5 @@ feed (`wrkq monitor watch --raw`, feature 9) shows both `task.claimed` events, t
 `take_over: true`, then `task.claim_released`. A due promise appears in `ready`, a stale etag is refused, renewing
 it drops it from `ready`, and resolving it leaves `state: resolved` with three `promise.*` events in its log.
 
-Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/04-claims-promises/drive.txt`.
-T-11374's five zsh driver-error claims (see Gotchas) were not replayed.
+Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/04-claims-promises/drive.txt`
+(the `promise.listView` frames after the NOTE line). T-11374's five zsh driver-error claims (see Gotchas) are not replayed.

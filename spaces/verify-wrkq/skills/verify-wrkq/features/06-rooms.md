@@ -51,7 +51,12 @@ hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.
 - **Reads.** `wrkc show <EN|R>`, `wrkc log <room>`, `wrkc members <room>` (`items[].memberRef`, `source`),
   `wrkc ls` (a bare JSON array of rooms), and `hide`/`unhide`, `join`/`leave`/`invite`. `wrkc ack` is labelled
   operator-only, but the daemon doesn't enforce it: an agent scope acked an envelope (`terminalActor: agent:cody`).
-  Product task T-10358 (2026-10-05, T-10349 `06-rooms/drive.txt`; still reproduces at 7350485, 2026-10-26).
+  Product task T-10358 (2026-10-05, T-10349 `06-rooms/drive.txt`; still reproduces at 5fbf10c, 2026-11-02).
+- **Ledger page.** The RPC-only `wrkq.envelope.listView {states?, ids?, limit?, cursor?}` (96051e4, no CLI verb)
+  reads stored envelope state in `EN-` sequence order **without** presenting, acking or sweeping anything: by
+  default the live states (`pending`, `presented`, `deferred`), and with `ids` the named envelopes in any state.
+  `wrkc show` gave the same `presentedTo: []` and etag before and after a listView (2026-11-02, T-12309). Feature 10
+  has its shape and refusals.
   `wrkc ack --output json` returns an array.
 
 ## How to get to it
@@ -116,6 +121,5 @@ written acked and terminal with `note_recorded`, shows only in the addressee's `
 shows every envelope with its sender and addressee. Live, read only: your own `wrkc inbox` matches what you
 know you owe.
 
-Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/06-rooms/drive.txt`
-(the T-11374 replay with its notes, body-source and T-10358 drives, then the bare-ref drives). T-10358 still
-reproduces at 7350485. Live inbox read: `live/reads.txt`.
+Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/06-rooms/drive.txt`
+(the T-11873 replay, then the `envelope.listView` frames). T-10358 still reproduces at 5fbf10c. Live inbox read: `live/reads.txt`.

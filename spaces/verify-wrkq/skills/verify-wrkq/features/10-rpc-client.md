@@ -1,7 +1,7 @@
 # 10. RPC and @wrkq/client
 
 wrkq and wrkf share one JSON-RPC protocol (`protocolVersion` `2026-06-30`, pinned by `protocolSchemaHash`;
-`sha256:3d3ffa73...` since T-11305's `note` fields, 95b3340).
+`sha256:c79874ef...` since the bootstrap views below, 5fbf10c; it was `sha256:3d3ffa73...` from 95b3340).
 `wrkq rpc --stdio` and `wrkf rpc --stdio` serve it over stdin and stdout, either against a local store
 (`--db path`) or bridged to a daemon (`rpc://`). `@wrkq/client` is the Bun TypeScript client. It spawns that
 stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rides the same protocol. Code:
@@ -19,6 +19,16 @@ stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rid
   `error.data.code` (`WRKQ_VALIDATION`, `WRKQ_CONFLICT`, ...) and `retryable`. An unknown param key is refused
   `-32602 invalid params: unknown field "tsak" for wrkq.task.show`, with `data.field`, so a misspelled selector
   no longer slips through. `wrkq rpc` without `--stdio` is refused.
+- **Bootstrap views.** Three read-only, bounded, cross-owner pages with no CLI verb, for consumers that rebuild
+  state (96051e4, 5fbf10c): `wrkq.promise.listView {states?, limit?, cursor?}` (default `["open"]`),
+  `wrkq.envelope.listView {states?, ids?, limit?, cursor?}` (default `pending`/`presented`/`deferred` unless `ids`
+  is given; never presents or acks) and `wrkq.workflow.instancesView {statuses?, tasks?, limit?, cursor?}` (default
+  `open`/`active`/`waiting`). Each returns `{items, nextCursor?}`. `limit` is 1-500 (default 500), and 0 or 501 is
+  refused `-32602` `WRKQ_VALIDATION` with `data.field: "limit"`. An unknown state or status is refused naming the
+  valid ones (`instancesView` just says `invalid workflow status`), and a foreign or garbled cursor is
+  `invalid cursor`. An empty `states`, `ids` or `tasks` array returns no items, not the default. The client
+  exposes them as `client.wrkq.promise.listView`, `client.wrkq.envelope.listView` and
+  `client.wrkq.workflow.instancesView`. Features 4, 6 and 8 say what each shows. Driven 2026-11-02, T-12309.
 - **Idempotency.** `idempotencyKey` on create replays the same task. The replay returns the original response,
   so its `etag` can be stale. Read the current etag (`wrkq.task.show`) before a CAS update.
 - **CAS.** `expectEtag` on update. A stale etag fails `WRKQ_CONFLICT`.
@@ -81,10 +91,11 @@ cd "$WV_STATE/client" && bun --env-file=/dev/null run client-drive.ts
 ## Proven when
 
 On the scratch, raw frames return the protocol hash, `-32601` for an unknown method and the task for
-`task.show`. The published client creates a task attributed to your principal, replays the same id on the same
+`task.show`, and the three bootstrap views page with a cursor and refuse a bad `limit`. The published client
+creates a task attributed to your principal, replays the same id on the same
 `idempotencyKey`, refuses a stale `expectEtag` with `WRKQ_CONFLICT`, and applies a correct CAS update (etag +1).
-Live: `rpc.initialize` names the canonical revision.
+The published client's three view methods answer. Live: `rpc.initialize` names the canonical revision.
 
-Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/10-rpc-client/drive.txt`, published
-`@wrkq/client@0.1.0-dev.20261025102633` with `spaces/verify-wrkq/fixtures/client-drive.ts` (run three times). Live: `live/reads.txt`
-(canonical serves 7350485, hash still `sha256:3d3ffa73...`).
+Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/10-rpc-client/drive.txt`, published
+`@wrkq/client@0.1.0-dev.20261102005525` with `spaces/verify-wrkq/fixtures/client-drive.ts` and the pass's
+`fixtures/client-views.ts`. Live: `live/reads.txt` (canonical serves 5fbf10c, hash `sha256:c79874ef...`).

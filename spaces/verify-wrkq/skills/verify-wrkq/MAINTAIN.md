@@ -53,7 +53,16 @@ the Go and Bun toolchains. The source reads in step 2 don't see those.
 The cheapest full drive is to replay the last pass. Its `drive.txt` files rerun as written, so run every command
 in their global timestamp order on the fresh scratch, renamed to this pass's scratch, then diff each output
 against the last pass's. Matching ids make the outputs comparable, and every difference gets triaged. The
-T-11873 pass did this with `parse.py`, `gen.py` and `compare.py` in its `artifact_dir/replay/`.
+T-11873 pass did this with `parse.py`, `gen.py` and `compare.py` in its `artifact_dir/replay/`; T-12309 reused them
+and added `triage.md`, one row per difference. Three traps (2026-11-02, T-12309):
+
+- `drive.txt` times are whole seconds, and the replay breaks a same-second tie by feature-file order. Drives from
+  two features that shared a second can swap, so a snapshot or a count taken then can differ (T-12309: `s1` held 3
+  tasks, not 5). Check the timestamps before you call such a diff a change.
+- Export everything the replay needs **before** you read it. `export A=... SINKPORT=$(cat $A/...)` reads `$A`
+  before it is set, so feature 9's sink port came out empty and the replay had to be rerun on a fresh scratch.
+- A replay runs in your harness shell, and its `just` must be the wrkp shim (feature 7 Gotchas). Check
+  `command -v just` first.
 
 Run Doctor first, and again after any surprise. Drive each feature's "Driving it" section on the scratch, **plus
 every drift or new behavior that step 2 flagged**, with `wv rec` into `NN-<feature>/drive.txt`. Do the canonical

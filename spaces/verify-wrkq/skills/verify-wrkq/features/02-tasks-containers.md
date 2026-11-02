@@ -19,8 +19,9 @@ its cascade, named subtasks, relations, the edit round trip (`cat --output raw` 
   T-00012, while `02`, `002` and `0002` select T-00002. On canonical, `498` is T-11498 and `0498` is T-10498. Five
   digits is the literal id. With no match the verbs report the raw token, `task not found: 4242`. `cat`, `set`,
   `stat`, `comment ls`, `diff`, `monitor wait`, `wrkp log --task`, `wrkf` task selectors, `wrkc` room refs
-  (feature 6) and a raw `wrkq.task.show` all follow this rule. `wrkq log` doesn't (see Gotchas). Driven 2026-10-26,
-  T-11873.
+  (feature 6), a raw `wrkq.task.show` and, since 3f33dec (T-11874), `wrkq log` all follow this rule: `log 2` reads
+  T-00012's history, and `log 4242` fails `failed to resolve resource: task not found: 4242` plus a hint (exit 1).
+  Driven 2026-10-26, T-11873; `log` driven 2026-11-02, T-12309.
 - **Update.** `wrkq set <sel> --state ... --priority ... [--if-match <etag>]`. A stale etag fails with
   `task etag precondition failed` (exit 1).
 - **List.** `wrkq ls <container> --type t`, `wrkq tree` (JSON lines when stdout is not a TTY), and
@@ -60,6 +61,8 @@ its cascade, named subtasks, relations, the edit round trip (`cat --output raw` 
   exit 2 before writing. Exempt: `agent`, `rpc`, `server serve` and the `watch` shim (driven 2026-10-20,
   T-11374: `set --json`, `rename-container --json`, `timeline --json`).
 - **History.** `wrkq log <ID|path> [--oneline|--patch|--json]`. A path names a task first, then a container.
+  `--oneline` and the detailed `Summary:` print the payload as `key=value` pairs cut at 60 characters, in a
+  different order on every run (see Gotchas).
 
 ## How to get to it
 
@@ -91,22 +94,25 @@ wrkq index update && wrkq search alpha --state all --json | jq -c '[.results[].r
   Archive a task with `wrkq rm`.
 - `touch --json` returns an array (`.[0].id`), `cat --json` returns an array unless you pass `--one`, and
   `mkdir --json` returns an array of `{path, created}`.
-- `wrkq set` prints `Processing 1/1...` on stderr and an `errors/failed/succeeded/total` summary when an item
-  fails. Look at the exit code, not only the stdout JSON.
+- `wrkq set` prints an `errors/failed/succeeded/total` summary when an item fails. Look at the exit code, not only
+  the stdout JSON. It also writes the progress line `\rProcessing 1/1...\r\033[K` to stderr whenever stdout is a
+  character device, which includes `>/dev/null` (a file gets none). Product task T-12318 (2026-11-02, T-12309
+  `02-tasks-containers/drive.txt`).
 - Closing a task prints a hint about reconciling worktrees under `~/praesidium/under-construction/`. On a scratch
   it means nothing.
 - `wrkq tree` without a TTY prints JSON lines, and an empty project prints nothing at all.
 - **A one-character slug fails with a raw store error.** `wrkq touch inbox/x -t x` returns `WRKQ_ERROR`
   `CHECK constraint failed: slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' ...`, because that GLOB needs
   two characters. Use slugs of two or more characters. Product task T-10355 (2026-10-05, T-10349
-  `02-tasks-containers/drive.txt`; still reproduces at 7350485, 2026-10-26, T-11873).
+  `02-tasks-containers/drive.txt`; still reproduces at 5fbf10c, 2026-11-02, T-12309).
 
 - **A bare number names the newest task with that suffix, not the T-1xxxx one.** On canonical (2026-10-26),
   `wrkq cat 7` is T-11867, not T-10007, and `07` is T-11807. An agent's "7 means T-10007" shorthand has to pass
   `T-10007` to the CLI (2026-10-26, T-11873 `live/reads.txt`).
-- **`wrkq log` doesn't expand bare numbers.** `wrkq log 2` fails `failed to resolve resource: resource not found: 2`
-  (exit 1), while `wrkq cat 2` works. Pass `T-<n>` or a path. SPEC.md also promises a padded `task not found: T-04242`
-  that no verb prints. Product task T-11874 (2026-10-26, T-11873 `02-tasks-containers/drive.txt`).
+- **`log --oneline` summaries are in random order.** The payload is a Go map, so `wrkq log PR-00001 --oneline` showed
+  `subject=...`, then `state=open, subject=...`, then `review_question=...` on successive runs, and the 60-character
+  cut picks which fields you see. Read `--json` when it matters, and expect these lines to differ in a replay
+  diff. Product task T-12319 (2026-11-02, T-12309 `02-tasks-containers/drive.txt`).
 
 ## Proven when
 
@@ -114,7 +120,8 @@ On the scratch, the created task carries your principal, an etag-guarded set ref
 the completed task until `--state all`, `rm`/`restore` moves the task between `archived` and `open`, the
 container archive cascades to `cancelled` and `unarchive` reverses exactly that change, a named subtask raises
 `open_subtask_count`, `log <ID>` and `log <path>` show `task.created` and `task.updated` attributed to you, and a
-bare `2` selects T-00012 once it exists, while `02` selects T-00002.
+bare `2` selects T-00012 once it exists (in `cat`, `set` and `log`), while `02` selects T-00002.
 
-Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/02-tasks-containers/drive.txt`
-(the T-11374 replay, then the bare-number drives after the NOTE line). T-10355 still reproduces at 7350485.
+Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/02-tasks-containers/drive.txt`
+(the T-11873 replay, then the `log` bare-number, `--oneline` order and progress drives after the NOTE line).
+T-10355 still reproduces at 5fbf10c.

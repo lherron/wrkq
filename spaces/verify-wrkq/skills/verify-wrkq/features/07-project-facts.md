@@ -58,6 +58,7 @@ mkdir -p "$WV_STATE/repo" && cd "$WV_STATE/repo" && git init -q -b main \
 wrkp git commit                                   # "wrkp git: ... is not a registered project root; skipping", exit 0
 wrkq set wv-<name> --root "$WV_STATE/repo"
 wrkp git commit && wrkp log wv-<name> --type git.commit --json | jq -c '[.[].projectEvent | {summary, attributes}]'
+[ "$(command -v just)" = "$HOME/.local/bin/just" ] || PATH="$HOME/.local/bin:$PATH"   # the shim must lead PATH (Gotchas)
 just hello; just fail; just --list >/dev/null
 wrkp log wv-<name> --type run.settled --json | jq -c '[.[].projectEvent | {summary, recipe: .attributes.recipe, status: .attributes.status, load1: .attributes.load1, ncpu: .attributes.ncpu}]'
 C1=$(wrkp cursor wv-<name>); wrkq touch inbox/wv-visible -t "WV visible"; wrkq set inbox/wv-visible --priority 1; wrkq mv inbox/wv-visible area2/
@@ -75,6 +76,11 @@ Live, read only: `wrkp types wrkq` and `wrkp log wrkq --type verify.upkeep --lim
   (`wrkp git --project <slug>` skips the root lookup, driven 2026-10-20). They
   skip with a one-line stderr notice and exit 0, so nothing fails visibly. A linked worktree resolves to the
   registered main checkout that owns it.
+- **The shim only works when it leads PATH, and login shells on max3 put Homebrew first.** `zsh -lc 'command -v
+  just'` is `/opt/homebrew/bin/just` (`~/.zprofile`'s `brew shellenv` prepends `/opt/homebrew/bin` after `.zshenv`
+  set `~/.local/bin` first), while `zsh -c` finds the shim. A Claude Code Bash shell inherits the login order, so
+  the replayed `just hello; just fail` posted **no** `run.settled` and still exited 0 and 3. Check `command -v just`
+  before the drive. Product task T-12310 (2026-11-02, T-12309 `07-project-facts/drive.txt`).
 - The shim posts with the caller's environment, so a `just` run inside a shell with `wv env` evaluated posts to
   the **scratch** daemon. A `just` run in the real wrkq checkout from that shell would post its `run.settled`
   to the scratch, not to canonical.
@@ -98,5 +104,7 @@ posts a `git.commit` (sha, branch, author, `files_changed`, plus node, insertion
 just's exit code passes through (3). An unfiltered `wrkp log` shows a new task's `task.created` but not its
 `task.edited` or `task.moved`.
 
-Driven 2026-10-26 on wv `t-11873` (T-11873 upkeep) with installed 7350485: `var/wrkq-artifacts/T-11873/07-project-facts/drive.txt`.
-Live reads: `live/reads.txt` (`wrkp types wrkq`; the T-11374 `verify.upkeep` fact).
+Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/07-project-facts/drive.txt`
+(the replayed `just` drives post nothing because of T-12310; the drives after the NOTE line re-run them with the shim
+first on PATH).
+Live reads: `live/reads.txt` (`wrkp types wrkq`; the T-11873 `verify.upkeep` fact).
