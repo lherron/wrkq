@@ -81,7 +81,7 @@ at most 65,536 bytes. Invocation errors exit 2; `--json` errors use the shared
 Once a moved metadata key has its extension row, adding or changing that key in
 `wrkq set --meta` refuses `meta_key_migrated` and names the replacement `wrkq ext
 put` command. Unchanged keys and removals remain accepted. This guard covers
-`acp.request`, `scribe`, nested `wrkf.taskStateMirror`, the archagent refactor
+nested `acp.request`, `scribe`, literal top-level key `wrkf.taskStateMirror`, the archagent refactor
 tuple, and `hcs_*` launch keys.
 
 ## Containers and projects

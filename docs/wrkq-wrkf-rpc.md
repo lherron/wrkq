@@ -2772,7 +2772,7 @@ not change the subject etag, updated time, or `taskDocHash`; they emit no webhoo
 The migrated-key guard refuses `meta_key_migrated` if a task metadata write adds
 or changes a moved key after its extension exists. Unchanged values and removals
 are admitted. Mappings: `acp.request` → `acp/request/main`, `scribe` →
-`scribe/request/main`, nested `wrkf.taskStateMirror` →
+`scribe/request/main`, literal top-level key `wrkf.taskStateMirror` →
 `agentloop/taskStateMirror/main`, archagent tuple keys → any
 `archagent/refactor/*`, `hcs_*` → `hcs/launch/main`. The error names the
 replacement `wrkq ext put` command.

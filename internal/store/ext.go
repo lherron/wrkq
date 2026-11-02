@@ -156,14 +156,21 @@ func CheckMigratedMeta(tx *sql.Tx, taskUUID string, incoming any) error {
 			return err
 		}
 	}
-	type moved struct{ path, ns, kind, id string }
-	paths := []moved{{"acp.request", "acp", "request", "main"}, {"scribe", "scribe", "request", "main"}, {"wrkf.taskStateMirror", "agentloop", "taskStateMirror", "main"}}
+	type moved struct {
+		path         []string
+		ns, kind, id string
+	}
+	paths := []moved{
+		{[]string{"acp", "request"}, "acp", "request", "main"},
+		{[]string{"scribe"}, "scribe", "request", "main"},
+		{[]string{"wrkf.taskStateMirror"}, "agentloop", "taskStateMirror", "main"},
+	}
 	for _, key := range strings.Fields("technique source risk package file apiImpact deltaId target targetSlug gate sourceWorkItem reportPath path") {
-		paths = append(paths, moved{key, "archagent", "refactor", ""})
+		paths = append(paths, moved{[]string{key}, "archagent", "refactor", ""})
 	}
 	for key := range after {
 		if strings.HasPrefix(key, "hcs_") {
-			paths = append(paths, moved{key, "hcs", "launch", "main"})
+			paths = append(paths, moved{[]string{key}, "hcs", "launch", "main"})
 		}
 	}
 	for _, p := range paths {
@@ -189,7 +196,7 @@ func CheckMigratedMeta(tx *sql.Tx, taskUUID string, incoming any) error {
 			return err
 		}
 		if exists {
-			return extFailure("meta_key_migrated", fmt.Sprintf("meta_key_migrated: meta.%s moved; use wrkq ext put <task> %s %s %s --body <json>", p.path, p.ns, p.kind, defaultExtID(p.id)))
+			return extFailure("meta_key_migrated", fmt.Sprintf("meta_key_migrated: meta.%s moved; use wrkq ext put <task> %s %s %s --body <json>", strings.Join(p.path, "."), p.ns, p.kind, defaultExtID(p.id)))
 		}
 	}
 	return nil
@@ -200,14 +207,15 @@ func defaultExtID(id string) string {
 	}
 	return id
 }
-func metaPath(meta map[string]any, path string) (any, bool) {
-	parts := strings.Split(path, ".")
-	for i, p := range parts {
+
+// Paths are explicit segments: a dot inside a literal key is never traversal.
+func metaPath(meta map[string]any, path []string) (any, bool) {
+	for i, p := range path {
 		v, ok := meta[p]
 		if !ok {
 			return nil, false
 		}
-		if i == len(parts)-1 {
+		if i == len(path)-1 {
 			return v, true
 		}
 		meta, ok = v.(map[string]any)
