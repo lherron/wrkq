@@ -36,6 +36,19 @@ SQLite serving requires a `wrkq_local` build. Portable builds refuse local
 locators before opening a database. Transport selection lives in `pkg/client`
 and `internal/rpccli/transport.go`.
 
+HTTP callers may supply `X-Wrkq-Principal-Ref` as the default mutation
+principal and `X-Wrkq-Scope-Ref` as the default mutation scope. The scope
+header accepts a full agent ScopeRef or scope handle with a project; runtime
+lane suffixes are discarded and the scope is stored in collaboration handle
+form (for example `cody@wrkq:primary`). Malformed headers return
+`WRKQ_VALIDATION`. Explicit method scope parameters on task updates and comment
+creation take precedence and retain their existing normalization; otherwise
+the header scope must match the effective caller principal. An absent scope
+header preserves principal-only attribution, and task requester attribution
+remains independent of creator attribution. These headers are caller assertions,
+not authenticated agent identity (`wrkq.attribution.caller-asserted`), and are
+outside the protocol schema hash.
+
 Both entrypoints produce identical stdio behavior:
 
 ```

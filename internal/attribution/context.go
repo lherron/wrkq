@@ -29,3 +29,20 @@ func DefaultPrincipal(ctx context.Context, fallback string) string {
 	}
 	return fallback
 }
+
+// WithCallerScope records the validated, normalized request-level caller scope.
+// Method-level scope parameters take precedence over this transport fallback.
+func WithCallerScope(ctx context.Context, scopeRef string) context.Context {
+	return context.WithValue(ctx, callerScopeKey{}, scopeRef)
+}
+
+type callerScopeKey struct{}
+
+// CallerScope returns the request-level scope, or empty when absent.
+func CallerScope(ctx context.Context) string {
+	if ctx != nil {
+		ref, _ := ctx.Value(callerScopeKey{}).(string)
+		return ref
+	}
+	return ""
+}

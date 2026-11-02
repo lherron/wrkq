@@ -46,13 +46,17 @@ func WithSearch(cfg SearchConfig) Option {
 	return func(a *API) { a.searchCfg = cfg }
 }
 
-// attributionFor resolves principal-only write attribution. The parameter name
+// attributionFor resolves write attribution with the request scope fallback. The parameter name
 // remains actor while older RPC DTOs are retired. Accepted non-empty values are
 // agent:<id> or full agent ScopeRefs, both persisted as the durable agent:<id>
 // principal. Empty uses the request's caller principal (the X-Wrkq-Principal-Ref
 // header over rpc://), else the configured default_principal_ref; if neither is
 // set the mutation fails.
 func (a *API) attributionFor(ctx context.Context, actor string) (attribution.Attribution, error) {
+	return a.attributionForScope(ctx, actor, "")
+}
+
+func (a *API) principalAttribution(ctx context.Context, actor string) (attribution.Attribution, error) {
 	principalInput := strings.TrimSpace(actor)
 	if principalInput == "" {
 		principalInput = strings.TrimSpace(a.defaultPrincipal(ctx))
@@ -86,9 +90,21 @@ func (a *API) defaultPrincipal(ctx context.Context) string {
 }
 
 func (a *API) attributionForScope(ctx context.Context, actor, scopeRef string) (attribution.Attribution, error) {
-	attr, err := a.attributionFor(ctx, actor)
-	if err != nil || strings.TrimSpace(scopeRef) == "" {
+	attr, err := a.principalAttribution(ctx, actor)
+	if err != nil {
 		return attr, err
+	}
+	if strings.TrimSpace(scopeRef) == "" {
+		header := attribution.CallerScope(ctx)
+		if header == "" {
+			return attr, nil
+		}
+		parsed, err := scope.ParseScopeHandle(header)
+		if err != nil || "agent:"+parsed.AgentID != attr.PrincipalRef {
+			return attribution.Attribution{}, NewValidationError("request scope must match actor", map[string]any{"field": "X-Wrkq-Scope-Ref"})
+		}
+		attr.ScopeRef = header
+		return attr, nil
 	}
 	parsed, err := scope.ParseScopeRef(scopeRef)
 	if err != nil || parsed.ProjectID == "" || "agent:"+parsed.AgentID != attr.PrincipalRef {

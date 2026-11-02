@@ -6,12 +6,18 @@ scope: write-attribution principal resolution for every wrkqapi mutation crossin
 predicate: >
   Every wrkq-core write records an exact caller principal (`agent:<id>`) plus
   optional scope before any write/no-op/dry-run success. Caller attribution is
-  principal-only: accepted sources are --principal-ref / --as /
+  principal-based: accepted sources are --principal-ref / --as /
   WRKQ_PRINCIPAL_REF / product-specific explicit principal envs /
   config default_principal_ref as either agent:<id> or a full agent ScopeRef
   reduced to agent:<id>, plus validated runtime scope-derived agents resolved
   by caller-owned scope order --scope > AGENT_SCOPE_REF > ASP_SCOPE_REF >
   ASP_HANDLE > ASP_AGENT_ID+ASP_PROJECT. Missing identity is WRKQ_VALIDATION.
+
+  The request-level X-Wrkq-Scope-Ref supplies optional mutation scope after
+  collaboration normalization; explicit attributionForScope method parameters
+  win. Missing scope preserves principal-only attribution; a scope fallback
+  must match the effective principal. Task creator and requester scopes remain
+  independent. This does not authenticate either caller assertion.
 
   The runtime never maps to agent:wrkq-system, never accepts system:*,
   actor UUID, A-* friendly IDs, bare caller slugs, WRKQ_ACTOR, WRKQ_ACTOR_ID,

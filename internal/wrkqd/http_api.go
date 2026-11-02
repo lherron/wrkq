@@ -12,6 +12,7 @@ import (
 	"github.com/lherron/wrkq/internal/scope"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/workrpc"
+	"github.com/lherron/wrkq/internal/wrkqapi"
 )
 
 func (s *daemonServer) registerRoutes(mux *http.ServeMux) {
@@ -161,6 +162,10 @@ func (s *daemonServer) handleWorkRPC(w http.ResponseWriter, r *http.Request) {
 	// --as) here; it becomes what an empty per-frame principal defaults to, the
 	// same role DefaultPrincipalRef plays for a local rpc --stdio (T-10328).
 	principalRef, err := parsePrincipalHeader(r)
+	var callerScope string
+	if err == nil {
+		callerScope, err = wrkqapi.NormalizeCallerScopeRef(r.Header.Get("X-Wrkq-Scope-Ref"))
+	}
 	if err != nil {
 		resp := workrpc.Response{
 			JSONRPC: "2.0",
@@ -173,7 +178,7 @@ func (s *daemonServer) handleWorkRPC(w http.ResponseWriter, r *http.Request) {
 		s.writeRPCResponse(w, r, http.StatusOK, req.Method, resp)
 		return
 	}
-	ctx := attribution.WithCallerPrincipal(r.Context(), principalRef)
+	ctx := attribution.WithCallerScope(attribution.WithCallerPrincipal(r.Context(), principalRef), callerScope)
 	resp, ok := s.workrpc.HandleRequest(ctx, req)
 	if !ok {
 		resp = workrpc.Response{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{}`)}

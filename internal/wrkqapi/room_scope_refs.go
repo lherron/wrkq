@@ -82,3 +82,20 @@ func stripRuntimeLane(raw string) string {
 	}
 	return raw
 }
+
+// NormalizeCallerScopeRef validates a request scope using the collaboration
+// grammar (ScopeRef or handle, with runtime lanes discarded). A principal alone
+// is not a caller scope. Like principal attribution, this is caller asserted.
+func NormalizeCallerScopeRef(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+	normalized, err := normalizeRoomScopeRef(raw)
+	if err != nil {
+		return "", err
+	}
+	if normalized == "" {
+		return "", NewValidationError("caller scope must include a project", map[string]any{"field": "scopeRef"})
+	}
+	return normalized, nil
+}
