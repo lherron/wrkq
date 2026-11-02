@@ -19,6 +19,11 @@ func MethodCatalog() []string {
 
 func ErrorCodeCatalog() []string {
 	codes := []string{
+		"WRKQ_EXT_INVALID",
+		"WRKQ_EXT_QUOTA",
+		"WRKQ_META_KEY_MIGRATED",
+		"WRKQ_COVERS_REQUIRES_WORKSTREAM",
+		"WRKQ_WORKSTREAM_NOT_CLAIMABLE",
 		CodeWRKQNotFound,
 		CodeWRKQValidation,
 		CodeWRKQConflict,
@@ -52,6 +57,10 @@ func ErrorCodeCatalog() []string {
 }
 
 var methodCatalog = []string{
+	"wrkq.ext.put",
+	"wrkq.ext.show",
+	"wrkq.ext.listView",
+	"wrkq.ext.delete",
 	"rpc.initialize",
 	"rpc.shutdown",
 	"rpc.exit",
@@ -249,6 +258,18 @@ var dtoCatalog = []string{
 	"WrkqTaskCopyParams",   // wrkq.task.copy request envelope (server-owned deep copy)
 	"WrkqTaskCopyResult",   // wrkq.task.copy per-source outcome (legacy copyResult output shape)
 	"WrkqTaskClaim",
+	"ExtSubject",
+	"ExtSubjectRef",
+	"WrkqExt",
+	"WrkqExtListItem",
+	"ExtPutParams",
+	"ExtPutResult",
+	"ExtShowParams",
+	"ExtShowResult",
+	"ExtDeleteParams",
+	"ExtDeleteResult",
+	"ExtListViewParams",
+	"WrkqExtListView",
 	"WrkqPromise",
 	"WrkqPromiseSubjectRef",
 	"WrkqPromiseListResult",

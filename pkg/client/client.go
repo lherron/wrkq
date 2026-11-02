@@ -22,6 +22,7 @@ type Client struct {
 	scopeRef      string
 	scopeExplicit bool
 
+	Ext       ExtService
 	Task      TaskService
 	Comment   CommentService
 	Promise   PromiseService
@@ -145,6 +146,7 @@ func New(ctx context.Context, options ...Option) (*Client, error) {
 		scopeRef:      opts.scopeRef,
 		scopeExplicit: opts.scopeExplicit,
 	}
+	client.Ext = ExtService{client: client}
 	client.Task = TaskService{client: client}
 	client.Comment = CommentService{client: client}
 	client.Promise = PromiseService{client: client}
@@ -176,6 +178,14 @@ func (c *Client) Call(ctx context.Context, method string, params any, out any) e
 	}
 	if ctx == nil {
 		return errors.New("call context is required")
+	}
+	scopeRef, err := c.mutationScopeRef()
+	if err != nil {
+		return err
+	}
+	ctx = attribution.WithCallerPrincipal(ctx, c.principalRef)
+	if scopeRef != "" {
+		ctx = attribution.WithCallerScope(ctx, scopeRef)
 	}
 	raw, err := c.transport.Call(ctx, method, params)
 	if err != nil {

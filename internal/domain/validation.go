@@ -38,10 +38,10 @@ func ValidateContainerKind(kind string) error {
 // ValidateTaskKind validates a task kind
 func ValidateTaskKind(kind string) error {
 	switch kind {
-	case "task", "subtask", "spike", "bug", "chore":
+	case "task", "subtask", "spike", "bug", "chore", "workstream":
 		return nil
 	default:
-		return fmt.Errorf("invalid task kind: must be one of: task, subtask, spike, bug, chore")
+		return fmt.Errorf("invalid task kind: must be one of: task, subtask, spike, bug, chore, workstream")
 	}
 }
 

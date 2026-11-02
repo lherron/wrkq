@@ -5,6 +5,7 @@ package wrkqapi
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -94,7 +95,7 @@ const taskBodyColumns = "t.description, t.specification"
 // in its order, over the joins that supply the path and subtask owner.
 func taskSelectSQL(bodyColumns string) string {
 	return "SELECT t.uuid, t.id, t.slug, t.title, t.project_uuid, t.campaign_uuid, t.state, t.priority, t.kind, " + bodyColumns + ", t.outcome, " +
-		"t.labels, t.meta, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, " +
+		"t.labels, t.meta, t.covers, t.etag, t.start_at, t.due_at, t.created_at, t.updated_at, t.completed_at, t.archived_at, t.deleted_at, t.acknowledged_at, " +
 		"t.assignee_principal_ref, t.requester_principal_ref, t.requester_scope_ref, t.claimed_by_principal_ref, t.claimed_scope_ref, t.claimed_node, t.claimed_at, t.claim_generation, " +
 		"t.created_by_principal_ref, t.updated_by_principal_ref, COALESCE(t.risk_class,''), " +
 		"COALESCE(cp.path || '/' || CASE WHEN owner.uuid IS NULL THEN t.slug ELSE owner.slug || '/' || t.slug END, t.slug), " +
@@ -122,7 +123,7 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		uuid, id, slug, title, projectUUID, state, kind, description, specification string
 		campaignUUID                                                                sql.NullString
 		outcome                                                                     sql.NullString
-		labels, meta                                                                sql.NullString
+		labels, meta, covers                                                        sql.NullString
 		priority                                                                    int
 		etag                                                                        int64
 		createdAt, updatedAt                                                        string
@@ -138,7 +139,7 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 	)
 	if err := s.Scan(
 		&uuid, &id, &slug, &title, &projectUUID, &campaignUUID, &state, &priority, &kind, &description, &specification, &outcome,
-		&labels, &meta, &etag, &startAt, &dueAt, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
+		&labels, &meta, &covers, &etag, &startAt, &dueAt, &createdAt, &updatedAt, &completedAt, &archivedAt, &deletedAt, &acknowledgedAt,
 		&assignee, &requesterPrincipal, &requesterScope, &claimedBy, &claimedScope, &claimedNode, &claimedAt, &claimGeneration,
 		&createdByPrincipal, &updatedByPrincipal, &riskClass, &path, &hasDescription, &hasSpecification, &subtaskOwner, &subtaskOwnerUUID, &openSubtaskCount,
 	); err != nil {
@@ -185,6 +186,12 @@ func scanTaskRow(s rowScanner) (*WrkqTask, string, error) {
 		UpdatedByPrincipalRef: updatedByPrincipal.String,
 		createdAtRaw:          createdAt,
 		updatedAtRaw:          updatedAt,
+	}
+	if covers.Valid {
+		task.Covers = &TaskCovers{}
+		if err := json.Unmarshal([]byte(covers.String), task.Covers); err != nil {
+			return nil, "", err
+		}
 	}
 	return task, createdAt, nil
 }

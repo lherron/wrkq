@@ -18,6 +18,7 @@ type TaskStore struct {
 
 // CreateParams contains parameters for creating a new task.
 type CreateParams struct {
+	Covers                *string
 	UUID                  string // optional: force specific UUID instead of auto-generating
 	Slug                  string
 	Title                 string
@@ -126,17 +127,17 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 			query = `INSERT INTO tasks (uuid, id, slug, title, description, specification, project_uuid, state, priority, kind,
 				parent_task_uuid, subtask_owner_uuid, assignee_principal_ref, requester_principal_ref, requester_scope_ref, requested_by_project_id, assigned_project_id, resolution,
 				workflow_preset, preset_version, phase, risk_class,
-				labels, meta, due_at, start_at,
+				labels, meta, covers, due_at, start_at,
 				created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref, updated_by_scope_ref)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			args = append(args, params.UUID)
 		} else {
 			query = `INSERT INTO tasks (id, slug, title, description, specification, project_uuid, state, priority, kind,
 				parent_task_uuid, subtask_owner_uuid, assignee_principal_ref, requester_principal_ref, requester_scope_ref, requested_by_project_id, assigned_project_id, resolution,
 				workflow_preset, preset_version, phase, risk_class,
-				labels, meta, due_at, start_at,
+				labels, meta, covers, due_at, start_at,
 				created_by_principal_ref, updated_by_principal_ref, created_by_scope_ref, updated_by_scope_ref)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		}
 
 		// Common args for both cases
@@ -164,6 +165,7 @@ func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params 
 			params.RiskClass,
 			params.Labels,
 			params.Meta,
+			params.Covers,
 			params.DueAt,
 			params.StartAt,
 			attr.PrincipalRef,
@@ -342,7 +344,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 		SELECT uuid, id, slug, title, project_uuid, requested_by_project_id, assigned_project_id,
 			   state, priority, kind, parent_task_uuid, subtask_owner_uuid,
 			   workflow_preset, preset_version, phase, risk_class,
-			   start_at, due_at, labels, meta, description, specification, outcome, campaign_uuid, etag,
+			   start_at, due_at, labels, meta, covers, description, specification, outcome, campaign_uuid, etag,
 			   created_at, updated_at, completed_at, archived_at,
 			   acknowledged_at, resolution,
 			   sdk_session_id,
@@ -353,7 +355,7 @@ func (ts *TaskStore) GetByUUID(uuid string) (*domain.Task, error) {
 		&task.UUID, &task.ID, &task.Slug, &task.Title, &task.ProjectUUID,
 		&requestedByProjectID, &assignedProjectID, &task.State, &task.Priority, &task.Kind, &parentTaskUUID, &task.SubtaskOwnerUUID,
 		&workflowPreset, &presetVersion, &phase, &riskClass,
-		&startAt, &dueAt, &labels, &meta, &task.Description, &task.Specification, &outcome, &campaignUUID, &task.ETag,
+		&startAt, &dueAt, &labels, &meta, &task.Covers, &task.Description, &task.Specification, &outcome, &campaignUUID, &task.ETag,
 		&createdAt, &updatedAt, &completedAt, &archivedAt,
 		&acknowledgedAt, &resolution,
 		&sdkSessionID,

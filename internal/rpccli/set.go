@@ -24,7 +24,7 @@ func newSetCmd() *cobra.Command {
 	var description, specification, outcome, state, title, slug, labels, meta, kind, assignee, dueAt, startAt string
 	var parentTask, parentID, requestedBy, assignedProject, resolution, causedBy, campaign string
 	var projectRoot, requester, requesterScope string
-	var metaFile string
+	var metaFile, covers string
 	var priority, jobs, batchSize int
 	var ifMatch int64
 	var dryRun, continueOnError, ordered bool
@@ -92,6 +92,14 @@ func newSetCmd() *cobra.Command {
 				} else {
 					dryFields["outcome"] = value
 				}
+			}
+			if cmd.Flags().Changed("covers") {
+				value, err := readJSONObjectValue(cmd, covers, "--covers", claims, true)
+				if err != nil {
+					return err
+				}
+				patch["covers"] = value
+				dryFields["covers"] = value
 			}
 			if kind != "" {
 				patch["kind"] = kind
@@ -210,11 +218,12 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&title, "title", "", "Update task title")
 	cmd.Flags().StringVar(&slug, "slug", "", "Update task slug")
 	cmd.Flags().StringVar(&labels, "labels", "", "Update labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
-	cmd.Flags().StringVar(&meta, "meta", "", "Update task metadata (JSON object or null)")
+	cmd.Flags().StringVar(&meta, "meta", "", "Update task metadata (JSON object or null; --meta-file reads a file)")
 	cmd.Flags().StringVar(&metaFile, "meta-file", "", "Load task metadata from file")
 	cmd.Flags().StringVar(&dueAt, "due-at", "", "Update task due date")
 	cmd.Flags().StringVar(&startAt, "start-at", "", "Update task start date")
-	cmd.Flags().StringVar(&kind, "kind", "", "Update task kind")
+	cmd.Flags().StringVar(&kind, "kind", "", "Task kind: task, subtask, spike, bug, chore, workstream")
+	cmd.Flags().StringVar(&covers, "covers", "", "Workstream coverage JSON object (inline, @file, or - for stdin; null clears)")
 	cmd.Flags().StringVar(&parentTask, "parent-task", "", "Set parent task ID or path")
 	cmd.Flags().StringVar(&parentID, "parent-id", "", "Alias for --parent-task")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Update task assignee")
@@ -227,18 +236,19 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&campaign, "campaign", "", "Enroll in a draft or active campaign by ID or path; the task keeps its own project (empty string unenrolls)")
 	cmd.Flags().StringVar(&projectRoot, "root", "", "Set a top-level project's checkout root (stored as ~/... when under $HOME; empty clears; consumers expand it)")
 	_ = cmd.Flags().MarkHidden("batch-size") // Accepted for compatibility; it has no behavior.
+	_ = cmd.Flags().MarkHidden("meta-file")  // Named by --meta to retain the 40-line help budget.
 	// Kept out of the 40-line help budget: --parent-id is an alias, and
 	// --requester-scope is named by --requester's help line.
 	_ = cmd.Flags().MarkHidden("parent-id")
 	_ = cmd.Flags().MarkHidden("requester-scope")
-	_ = batchSize                            // Legacy accepts --batch-size but does not apply batching.
+	_ = batchSize // Legacy accepts --batch-size but does not apply batching.
 	return refuseRepeatedFlags(cmd)
 }
 
 func runSetProjectRoot(cmd *cobra.Command, args []string, rawRoot string, ifMatch int64, dryRun bool) error {
 	for _, name := range []string{
 		"description", "specification", "outcome", "state", "priority", "title", "slug",
-		"labels", "meta", "meta-file", "due-at", "start-at", "kind",
+		"labels", "meta", "meta-file", "due-at", "start-at", "kind", "covers",
 		"parent-task", "parent-id", "assignee", "requested-by", "assigned-project",
 		"resolution", "caused-by", "campaign",
 	} {

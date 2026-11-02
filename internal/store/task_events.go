@@ -50,6 +50,13 @@ func summarizeWebhookValue(field string, value interface{}) interface{} {
 		}
 	case "labels":
 		return summarizeWebhookLabels(value)
+	case "covers":
+		if text, ok := value.(string); ok {
+			var parsed any
+			if json.Unmarshal([]byte(text), &parsed) == nil {
+				return parsed
+			}
+		}
 	}
 	return value
 }
@@ -95,7 +102,7 @@ func loadTaskFieldValues(tx *sql.Tx, taskUUID string, fields []string) (map[stri
 			} else {
 				values[field] = value
 			}
-		case "state", "slug", "title", "project_uuid", "kind", "resolution", "outcome", "meta", "labels", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_principal_ref", "requester_principal_ref", "requester_scope_ref", "requested_by_project_id", "assigned_project_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
+		case "state", "slug", "title", "project_uuid", "kind", "resolution", "outcome", "meta", "labels", "covers", "due_at", "start_at", "archived_at", "deleted_at", "parent_task_uuid", "assignee_principal_ref", "requester_principal_ref", "requester_scope_ref", "requested_by_project_id", "assigned_project_id", "created_by_principal_ref", "updated_by_principal_ref", "deleted_by_principal_ref", "created_by_scope_ref", "updated_by_scope_ref", "deleted_by_scope_ref":
 			var value sql.NullString
 			if err := tx.QueryRow("SELECT "+field+" FROM tasks WHERE uuid = ?", taskUUID).Scan(&value); err != nil {
 				return nil, err

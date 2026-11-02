@@ -1253,6 +1253,138 @@
         ]
       },
       {
+        "name": "ext",
+        "use": "ext",
+        "short": "Manage subject extensions with independent etag fences",
+        "hidden": false,
+        "available": true,
+        "commands": [
+          {
+            "name": "delete",
+            "use": "delete \u003csubject\u003e \u003cns\u003e \u003ckind\u003e \u003cid\u003e",
+            "short": "Delete an extension",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "if-match",
+                "usage": "Require this extension etag (0 means create only)",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
+          },
+          {
+            "name": "get",
+            "use": "get \u003csubject\u003e \u003cns\u003e \u003ckind\u003e \u003cid\u003e",
+            "short": "Read an extension",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
+          },
+          {
+            "name": "list",
+            "use": "list [\u003csubject\u003e]",
+            "short": "List extensions with subject state filters and cursor pagination",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "cursor",
+                "usage": "Opaque cursor from the previous page's nextCursor",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              },
+              {
+                "name": "kind",
+                "usage": "Filter by extension kind",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "limit",
+                "usage": "Maximum rows per page (1–500)",
+                "type": "int",
+                "default": "500",
+                "hidden": false
+              },
+              {
+                "name": "ns",
+                "usage": "Filter by namespace",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "states",
+                "usage": "Filter by subject task states (comma-separated)",
+                "type": "stringSlice",
+                "default": "[]",
+                "hidden": false
+              }
+            ]
+          },
+          {
+            "name": "put",
+            "use": "put \u003csubject\u003e \u003cns\u003e \u003ckind\u003e \u003cid\u003e",
+            "short": "Write an extension",
+            "hidden": false,
+            "available": true,
+            "flags": [
+              {
+                "name": "body",
+                "usage": "JSON object (inline, @file, or - for stdin)",
+                "type": "string",
+                "hidden": false
+              },
+              {
+                "name": "create",
+                "usage": "Create only; refuse an existing extension",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
+                "name": "if-match",
+                "usage": "Require this extension etag (0 means create only)",
+                "type": "int64",
+                "default": "0",
+                "hidden": false
+              },
+              {
+                "name": "json",
+                "usage": "Output as JSON",
+                "type": "bool",
+                "default": "false",
+                "hidden": true
+              }
+            ]
+          }
+        ]
+      },
+      {
         "name": "find",
         "use": "find [PATH...]",
         "short": "Search for tasks and containers",
@@ -3667,6 +3799,12 @@
             "hidden": false
           },
           {
+            "name": "covers",
+            "usage": "Workstream coverage JSON object (inline, @file, or - for stdin; null clears)",
+            "type": "string",
+            "hidden": false
+          },
+          {
             "name": "description",
             "shorthand": "d",
             "usage": "Update task description",
@@ -3710,7 +3848,7 @@
           },
           {
             "name": "kind",
-            "usage": "Update task kind",
+            "usage": "Task kind: task, subtask, spike, bug, chore, workstream",
             "type": "string",
             "hidden": false
           },
@@ -3722,7 +3860,7 @@
           },
           {
             "name": "meta",
-            "usage": "Update task metadata (JSON object or null)",
+            "usage": "Update task metadata (JSON object or null; --meta-file reads a file)",
             "type": "string",
             "hidden": false
           },
@@ -3730,7 +3868,7 @@
             "name": "meta-file",
             "usage": "Load task metadata from file",
             "type": "string",
-            "hidden": false
+            "hidden": true
           },
           {
             "name": "ordered",
@@ -3911,6 +4049,12 @@
             "hidden": false
           },
           {
+            "name": "covers",
+            "usage": "Workstream coverage JSON object (inline, @file, or - for stdin)",
+            "type": "string",
+            "hidden": false
+          },
+          {
             "name": "description",
             "shorthand": "d",
             "usage": "Description for the task (use @file.md for file or - for stdin)",
@@ -3938,7 +4082,7 @@
           },
           {
             "name": "kind",
-            "usage": "Task kind: task, subtask, spike, bug, chore (default: task)",
+            "usage": "Task kind: task, subtask, spike, bug, chore, workstream (default: task)",
             "type": "string",
             "hidden": false
           },

@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/useragent"
 	"github.com/lherron/wrkq/internal/workrpc"
 )
@@ -446,6 +447,12 @@ func (t *remoteTransport) roundTrip(ctx context.Context, method string, params a
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(frame))
 	if err != nil {
 		return nil, err
+	}
+	if principal := attribution.DefaultPrincipal(ctx, ""); principal != "" {
+		req.Header.Set("X-Wrkq-Principal-Ref", principal)
+	}
+	if scopeRef := attribution.CallerScope(ctx); scopeRef != "" {
+		req.Header.Set("X-Wrkq-Scope-Ref", scopeRef)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", useragent.String())

@@ -121,6 +121,12 @@ class WorkClientImpl implements WorkClient {
   };
 
   readonly wrkq: WrkqFacade = {
+    ext: {
+      put: (p) => this.call("wrkq.ext.put", p),
+      show: (p) => this.call("wrkq.ext.show", p),
+      listView: (p) => this.call("wrkq.ext.listView", p ?? {}),
+      delete: (p) => this.call("wrkq.ext.delete", p),
+    },
     task: {
       lsView: (p) => this.call("wrkq.task.lsView", p),
       treeView: (p) => this.call("wrkq.task.treeView", p),

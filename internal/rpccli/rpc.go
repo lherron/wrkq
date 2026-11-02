@@ -42,7 +42,11 @@ func newRPCCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return workrpc.ServeRemoteStdio(cmd.Context(), os.Stdin, os.Stdout, cfg.RemoteEndpoint, remoteTokenFromEnv(), principal)
+				ctx := cmd.Context()
+				if scopeRef := mutationScopeRef(cmd, principal); scopeRef != "" {
+					ctx = attribution.WithCallerScope(ctx, scopeRef)
+				}
+				return workrpc.ServeRemoteStdio(ctx, os.Stdin, os.Stdout, cfg.RemoteEndpoint, remoteTokenFromEnv(), principal)
 			}
 			return serveLocalStdio(cmd, cfg)
 		},

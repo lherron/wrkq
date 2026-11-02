@@ -36,19 +36,53 @@ such as handoff and diff, use their own flags and TTY defaults rather than
 ## Command index
 
 ```text
-ack            agent          agent-context  agent-info
-apply          archive        attach         campaign
-cat            check          check-inbox    claim
-comment        completion     container      cp
-diff           find           handoff        help
-index          log            ls             mkdir
-monitor        mv             projects       promise
-relation       release        rename-container restore
-rm             rmdir          rpc            search
-server         set            stat           timeline
-touch          tree           unarchive      usage
-version        watch          webhook        whoami
+ack               agent             agent-context     agent-info
+apply             archive           attach            campaign
+cat               check             check-inbox       claim
+comment           completion        container         cp
+diff              ext               find              handoff
+index             log               ls                mkdir
+monitor           mv                projects          promise
+relation          release           rename-container  restore
+rm                rmdir             rpc               search
+server            set               stat              timeline
+touch             tree              unarchive         usage
+version           watch             webhook           whoami
 ```
+
+## Subject extensions
+
+Extensions have their own etags and do not change the subject task's etag,
+updated time, or workflow document hash. Subjects are public task (`T-…`),
+container (`P-…`), or room (`R-…`) IDs.
+
+```bash
+wrkq ext put T-00001 acp request main --body '{"rev":1}' --create
+wrkq ext get T-00001 acp request main
+wrkq ext put T-00001 acp request main --body @request.json --if-match 1
+wrkq ext put T-00001 scribe request main --body - <<'EOF'
+{"slug":"explanation","kind":"document","replace":false}
+EOF
+wrkq ext list T-00001 --ns acp --kind request
+wrkq ext list --ns acp --states open,in_progress,blocked --limit 100
+wrkq ext list --ns acp --cursor '<nextCursor>'
+wrkq ext delete T-00001 acp request main --if-match 2
+```
+
+Responses preserve the RPC envelopes: `{ext, created}`, `{ext}`,
+`{items, nextCursor}`, and `{deleted}`. Without a fence, put is a last-writer-wins
+upsert; `--create` (equivalent to `--if-match 0`) refuses an existing row. Put's
+`--create` and `--if-match` are mutually exclusive. A stale fence refuses
+`conflict`; invalid namespace, kind, id, or body refuses `ext_invalid`; exceeding
+256 extensions on a subject refuses `ext_quota`. Bodies must be JSON objects of
+at most 65,536 bytes. Invocation errors exit 2; `--json` errors use the shared
+`{"error":{"code":…, "message":…}}` envelope.
+
+Once a moved metadata key has its extension row, adding or changing that key in
+`wrkq set --meta` refuses `meta_key_migrated` and names the replacement `wrkq ext
+put` command. Unchanged keys and removals remain accepted. This guard covers
+`acp.request`, `scribe`, nested `wrkf.taskStateMirror`, the archagent refactor
+tuple, and `hcs_*` launch keys.
 
 ## Containers and projects
 
@@ -76,6 +110,24 @@ wrkq container set /myproject --webhook-url http://127.0.0.1:18451/api/webhooks/
 # Register a checkout root on a top-level project (paths under $HOME stored as ~/...)
 wrkq set /myproject --root ~/praesidium/myproject
 ```
+
+## Workstreams
+
+`workstream` is a task kind with the same task ID, comments, and history.
+`touch` and `set` accept `--kind workstream` and `--covers` as an inline JSON
+object, `@file`, or `-` for stdin:
+
+```bash
+wrkq touch /hcs/lance/context --kind workstream --covers '{"container":"P-00001","tasks":["T-00001"]}'
+wrkq set T-00002 --covers '{"tasks":["T-00003"]}' --if-match 1
+wrkq cat T-00002 --output raw                  # frontmatter includes covers
+wrkq set T-00002 --covers null                # clear coverage
+```
+
+Every covered container/task must exist. Coverage uses the task's etag and is
+outside its workflow document hash. Coverage on other kinds, or changing away
+from workstream while coverage remains set, refuses `covers_requires_workstream`.
+Claiming a workstream refuses `workstream_not_claimable`.
 
 ## Task CRUD
 

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/useragent"
 )
 
@@ -150,6 +151,9 @@ func forwardRemoteFrame(ctx context.Context, client *http.Client, url, token, pr
 	}
 	if principalRef != "" {
 		req.Header.Set("X-Wrkq-Principal-Ref", principalRef)
+	}
+	if scopeRef := attribution.CallerScope(ctx); scopeRef != "" {
+		req.Header.Set("X-Wrkq-Scope-Ref", scopeRef)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

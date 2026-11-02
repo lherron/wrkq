@@ -16,7 +16,12 @@ export type WrkqTaskState =
   | "archived"
   | "deleted";
 
-export type WrkqTaskKind = "task" | "subtask" | "spike" | "bug" | "chore";
+export type WrkqTaskKind = "task" | "subtask" | "spike" | "bug" | "chore" | "workstream";
+export interface WrkqTaskCovers {
+  container?: string;
+  tasks?: string[];
+}
+
 export type WrkqRiskClass = "low" | "medium" | "high" | string;
 
 export interface WrkqTaskCreateParams {
@@ -28,6 +33,7 @@ export interface WrkqTaskCreateParams {
   description?: string;
   specification?: string;
   kind?: WrkqTaskKind;
+  covers?: WrkqTaskCovers;
   priority?: number;
   state?: WrkqTaskState;
   parentTask?: string;
@@ -88,6 +94,7 @@ export interface WrkqTaskUpdateParams {
     state?: WrkqTaskState;
     priority?: number;
     kind?: string;
+    covers?: WrkqTaskCovers | null;
     labels?: string[];
     meta?: Record<string, unknown>;
     riskClass?: WrkqRiskClass;
@@ -255,6 +262,7 @@ export interface WrkqTask {
   state: WrkqTaskState;
   priority: number;
   kind: string;
+  covers?: WrkqTaskCovers | null;
   description: string;
   specification: string;
   /** Curated plain-terms result of the work. */

@@ -54,6 +54,13 @@ func (a *API) TaskClaim(ctx context.Context, p TaskClaimParams) (*WrkqTaskClaim,
 		}
 		return nil, NewInternalError(err)
 	}
+	var taskKind string
+	if err := tx.QueryRow("SELECT kind FROM tasks WHERE uuid=?", uuid).Scan(&taskKind); err != nil {
+		return nil, NewInternalError(err)
+	}
+	if taskKind == "workstream" {
+		return nil, newError("WRKQ_WORKSTREAM_NOT_CLAIMABLE", "workstream_not_claimable: workstreams cannot be claimed", false, nil, nil)
+	}
 	if parsedScope.TaskID != row.taskID {
 		return nil, NewValidationError("claim scope must name the claimed task", map[string]any{
 			"field": "scope", "scopeTask": parsedScope.TaskID, "task": row.taskID,

@@ -6,6 +6,7 @@ import "github.com/lherron/wrkq/internal/wrkqapi"
 // their JSON fields cannot drift into a second client-side protocol copy.
 type SubtaskSummary = wrkqapi.SubtaskSummary
 type TaskCreateParams = wrkqapi.TaskCreateParams
+type TaskCovers = wrkqapi.TaskCovers
 type Task = wrkqapi.WrkqTask
 type TaskPatch = wrkqapi.TaskPatch
 type TaskListResult = wrkqapi.WrkqTaskListResult
@@ -33,3 +34,17 @@ type HistoryListViewParams = wrkqapi.HistoryListViewParams
 type HistoryListView = wrkqapi.WrkqHistoryListView
 type HistoryEvent = wrkqapi.WrkqLogEvent
 type MonitorEvent = wrkqapi.WrkqMonitorEvent
+
+// Extensions retain their own fence and public subject identity.
+type ExtSubject = wrkqapi.ExtSubject
+type Ext = wrkqapi.WrkqExt
+type ExtSubjectRef = wrkqapi.ExtSubjectRef
+type ExtListItem = wrkqapi.WrkqExtListItem
+type ExtPutParams = wrkqapi.ExtPutParams
+type ExtPutResult = wrkqapi.ExtPutResult
+type ExtShowParams = wrkqapi.ExtShowParams
+type ExtShowResult = wrkqapi.ExtShowResult
+type ExtListViewParams = wrkqapi.ExtListViewParams
+type ExtListView = wrkqapi.WrkqExtListView
+type ExtDeleteParams = wrkqapi.ExtDeleteParams
+type ExtDeleteResult = wrkqapi.ExtDeleteResult

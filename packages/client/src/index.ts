@@ -14,7 +14,7 @@ export type { WorkClient, CreateClientOptions } from "./client.js";
 export { WorkRpcError, isWorkRpcError, isWrkqError, isWrkfError } from "./errors.js";
 export type { WorkRpcErrorData } from "./errors.js";
 
-export { PROTOCOL_VERSION } from "./protocol.js";
+export { PROTOCOL_VERSION, PROTOCOL_SCHEMA_HASH } from "./protocol.js";
 export type { InitializeParams, InitializeResult } from "./protocol.js";
 
 // Transport seam + wire types (for advanced/low-level consumers and tests).
@@ -33,8 +33,10 @@ export type {
 export type {
   WrkqAdminFacade,
   WrkqFacade,
+  WrkqExtFacade,
 } from "./wrkq/facade.js";
 export type { WrkfFacade } from "./wrkf/facade.js";
+export type * from "./wrkq/ext.js";
 export type * from "./wrkq/attachment.js";
 export type * from "./wrkq/campaign.js";
 export type * from "./wrkq/collaboration.js";

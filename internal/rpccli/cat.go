@@ -414,6 +414,7 @@ type catTask struct {
 	DueAt                 *string         `json:"due_at,omitempty"`
 	Labels                *string         `json:"labels,omitempty"`
 	Meta                  json.RawMessage `json:"meta"`
+	Covers                json.RawMessage `json:"covers,omitempty"`
 	Description           string          `json:"description"`
 	Specification         string          `json:"specification"`
 	Outcome               *string         `json:"outcome,omitempty"`
@@ -495,6 +496,9 @@ func writeCatRaw(w io.Writer, objs []json.RawMessage, noFrontmatter, excludeComm
 			fmt.Fprintf(w, "state: %s\n", t.State)
 			fmt.Fprintf(w, "priority: %d\n", t.Priority)
 			fmt.Fprintf(w, "kind: %s\n", t.Kind)
+			if len(t.Covers) > 0 && string(t.Covers) != "null" {
+				fmt.Fprintf(w, "covers: %s\n", t.Covers)
+			}
 			if t.RoomLocator != "" {
 				fmt.Fprintf(w, "room_locator: %s\n", t.RoomLocator)
 			}

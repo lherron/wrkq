@@ -167,6 +167,18 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.task.restore", apiHandler(func(ctx context.Context, p wrkqapi.TaskRestoreParams) (any, error) {
 		return wq.TaskRestore(ctx, p)
 	}))
+	s.Register("wrkq.ext.put", apiHandler(func(ctx context.Context, p wrkqapi.ExtPutParams) (any, error) {
+		return wq.ExtPut(ctx, p)
+	}))
+	s.Register("wrkq.ext.show", apiHandler(func(ctx context.Context, p wrkqapi.ExtShowParams) (any, error) {
+		return wq.ExtShow(ctx, p)
+	}))
+	s.Register("wrkq.ext.listView", apiHandler(func(ctx context.Context, p wrkqapi.ExtListViewParams) (any, error) {
+		return wq.ExtListView(ctx, p)
+	}))
+	s.Register("wrkq.ext.delete", apiHandler(func(ctx context.Context, p wrkqapi.ExtDeleteParams) (any, error) {
+		return wq.ExtDelete(ctx, p)
+	}))
 	s.Register("wrkq.promise.add", apiHandler(func(ctx context.Context, p wrkqapi.PromiseAddParams) (any, error) {
 		return wq.PromiseAdd(ctx, p)
 	}))

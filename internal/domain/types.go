@@ -28,11 +28,12 @@ const RootContainerUUID = "00000000-0000-4000-8000-000000000001"
 type TaskKind string
 
 const (
-	TaskKindTask    TaskKind = "task"
-	TaskKindSubtask TaskKind = "subtask"
-	TaskKindSpike   TaskKind = "spike"
-	TaskKindBug     TaskKind = "bug"
-	TaskKindChore   TaskKind = "chore"
+	TaskKindTask       TaskKind = "task"
+	TaskKindSubtask    TaskKind = "subtask"
+	TaskKindSpike      TaskKind = "spike"
+	TaskKindBug        TaskKind = "bug"
+	TaskKindChore      TaskKind = "chore"
+	TaskKindWorkstream TaskKind = "workstream"
 )
 
 // TaskResolution represents the resolution of a completed task
@@ -126,6 +127,7 @@ type Container struct {
 
 // Task represents a task
 type Task struct {
+	Covers                *string    `json:"covers,omitempty" db:"covers"`
 	UUID                  string     `json:"uuid" db:"uuid"`
 	ID                    string     `json:"id" db:"id"`
 	Slug                  string     `json:"slug" db:"slug"`

@@ -50,6 +50,10 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 		return nil, ferr
 	}
 
+	if err := a.validateCoversPatch(uuid, fields, p.Patch.Covers); err != nil {
+		return nil, err
+	}
+
 	if cbv, ok := fields["caused_by"]; ok {
 		if cu, ok := cbv.(store.CausedByUpdate); ok {
 			for _, r := range cu.Refs {
@@ -102,6 +106,10 @@ func (a *API) TaskUpdate(ctx context.Context, p TaskUpdateParams) (*WrkqTask, er
 	}
 	_, err = a.store.Tasks.UpdateFieldsWithViaAttributionAndPrecondition(attr, uuid, fields, currentEtag, "rpc", claimPrecondition)
 	if err != nil {
+		var extErr *store.ExtError
+		if errors.As(err, &extErr) {
+			return nil, mapExtStoreError(err)
+		}
 		var mismatch *domain.ETagMismatchError
 		if errors.As(err, &mismatch) {
 			return nil, NewConflictError("task update conflict", map[string]any{

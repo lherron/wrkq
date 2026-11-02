@@ -140,6 +140,11 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		return nil, merr
 	}
 
+	covers, cerr := a.validateCovers(p.Kind, p.Covers)
+	if cerr != nil {
+		return nil, cerr
+	}
+
 	var causedByRefs []store.CausedByRef
 	if len(p.CausedBy) > 0 {
 		refs, cerr := causedby.ResolveTokens(a.db, p.CausedBy, "")
@@ -175,6 +180,7 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 		State:                 state,
 		Priority:              priority,
 		Kind:                  p.Kind,
+		Covers:                covers,
 		ParentTaskUUID:        parentTaskUUID,
 		SubtaskOwnerUUID:      subtaskOwnerUUID,
 		AssigneePrincipalRef:  assigneePrincipalRef,

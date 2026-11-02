@@ -78,6 +78,18 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		return nil, NewInternalError(err)
 	}
 
+	var coversRaw sql.NullString
+	if err := tx.QueryRowContext(ctx, "SELECT covers FROM tasks WHERE uuid=?", taskUUID).Scan(&coversRaw); err != nil {
+		return nil, NewInternalError(err)
+	}
+	var covers *TaskCovers
+	if coversRaw.Valid {
+		covers = &TaskCovers{}
+		if err := json.Unmarshal([]byte(coversRaw.String), covers); err != nil {
+			return nil, NewInternalError(err)
+		}
+	}
+
 	var projectID string
 	_ = tx.QueryRowContext(ctx, "SELECT id FROM containers WHERE uuid = ?", projectUUID).Scan(&projectID)
 
@@ -140,6 +152,7 @@ func (a *API) TaskCatView(ctx context.Context, p TaskCatViewParams) (*WrkqTaskCa
 		State:                 state,
 		Priority:              priority,
 		Kind:                  kind,
+		Covers:                covers,
 		ParentTaskID:          parentTaskID,
 		ParentTaskUUID:        parentTaskUUID,
 		AssigneeSlug:          assigneeSlug,

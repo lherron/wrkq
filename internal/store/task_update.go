@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -118,6 +119,24 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 			return err
 		}
 
+		if incoming, ok := fields["meta"]; ok {
+			var meta any
+			if text, ok := incoming.(string); ok {
+				if err := json.Unmarshal([]byte(text), &meta); err != nil {
+					return fmt.Errorf("invalid meta: %w", err)
+				}
+			} else if text, ok := incoming.(*string); ok && text != nil {
+				if err := json.Unmarshal([]byte(*text), &meta); err != nil {
+					return fmt.Errorf("invalid meta: %w", err)
+				}
+			} else {
+				meta = incoming
+			}
+			if err := CheckMigratedMeta(tx, taskUUID, meta); err != nil {
+				return err
+			}
+		}
+
 		// Validate re-parenting (no self-parent, no cycles, depth <= 1).
 		if pv, ok := fields["parent_task_uuid"]; ok && pv != nil {
 			parentUUID, _ := pv.(string)
@@ -190,7 +209,11 @@ func (ts *TaskStore) UpdateFieldsWithViaAttributionAndPrecondition(attr attribut
 		// shows it like any other field edit.
 		payloadFields := make(map[string]interface{}, len(fields)+4)
 		for k, v := range fields {
-			payloadFields[k] = v
+			if k == "covers" {
+				payloadFields[k] = summarizeWebhookValue(k, v)
+			} else {
+				payloadFields[k] = v
+			}
 		}
 		eventChanged := fieldNames
 		eventChanges := buildWebhookChanges(oldValues, fields)

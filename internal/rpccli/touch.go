@@ -31,7 +31,7 @@ type touchResult struct {
 func newTouchCmd() *cobra.Command {
 	var title, description, specification, state, kind, parentTask, assignee, labels, meta string
 	var dueAt, startAt, requestedBy, assignedProject, resolution, metaFile, forceUUID, causedBy string
-	var campaign, requester, requesterScope string
+	var campaign, requester, requesterScope, covers string
 	var priority int
 	var asJSON, subtask bool
 
@@ -52,6 +52,7 @@ func newTouchCmd() *cobra.Command {
 				campaign: campaign, json: asJSON, subtask: subtask,
 				requester: requester, requesterScope: requesterScope,
 				labelsSet: cmd.Flags().Changed("labels"),
+				covers:    covers, coversSet: cmd.Flags().Changed("covers"),
 			})
 		},
 	}
@@ -60,7 +61,7 @@ func newTouchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&specification, "specification", "", "Specification for the task (use @file.md for file or - for stdin)")
 	cmd.Flags().StringVar(&state, "state", "open", "Initial task state (idea, draft, open, in_progress, completed, blocked, cancelled, archived, deleted)")
 	cmd.Flags().IntVar(&priority, "priority", 3, "Initial task priority (1-4)")
-	cmd.Flags().StringVar(&kind, "kind", "", "Task kind: task, subtask, spike, bug, chore (default: task)")
+	cmd.Flags().StringVar(&kind, "kind", "", "Task kind: task, subtask, spike, bug, chore, workstream (default: task)")
 	cmd.Flags().BoolVar(&subtask, "subtask", false, "Create a named subtask using T-XXXXX.slug")
 	cmd.Flags().StringVar(&parentTask, "parent-task", "", "Parent task ID or path (for child tasks)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee principal ref or bare agent slug")
@@ -70,6 +71,7 @@ func newTouchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignedProject, "assigned-project", "", "Assignee project ID")
 	cmd.Flags().StringVar(&resolution, "resolution", "", "Task resolution (done, wont_do, duplicate, needs_info)")
 	cmd.Flags().StringVar(&labels, "labels", "", "Initial labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
+	cmd.Flags().StringVar(&covers, "covers", "", "Workstream coverage JSON object (inline, @file, or - for stdin)")
 	cmd.Flags().StringVar(&meta, "meta", "", "Initial task metadata (JSON object or null)")
 	cmd.Flags().StringVar(&metaFile, "meta-file", "", "Load task metadata from file (JSON object or null)")
 	cmd.Flags().StringVar(&dueAt, "due-at", "", "Initial task due date")
@@ -82,6 +84,8 @@ func newTouchCmd() *cobra.Command {
 }
 
 type touchOpts struct {
+	covers                                                               string
+	coversSet                                                            bool
 	title, description, specification, state, kind, parentTask, assignee string
 	requestedBy, assignedProject, resolution, labels, meta, metaFile     string
 	dueAt, startAt, forceUUID, causedBy, campaign                        string
@@ -149,6 +153,13 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 		return err
 	}
 
+	var coversValue json.RawMessage
+	if o.coversSet {
+		coversValue, err = readJSONObjectValue(cmd, o.covers, "--covers", claims, true)
+		if err != nil {
+			return err
+		}
+	}
 	results := make([]touchResult, 0, len(paths))
 	for _, path := range paths {
 		// Legacy defaults the title to the (final-segment) slug when --title is empty.
@@ -158,6 +169,9 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 			title = segs[len(segs)-1]
 		}
 		params := map[string]any{"path": path, "title": title}
+		if o.coversSet {
+			params["covers"] = coversValue
+		}
 		if o.subtask {
 			owner, slug, err := id.ParseTask(path)
 			if err != nil || slug == "" {

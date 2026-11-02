@@ -34,7 +34,7 @@ func (p *TaskPatch) UnmarshalJSON(b []byte) error {
 		"slug": true, "title": true, "description": true, "specification": true, "outcome": true, "state": true,
 		"priority": true, "kind": true, "riskClass": true, "parentTask": true, "labels": true, "meta": true, "metaRaw": true,
 		"assigneePrincipalRef": true, "requesterPrincipalRef": true, "requesterScopeRef": true, "requestedBy": true, "assignedProject": true, "resolution": true,
-		"dueAt": true, "startAt": true, "causedBy": true, "campaign": true,
+		"dueAt": true, "startAt": true, "causedBy": true, "campaign": true, "covers": true,
 	}
 	for key := range raw {
 		if !allowed[key] {

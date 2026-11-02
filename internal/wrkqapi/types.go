@@ -7,6 +7,11 @@ import (
 	"github.com/lherron/wrkq/internal/workflow"
 )
 
+type TaskCovers struct {
+	Container string   `json:"container,omitempty"`
+	Tasks     []string `json:"tasks,omitempty"`
+}
+
 // WrkqTask is the stable task resource DTO (docs/wrkq-wrkf-rpc.md §6.2).
 type SubtaskSummary struct {
 	ID        string `json:"id"`
@@ -17,6 +22,7 @@ type SubtaskSummary struct {
 }
 
 type WrkqTask struct {
+	Covers                *TaskCovers      `json:"covers,omitempty"`
 	RoomLocator           string           `json:"roomLocator,omitempty"`
 	SubtaskOwner          string           `json:"subtaskOwner,omitempty"`
 	SubtaskOwnerUUID      string           `json:"subtaskOwnerUuid,omitempty"`
@@ -127,19 +133,20 @@ type WrkqWorkflowTimelineResult struct {
 
 // TaskCreateParams mirrors WrkqTaskCreateParams (§6.2).
 type TaskCreateParams struct {
-	SubtaskOwner         string `json:"subtaskOwner,omitempty"`
-	Slug                 string `json:"slug,omitempty"`
-	Path                 string `json:"path,omitempty"`
-	Project              string `json:"project,omitempty"`
-	Title                string `json:"title"`
-	Description          string `json:"description,omitempty"`
-	Specification        string `json:"specification,omitempty"`
-	Kind                 string `json:"kind,omitempty"`
-	Priority             int    `json:"priority,omitempty"`
-	State                string `json:"state,omitempty"`
-	RiskClass            string `json:"riskClass,omitempty"`
-	ParentTask           string `json:"parentTask,omitempty"`
-	AssigneePrincipalRef string `json:"assigneePrincipalRef,omitempty"`
+	Covers               *TaskCovers `json:"covers,omitempty"`
+	SubtaskOwner         string      `json:"subtaskOwner,omitempty"`
+	Slug                 string      `json:"slug,omitempty"`
+	Path                 string      `json:"path,omitempty"`
+	Project              string      `json:"project,omitempty"`
+	Title                string      `json:"title"`
+	Description          string      `json:"description,omitempty"`
+	Specification        string      `json:"specification,omitempty"`
+	Kind                 string      `json:"kind,omitempty"`
+	Priority             int         `json:"priority,omitempty"`
+	State                string      `json:"state,omitempty"`
+	RiskClass            string      `json:"riskClass,omitempty"`
+	ParentTask           string      `json:"parentTask,omitempty"`
+	AssigneePrincipalRef string      `json:"assigneePrincipalRef,omitempty"`
 	// RequesterPrincipalRef / RequesterScopeRef name who asked for the work.
 	// A scope alone derives the principal; both must agree.
 	RequesterPrincipalRef string         `json:"requesterPrincipalRef,omitempty"`
@@ -258,6 +265,7 @@ type TaskMoveParams struct {
 
 // TaskPatch is the mutable subset of a task.
 type TaskPatch struct {
+	Covers               json.RawMessage `json:"covers,omitempty"`
 	Slug                 *string         `json:"slug,omitempty"`
 	Title                *string         `json:"title,omitempty"`
 	Description          *string         `json:"description,omitempty"`

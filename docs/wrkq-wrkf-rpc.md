@@ -2735,3 +2735,58 @@ subtask selectors remain exact and each event keeps its own task ID. State-only
 predicates remain exact. These reads never apply task membership exclusion.
 Webhook v2 adds optional `subtask_owner_id` and `subtask_owner_uuid` while keeping
 `ticket_id` and `ticket_uuid` as the event's own task.
+
+
+### Subject extension register (`wrkq.ext.*`)
+
+Subjects use exactly one public ID field: `{task: "T-…"}`,
+`{container: "P-…"}`, or `{room: "R-…"}`.
+
+| Method | Parameters | Result |
+|---|---|---|
+| `wrkq.ext.put` | `subject, ns, kind, id, body, ifMatch?, principalRef?` | `{ext, created}` |
+| `wrkq.ext.show` | `subject, ns, kind, id` | `{ext}` |
+| `wrkq.ext.listView` | `subject?, ns?, kind?, subjectStates?, limit?, cursor?` | `{items, nextCursor}` |
+| `wrkq.ext.delete` | `subject, ns, kind, id, ifMatch?` | `{deleted}` |
+
+`ifMatch` omitted means last-writer-wins; zero means create-only; positive values
+must match the extension's current etag. Each put increments its own etag. A row
+carries its subject's public ID, never its UUID. List items carry a
+`subject: {type, id, state}` descriptor. `subjectStates` is an array filtering the
+subject task's state. Pagination uses an opaque `cursor`/`nextCursor`; the
+maximum `limit` is 500.
+
+Namespace and kind accept 1–4 dot-separated segments, each beginning lowercase,
+alphanumeric, at most 64 characters per segment and 128 bytes total. IDs are
+1–200 bytes without control characters. Body must be a JSON object at most
+65,536 bytes; a subject may hold at most 256 rows. Validation refuses
+`ext_invalid`, quota refuses `ext_quota`, an unknown subject refuses `not_found`,
+and a stale/create-only fence refuses `conflict`.
+
+Writes use caller principal attribution and the `X-Wrkq-Scope-Ref` header. Each
+admitted put/delete writes one event under its subject's resource type and UUID,
+with event type `task.ext.put`/`task.ext.deleted` (or `container.`/`room.`) and
+payload `{ns, kind, id, etag}`. The ledger excludes bodies. Extension writes do
+not change the subject etag, updated time, or `taskDocHash`; they emit no webhook.
+
+The migrated-key guard refuses `meta_key_migrated` if a task metadata write adds
+or changes a moved key after its extension exists. Unchanged values and removals
+are admitted. Mappings: `acp.request` → `acp/request/main`, `scribe` →
+`scribe/request/main`, nested `wrkf.taskStateMirror` →
+`agentloop/taskStateMirror/main`, archagent tuple keys → any
+`archagent/refactor/*`, `hcs_*` → `hcs/launch/main`. The error names the
+replacement `wrkq ext put` command.
+
+### Workstream task kind and coverage
+
+`wrkq.task.create` and `wrkq.task.update` accept `kind: "workstream"` and optional
+`covers: {container?: "P-…", tasks?: ["T-…"]}`. Each ID must exist or the call
+refuses `not_found`. Explicit `covers: null` clears coverage; omission on update
+leaves it unchanged. Coverage is fenced by the task etag and appears in task
+DTOs, show/list/cat views, and the `task.updated` change payload, outside
+`taskDocHash`. Setting coverage on another kind or changing away from workstream
+while coverage remains set refuses `covers_requires_workstream`.
+`wrkq.task.claim` refuses `workstream_not_claimable` for workstreams.
+`wrkq.task.list {kind: "workstream"}` and
+`wrkq.task.findListView {kind: "workstream"}` filter by the singular wire field
+`kind`.

@@ -5,6 +5,7 @@
  * package (spec §7.6).
  */
 
+export type * from "./ext.js";
 export type * from "./attachment.js";
 export type * from "./campaign.js";
 export type * from "./collaboration.js";
@@ -28,6 +29,7 @@ export type {
   WrkqContainerFacade,
   WrkqEnvelopeFacade,
   WrkqFacade,
+  WrkqExtFacade,
   WrkqIndexFacade,
   WrkqPromiseFacade,
   WrkqProjectEventFacade,

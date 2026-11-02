@@ -1,3 +1,8 @@
+import type {
+  WrkqExtPutParams, WrkqExtPutResult, WrkqExtShowParams, WrkqExtShowResult,
+  WrkqExtListViewParams, WrkqExtListView, WrkqExtDeleteParams, WrkqExtDeleteResult,
+} from "./ext.js";
+
 /**
  * wrkq/facade.ts — typed surface for the wrkq namespace (task ownership).
  *
@@ -182,6 +187,13 @@ import type {
   WrkqWorkflowTimelineParams,
   WrkqWorkflowTimelineResult,
 } from "./workflow-binding.js";
+
+export interface WrkqExtFacade {
+  put(params: WrkqExtPutParams): Promise<WrkqExtPutResult>;
+  show(params: WrkqExtShowParams): Promise<WrkqExtShowResult>;
+  listView(params?: WrkqExtListViewParams): Promise<WrkqExtListView>;
+  delete(params: WrkqExtDeleteParams): Promise<WrkqExtDeleteResult>;
+}
 
 export interface WrkqTaskFacade {
  lsView(params: WrkqLsListViewParams): Promise<WrkqLsListView>;
@@ -428,6 +440,7 @@ export interface WrkqEnvelopeFacade {
 }
 
 export interface WrkqFacade {
+  readonly ext: WrkqExtFacade;
   readonly task: WrkqTaskFacade;
   readonly comment: WrkqCommentFacade;
   readonly attachment: WrkqAttachmentFacade;
