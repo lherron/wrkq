@@ -574,7 +574,14 @@ wrkq.task.copy        [new mutation method — server-owned deep copy; see copy 
 >   `history` namespace (generic audit-log tailing) backing
 >   `monitor watch --raw` (the retired `wrkq watch` used it too): a bounded ASCENDING raw `event_log` page with actor
 >   slug/id + `resource_id` hydration. Params: `{ cursor, limit? }` →
->   `WrkqHistoryTailView{ items: WrkqWatchEvent[], high_water }`. It MUST NOT reuse
+>   `WrkqHistoryTailView{ items: WrkqWatchEvent[], high_water, incarnation, head }`.
+>   `incarnation` is the string from `collaboration_ledger_meta`; `head` is the
+>   int64 `COALESCE(MAX(event_log.id), 0)`. Both share the page's read-only snapshot
+>   transaction and are returned even for empty or fully filtered pages.
+>   A separately initialized database has a different incarnation; a file-copy
+>   restore keeps it. Consumers can detect a restore below their cursor via
+>   `head < cursor`. `high_water` retains its existing behavior, including an
+>   unchanged cursor when it exceeds head. It MUST NOT reuse
 >   `WrkqLogEvent` — `WrkqWatchEvent` is the legacy watchEvent row shape, which
 >   INCLUDES `resource_id`, uses a STRING timestamp (raw `event_log.timestamp`), and
 >   has a nullable `resource_uuid` (omitempty): `{ id, timestamp, actor_uuid?,

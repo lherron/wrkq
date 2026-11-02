@@ -481,6 +481,8 @@ items[].event_type: string
 items[].etag: number
 items[].payload: string
 high_water: number
+incarnation: string
+head: number
 
 ## wrkq.monitor.eventsView
 $: object

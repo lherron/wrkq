@@ -111,6 +111,8 @@ export interface WrkqHistoryEvent {
 export interface WrkqHistoryTailView {
   items: WrkqHistoryEvent[];
   high_water: number;
+  incarnation: string;
+  head: number;
 }
 
 export interface WrkqHistoryListView {

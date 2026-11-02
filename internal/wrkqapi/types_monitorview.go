@@ -73,6 +73,10 @@ type WrkqWatchEvent struct {
 type WrkqHistoryTailView struct {
 	Items     []WrkqWatchEvent `json:"items"`
 	HighWater int64            `json:"high_water"`
+	// Incarnation and Head identify the database and event-log head in the same
+	// read snapshot as Items. HighWater still preserves a cursor above Head.
+	Incarnation string `json:"incarnation"`
+	Head        int64  `json:"head"`
 }
 
 // MonitorEventsViewParams carries the already-CALLER-scoped task selectors plus the

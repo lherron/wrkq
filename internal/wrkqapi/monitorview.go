@@ -215,13 +215,24 @@ func (a *API) HistoryTailView(ctx context.Context, p HistoryTailViewParams) (*Wr
 		limit = monitorMaxPageLimit
 	}
 
-	rows, err := a.db.QueryContext(ctx, watchTailScanQuery, p.Cursor, limit)
+	tx, err := a.db.BeginRead(ctx)
+	if err != nil {
+		return nil, NewInternalError(fmt.Errorf("begin tail snapshot: %w", err))
+	}
+	defer func() { _ = tx.Rollback() }()
+	view := &WrkqHistoryTailView{Items: []WrkqWatchEvent{}, HighWater: p.Cursor}
+	if err := tx.QueryRowContext(ctx, "SELECT incarnation FROM collaboration_ledger_meta WHERE singleton = 1").Scan(&view.Incarnation); err != nil {
+		return nil, NewInternalError(fmt.Errorf("read tail incarnation: %w", err))
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(id), 0) FROM event_log").Scan(&view.Head); err != nil {
+		return nil, NewInternalError(fmt.Errorf("read tail head: %w", err))
+	}
+	rows, err := tx.QueryContext(ctx, watchTailScanQuery, p.Cursor, limit)
 	if err != nil {
 		return nil, NewInternalError(fmt.Errorf("query failed: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 
-	view := &WrkqHistoryTailView{Items: []WrkqWatchEvent{}, HighWater: p.Cursor}
 	for rows.Next() {
 		var e WrkqWatchEvent
 		var resourceID, taskID sql.NullString
@@ -252,6 +263,12 @@ func (a *API) HistoryTailView(ctx context.Context, p HistoryTailViewParams) (*Wr
 	}
 	if err := rows.Err(); err != nil {
 		return nil, NewInternalError(fmt.Errorf("rows error: %w", err))
+	}
+	if err := rows.Close(); err != nil {
+		return nil, NewInternalError(fmt.Errorf("close tail rows: %w", err))
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, NewInternalError(fmt.Errorf("commit tail snapshot: %w", err))
 	}
 	return view, nil
 }
