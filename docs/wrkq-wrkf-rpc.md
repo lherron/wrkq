@@ -76,6 +76,35 @@ wrkf rpc --stdio
 
 ---
 
+### Bounded commit wake hint
+
+`wrkq.commit.wait {since?: string, timeoutMs?: int}` returns
+`{token: string, changed: bool}`. The opaque token combines a server incarnation
+with an in-memory commit sequence; it is never a durable cursor. Missing, stale,
+or foreign-incarnation tokens return immediately with `changed: true`. A current
+token parks until an event-logging commit or the timeout (default 25,000 ms,
+clamped to 1,000–30,000 ms). Timeout and capacity refusal return the input token
+with `changed: false`. At most 512 requests park; excess requests return at once.
+
+Waiters hold no database connection or transaction and cancel on request context
+cancellation. The existing post-commit broadcaster covers `event_log`,
+`project_events`, and `workflow_events` commits in this process; parked-waiter
+notifications coalesce to at most one per 100 ms. External-process writes and
+time-based materialization are discovered at the caller's next bounded read.
+HTTP responses and remote stdio forwarding allow 35 seconds, above the maximum
+wait. The normal 20-second database-read deadline does not apply to this wait.
+
+Take the token **before** reading the existing bounded view, then wait with that
+token and repeat. A commit crossing the read advances the sequence synchronously,
+so the next wait returns immediately even before a coalesced notification flushes.
+Durable view cursors remain authoritative across restarts. This is the sole
+bounded-wait exception in `wrkq.wrkf-rpc.bounded-polling-streaming` (ADR 0004),
+with no subscription, event payload, filter, or retained per-client state.
+Adding the operation changes the exact protocol schema hash and requires the
+coordinated producer/Go-client cutover described in the approved D1 spec.
+
+---
+
 ## 2. Ownership boundary
 
 **`wrkq.*` owns task records and all direct task mutation.**

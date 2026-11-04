@@ -96,7 +96,7 @@ func TestCommitWaitWakeAndTokenBeforeRead(t *testing.T) {
 		params any
 	}{
 		{"wrkq.task.create", map[string]any{"path": "inbox/wake", "title": "wake"}},
-		{"wrkq.projectEvent.post", map[string]any{"project": "inbox", "type": "test.fact", "summary": "wake", "attributes": map[string]any{}}},
+		{"wrkq.projectEvent.post", map[string]any{"project": "inbox", "type": "test.fact", "summary": "wake", "attributes": map[string]any{"source": "commit_wait_gate"}}},
 	} {
 		t.Run(mutation.method, func(t *testing.T) {
 			token := h.wait(t, "", 1000).Token
