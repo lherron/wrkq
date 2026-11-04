@@ -108,9 +108,9 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"methods", len(MethodCatalog()), 189},
+		{"methods", len(MethodCatalog()), 190},
 		{"errorCodes", len(ErrorCodeCatalog()), 32},
-		{"dtos", len(dtoCatalog), 175},
+		{"dtos", len(dtoCatalog), 177},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

@@ -24,6 +24,7 @@ type commitWaitReply struct {
 type commitWaitHarness struct {
 	url    string
 	client *http.Client
+	rpc    *workrpc.Server
 }
 
 func newCommitWaitHarness(t *testing.T, database *db.DB) commitWaitHarness {
@@ -38,7 +39,7 @@ func newCommitWaitHarness(t *testing.T, database *db.DB) commitWaitHarness {
 	daemon := &daemonServer{db: database, cfg: cfg, token: "secret", workrpc: rpc}
 	server := httptest.NewServer(daemon.withAuth(daemon.handleWorkRPC))
 	t.Cleanup(server.Close)
-	h := commitWaitHarness{server.URL, server.Client()}
+	h := commitWaitHarness{server.URL, server.Client(), rpc}
 	h.must(t, "rpc.initialize", map[string]any{"protocolVersion": workrpc.ProtocolVersion})
 	return h
 }
@@ -185,11 +186,17 @@ func TestCommitWaitCapAndDisconnect(t *testing.T) {
 	done := make(chan error, 512)
 	for i := 0; i < 512; i++ {
 		go func() {
-			_, err := h.call(ctx, "wrkq.commit.wait", map[string]any{"since": token, "timeoutMs": 30000})
+			raw, _ := json.Marshal(map[string]any{"since": token, "timeoutMs": 30000})
+			frame, _ := h.rpc.HandleRequest(ctx, workrpc.Request{JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "wrkq.commit.wait", Params: raw})
+			var err error
+			if frame.Error != nil {
+				err = fmt.Errorf("%+v", frame.Error)
+			}
 			done <- err
 		}()
 	}
-	// All connections are loopback and handlers do no IO after decoding.
+	// Admission uses real handlers directly to avoid 1024 loopback socket FDs.
+	// The overflow call and cancellation probe still cross the HTTP route.
 	time.Sleep(300 * time.Millisecond)
 	start := time.Now()
 	overflow := h.wait(t, token, 30000)
