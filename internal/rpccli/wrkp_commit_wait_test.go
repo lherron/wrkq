@@ -31,7 +31,7 @@ func TestWrkpFollowCommitWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 	api, opts, err := bootstrap.Server(database, &config.Config{DBPath: dbPath, AttachmentsMaxMB: 50})
 	if err != nil {
 		t.Fatal(err)
