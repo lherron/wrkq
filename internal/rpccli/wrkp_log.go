@@ -126,6 +126,9 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 			}
 			var fingerprintAt time.Time
 			for {
+				if cmd.Context().Err() != nil {
+					return nil
+				}
 				readStarted := time.Now()
 				sentCursor := cursor
 				params := query.pageParams(cursor, delivered)
