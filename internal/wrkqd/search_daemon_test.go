@@ -24,7 +24,7 @@ func TestSearchIndexerCommitFreshness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer idx.Close()
+	defer func() { _ = idx.Close() }()
 	task, err := store.New(database).Tasks.Create("00000000-0000-0000-0000-000000000001", store.CreateParams{
 		ProjectUUID: "00000000-0000-0000-0000-000000000002", Slug: "commit-freshness", Title: "Commit freshness needle", State: "open", Priority: 2, Kind: "task",
 	})

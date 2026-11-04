@@ -13,7 +13,7 @@ func TestAfterCommitOnlySignalsLoggedEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 	if _, err := database.Exec(`CREATE TABLE event_log (id INTEGER PRIMARY KEY, timestamp TEXT DEFAULT CURRENT_TIMESTAMP, principal_ref TEXT, scope_ref TEXT, resource_type TEXT, resource_uuid TEXT, event_type TEXT, etag INTEGER, payload TEXT)`); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestAfterCommitCallbacksWithoutLoggedEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 	writer := NewWriter(database.DB)
 	_, changed := database.EventCommits.Snapshot()
 	var calls []int

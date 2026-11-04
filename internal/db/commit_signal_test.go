@@ -10,7 +10,7 @@ func TestEventCommitSignal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 	if _, err := database.Exec("CREATE TABLE event_log (id INTEGER PRIMARY KEY)"); err != nil {
 		t.Fatal(err)
 	}
