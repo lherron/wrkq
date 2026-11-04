@@ -201,6 +201,11 @@ func TestCommitWaitCapAndDisconnect(t *testing.T) {
 	// Admission uses real handlers directly to avoid 1024 loopback socket FDs.
 	// The overflow call and cancellation probe still cross the HTTP route.
 	time.Sleep(300 * time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("one of the first 512 waits returned before cancellation: %v", err)
+	default:
+	}
 	start := time.Now()
 	overflow := h.wait(t, token, 30000)
 	if overflow.Changed || overflow.Token != token || time.Since(start) > 200*time.Millisecond {
