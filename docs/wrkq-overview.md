@@ -14,8 +14,8 @@ wrkq is a local-first task-management system for humans and coding agents: a
 filesystem-flavored CLI over a SQLite database. This page orients a reader
 inside the `wrkq` repository (binaries, storage layout, data model, execution
 modes). It complements the platform-level system-boundary doc; for the
-current CLI/daemon contract, see [docs/SPEC.md](docs/SPEC.md). Active
-[architecture records](architecture/README.md) take precedence over documentation
+current CLI/daemon contract, see [docs/SPEC.md](https://github.com/lherron/wrkq/blob/main/docs/SPEC.md). Active
+[architecture records](https://github.com/lherron/wrkq/blob/main/architecture/README.md) take precedence over documentation
 when they conflict.
 
 ## Shipped binaries
@@ -81,7 +81,7 @@ entities:
 - **Handoffs** — context records for an agent's future session or an explicit
   successor, scoped to `agent:<id>:project:<proj>`. `handoff create --to`
   addresses another agent; the author and recipient remain distinct. See
-  [handoffs in the spec](docs/SPEC.md#handoffs).
+  [handoffs in the spec](https://github.com/lherron/wrkq/blob/main/docs/SPEC.md#handoffs).
 - **Task claims** — atomic single-holder claim state (holder principal, exact
   scope, server-derived node, timestamp, monotonic generation, one-time claim
   token) recorded on the task row itself, distinct from relations/lineage.
