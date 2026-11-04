@@ -17,6 +17,12 @@ The client speaks **only** the unified stdio JSON-RPC protocol. It never calls
 
 Contract: [`docs/wrkq-wrkf-rpc.md`](../../docs/wrkq-wrkf-rpc.md)
 
+The request envelope carries `caller`, resolved once per client from
+`componentName` → `PRAESIDIUM_CALLER` → `ASP_HANDLE` → `tty`/`unknown`.
+Environment resolution uses `process.env` merged with the `env` option. Invalid
+names become `unknown`; they never change mutation authority. Named components
+also set `PRAESIDIUM_CALLER` for the spawned binary.
+
 ## Requirements
 
 Bun ≥ 1.3. The `wrkq` (or `wrkf`) binary must be on `PATH` or referenced by an
@@ -41,6 +47,7 @@ const client = await createClient({
   principalRef: "agent:agent-loop",
   role: "coordinator",
   clientInfo: { name: "agent-loop", version: "0.1.0" },
+  componentName: "agent-loop", // service request logging attribution
 });
 // createClient runs rpc.initialize before resolving (autoInitialize: true).
 ```

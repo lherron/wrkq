@@ -14,6 +14,8 @@ export interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: string | number;
   method: string;
+  /** Service API attribution, independent of mutation authority. */
+  caller?: string;
   params?: unknown;
 }
 
@@ -21,6 +23,8 @@ export interface JsonRpcRequest {
 export interface JsonRpcNotification {
   jsonrpc: "2.0";
   method: string;
+  /** Service API attribution, independent of mutation authority. */
+  caller?: string;
   params?: unknown;
 }
 

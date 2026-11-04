@@ -49,6 +49,24 @@ remains independent of creator attribution. These headers are caller assertions,
 not authenticated agent identity (`wrkq.attribution.caller-asserted`), and are
 outside the protocol schema hash.
 
+Request logging attribution uses the optional top-level `caller` envelope field
+and, over HTTP, `X-Praesidium-Caller` (the header takes precedence when present).
+Values match `[A-Za-z0-9._:@/+-]{1,128}`; absent, invalid and non-string values log
+as `unknown` without refusing the request. Every wrkqd request line includes
+`data.caller`; quiet-poll sampling groups by client, caller, remote and op.
+This transport metadata is outside the method DTO catalog and protocol schema
+hash. Older servers ignore the envelope field, and older clients remain valid.
+
+Go transports resolve the caller once per connection from `Profile.ComponentName`,
+then `PRAESIDIUM_CALLER`, then `ASP_HANDLE`, then `tty` when stdin is a terminal
+or `unknown`. The typed Go client exposes `WithComponentName` for remote calls.
+`@wrkq/client` uses `createClient({componentName})` and the same order with its
+merged process/child environment. The stdio bridge preserves an explicit frame
+caller and supplies its resolved caller when absent. Named components also pass
+their name in the child environment; wrkq binaries have no component name and
+preserve inherited hints. Attribution is independent of principal/scope authority
+and preserves `wrkq.attribution.caller-asserted` and `wrkq.wrkf-rpc.stdout-purity`.
+
 Both entrypoints produce identical stdio behavior:
 
 ```

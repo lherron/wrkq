@@ -15,11 +15,14 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/useragent"
@@ -30,6 +33,8 @@ import (
 // unified workrpc server. ProtocolSchemaHash still pins the complete contract;
 // the profile catches a server wired to the wrong capability surface.
 type Profile struct {
+	// ComponentName identifies a named embedding program for request logging.
+	ComponentName   string
 	Capability      string
 	RequiredMethods []string
 }
@@ -136,6 +141,7 @@ type conn struct {
 	onClose func() error
 	closed  bool
 	profile Profile
+	caller  string
 }
 
 func (c *conn) Call(_ context.Context, method string, params any) (json.RawMessage, error) {
@@ -177,7 +183,7 @@ func (c *conn) writeFrame(id json.RawMessage, method string, params any) error {
 		}
 		raw = b
 	}
-	frame, err := json.Marshal(workrpc.Request{JSONRPC: "2.0", ID: id, Method: method, Params: raw})
+	frame, err := json.Marshal(workrpc.Request{JSONRPC: "2.0", ID: id, Method: method, Params: raw, Caller: json.RawMessage(strconv.Quote(c.caller))})
 	if err != nil {
 		return err
 	}
@@ -304,8 +310,9 @@ func NewSubprocess(ctx context.Context, binaryPath, dbPath string, extraEnv []st
 	}
 	args = append(args, "rpc", "--stdio")
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-	if len(extraEnv) > 0 {
-		cmd.Env = append(cmd.Environ(), extraEnv...)
+	cmd.Env = append(cmd.Environ(), extraEnv...)
+	if profile.ComponentName != "" {
+		cmd.Env = append(cmd.Env, "PRAESIDIUM_CALLER="+profile.ComponentName)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -318,7 +325,14 @@ func NewSubprocess(ctx context.Context, binaryPath, dbPath string, extraEnv []st
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	c := &conn{w: stdin, br: bufio.NewReader(stdout), profile: profile}
+	env := map[string]string{}
+	for _, entry := range cmd.Environ() {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			env[key] = value
+		}
+	}
+	c := &conn{w: stdin, br: bufio.NewReader(stdout), profile: profile,
+		caller: useragent.CallerForEnv(profile.ComponentName, func(key string) string { return env[key] }, term.IsTerminal(int(os.Stdin.Fd())))}
 	c.onClose = func() error {
 		_ = stdin.Close()
 		return cmd.Wait()
@@ -377,6 +391,7 @@ type remoteTransport struct {
 	nextID  int
 	closed  bool
 	profile Profile
+	caller  string
 }
 
 func NewRemote(endpoint, token string, profile Profile) (Transport, error) {
@@ -389,6 +404,7 @@ func NewRemote(endpoint, token string, profile Profile) (Transport, error) {
 		url:     "http://" + endpoint + "/v1/rpc",
 		token:   token,
 		profile: profile,
+		caller:  useragent.ResolveCaller(profile.ComponentName),
 	}
 	if err := t.initialize(); err != nil {
 		return nil, err
@@ -436,7 +452,7 @@ func (t *remoteTransport) roundTrip(ctx context.Context, method string, params a
 		}
 		raw = b
 	}
-	frame, err := json.Marshal(workrpc.Request{JSONRPC: "2.0", ID: id, Method: method, Params: raw})
+	frame, err := json.Marshal(workrpc.Request{JSONRPC: "2.0", ID: id, Method: method, Params: raw, Caller: json.RawMessage(strconv.Quote(t.caller))})
 	if err != nil {
 		return nil, err
 	}
@@ -456,6 +472,7 @@ func (t *remoteTransport) roundTrip(ctx context.Context, method string, params a
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", useragent.String())
+	req.Header.Set("X-Praesidium-Caller", t.caller)
 	if t.token != "" {
 		req.Header.Set("Authorization", "Bearer "+t.token)
 	}

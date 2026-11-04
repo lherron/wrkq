@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lherron/wrkq/internal/useragent"
 	"github.com/lherron/wrkq/internal/workrpc"
 )
 
@@ -21,7 +22,7 @@ import (
 // var/logs/wrkq/wrkqd.log, diagnostics stay on stderr in wrkqd.err.log), in the
 // `{level, component, event, data, ts}` shape acp-server's request-log.ts
 // writes. Every line carries `listener`, the matched `route` template and the
-// caller's `client` token. Never logged: bodies, query strings, headers; for a
+// caller's `client` token and validated `caller` name. Never logged: bodies, query strings, headers; for a
 // non-2xx JSON response only the error `code` and `message` are lifted. A
 // /v1/rpc line also names its JSON-RPC method as `op`, and a frame that failed inside an
 // HTTP 200 logs as a warn with the JSON-RPC error's code and message.
@@ -30,7 +31,7 @@ import (
 // 100ms, about 10 lines a second per follower. As with acp's quiet polls,
 // a failing poll always logs; a successful one logs at most once per
 // sample window (default one minute, --poll-sample-window) per client,
-// remote and op, with `suppressed` counting
+// caller, remote and op, with `suppressed` counting
 // the successes skipped since the last line, so the caller stays visible.
 
 const (
@@ -79,6 +80,7 @@ type requestLogField struct {
 	Route      string  `json:"route"`
 	Listener   string  `json:"listener"`
 	Client     string  `json:"client"`
+	Caller     string  `json:"caller"`
 	RequestID  string  `json:"requestId,omitempty"`
 	Status     int     `json:"status"`
 	DurationMs int64   `json:"durationMs"`
@@ -94,6 +96,7 @@ type rpcLogKey struct{}
 // rpcLogNote is filled by the /v1/rpc handler for the request log to read.
 type rpcLogNote struct {
 	method string
+	caller any
 	err    *workrpc.RPCError
 }
 
@@ -103,7 +106,7 @@ func noteRPC(ctx context.Context, method string, rpcErr *workrpc.RPCError) {
 	}
 }
 
-type quietPollKey struct{ client, remote, op string }
+type quietPollKey struct{ client, caller, remote, op string }
 
 type quietPollState struct {
 	mu     sync.Mutex
@@ -152,11 +155,15 @@ func withRequestLog(next http.Handler, listener string) http.Handler {
 			Route:      route,
 			Listener:   listener,
 			Client:     clientFromUserAgent(r.UserAgent()),
+			Caller:     useragent.Caller(note.caller),
 			RequestID:  truncate(r.Header.Get("X-Request-ID")),
 			Status:     rec.status,
 			DurationMs: time.Since(start).Milliseconds(),
 			Remote:     remoteHost(r.RemoteAddr),
 			Op:         note.method,
+		}
+		if _, present := r.Header["X-Praesidium-Caller"]; present {
+			field.Caller = useragent.Caller(r.Header.Get("X-Praesidium-Caller"))
 		}
 		level := "info"
 		switch {
@@ -174,7 +181,7 @@ func withRequestLog(next http.Handler, listener string) http.Handler {
 			if field.Remote != nil {
 				remote = *field.Remote
 			}
-			ok, skipped := quietPolls.admit(quietPollKey{field.Client, remote, note.method}, start)
+			ok, skipped := quietPolls.admit(quietPollKey{field.Client, field.Caller, remote, note.method}, start)
 			if !ok {
 				return
 			}

@@ -11,6 +11,8 @@ import (
 const DefaultMaxFrameBytes = 8 << 20
 
 type Request struct {
+	// Attribution is outside the method DTO schema and accepts malformed values.
+	Caller  json.RawMessage `json:"caller,omitempty"`
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
 	Method  string          `json:"method"`

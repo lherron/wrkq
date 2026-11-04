@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/useragent"
@@ -79,6 +80,7 @@ func ServeRemoteStdio(ctx context.Context, in io.Reader, out io.Writer, endpoint
 	writer := NewWriter(out)
 	client := http.DefaultClient
 	url := "http://" + endpoint + "/v1/rpc"
+	caller := useragent.ResolveCaller("")
 	shutdown := false
 	for {
 		req, err := reader.ReadRequest()
@@ -121,6 +123,9 @@ func ServeRemoteStdio(ctx context.Context, in io.Reader, out io.Writer, endpoint
 			}
 			continue
 		}
+		if len(req.Caller) == 0 {
+			req.Caller = json.RawMessage(strconv.Quote(caller))
+		}
 		resp, err := forwardRemoteFrame(ctx, client, url, token, principalRef, req)
 		if err != nil {
 			resp = Response{
@@ -146,6 +151,7 @@ func forwardRemoteFrame(ctx context.Context, client *http.Client, url, token, pr
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", useragent.String())
+	req.Header.Set("X-Praesidium-Caller", useragent.Caller(frame.Caller))
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

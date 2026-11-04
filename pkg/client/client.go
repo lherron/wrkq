@@ -31,6 +31,7 @@ type Client struct {
 }
 
 type newOptions struct {
+	componentName string
 	locator       string
 	token         string
 	principalRef  string
@@ -41,6 +42,11 @@ type newOptions struct {
 
 // Option customizes New.
 type Option func(*newOptions) error
+
+// WithComponentName names the embedding program for request logging only.
+func WithComponentName(name string) Option {
+	return func(opts *newOptions) error { opts.componentName = name; return nil }
+}
 
 // WithLocator is the library equivalent of wrkq --db. It accepts a local path
 // in wrkq_local builds or an rpc://host[:port] locator in every build.
@@ -130,7 +136,9 @@ func New(ctx context.Context, options ...Option) (*Client, error) {
 			if token == "" {
 				token = TokenFromEnv()
 			}
-			transport, err = NewRemote(cfg.RemoteEndpoint, token, WrkqProfile)
+			profile := WrkqProfile
+			profile.ComponentName = opts.componentName
+			transport, err = NewRemote(cfg.RemoteEndpoint, token, profile)
 		} else {
 			transport, err = newConfiguredLocalTransport(cfg, opts.principalRef)
 		}

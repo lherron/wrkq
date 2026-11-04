@@ -146,6 +146,9 @@ func (s *daemonServer) handleWorkRPC(w http.ResponseWriter, r *http.Request) {
 		s.writeRPCResponse(w, r, http.StatusBadRequest, req.Method, resp)
 		return
 	}
+	if note, ok := r.Context().Value(rpcLogKey{}).(*rpcLogNote); ok {
+		note.caller = req.Caller
+	}
 	if len(req.ID) == 0 {
 		resp := workrpc.Response{
 			JSONRPC: "2.0",

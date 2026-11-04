@@ -77,6 +77,8 @@ export interface CreateClientOptions {
   stderrTailBytes?: number;
   closeTimeoutMs?: number;
   clientInfo?: { name: string; version: string };
+  /** Named embedding component for service request logging. */
+  componentName?: string;
   /** Run rpc.initialize before returning. Default true. */
   autoInitialize?: boolean;
   /** Inject a transport directly (for tests). Bypasses spawning. */
@@ -93,6 +95,7 @@ class WorkClientImpl implements WorkClient {
   constructor(
     transport: Transport,
     clientInfo?: { name: string; version: string },
+    private readonly caller: string = "unknown",
   ) {
     this.transport = transport;
     this.clientInfo = clientInfo ?? DEFAULT_CLIENT_INFO;
@@ -100,7 +103,7 @@ class WorkClientImpl implements WorkClient {
 
   async call<R = unknown>(method: string, params?: unknown): Promise<R> {
     const id = `req_${++this.idSeq}`;
-    const frame: JsonRpcRequest = { jsonrpc: "2.0", id, method };
+    const frame: JsonRpcRequest = { jsonrpc: "2.0", id, method, caller: this.caller };
     if (params !== undefined) frame.params = params;
     const resp = await this.transport.request(frame);
     if (resp.error) {
@@ -429,15 +432,30 @@ export async function createClient(
       signal: opts.signal,
       stderrTailBytes: opts.stderrTailBytes,
       closeTimeoutMs: opts.closeTimeoutMs,
-      env: opts.env,
+      env: opts.componentName
+        ? { ...opts.env, PRAESIDIUM_CALLER: opts.componentName }
+        : opts.env,
       cwd: opts.cwd,
     });
 
-  const client = new WorkClientImpl(transport, opts.clientInfo);
+  const client = new WorkClientImpl(
+    transport,
+    opts.clientInfo,
+    resolveCaller(opts.componentName, { ...process.env, ...opts.env }),
+  );
 
   if (opts.autoInitialize !== false) {
     await client.rpc.initialize();
   }
 
   return client;
+}
+
+/** Resolve once per client; an invalid nearest hint is unknown, not a fallback. */
+function resolveCaller(
+  component: string | undefined,
+  env: Record<string, string | undefined>,
+): string {
+  const value = component || env.PRAESIDIUM_CALLER || env.ASP_HANDLE || (process.stdin.isTTY ? "tty" : "unknown");
+  return /^[A-Za-z0-9._:@/+-]{1,128}$/.test(value) ? value : "unknown";
 }

@@ -39,3 +39,28 @@ func TestRemoteStdioForwardsCallerScopeHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRemoteStdioCaller(t *testing.T) {
+	t.Setenv("PRAESIDIUM_CALLER", "parent")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var frame map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&frame)
+		want := "parent"
+		if frame["id"] == float64(2) {
+			want = "explicit@wrkq:primary"
+		}
+		if frame["id"] == float64(3) {
+			want = "unknown"
+		}
+		if got := r.Header.Get("X-Praesidium-Caller"); got != want {
+			t.Errorf("header=%q want %q", got, want)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": frame["id"], "result": map[string]any{}})
+	}))
+	defer server.Close()
+	input := strings.NewReader("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"probe\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"probe\",\"caller\":\"explicit@wrkq:primary\"}\n{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"probe\",\"caller\":null}\n")
+	var out bytes.Buffer
+	if err := ServeRemoteStdio(context.Background(), input, &out, strings.TrimPrefix(server.URL, "http://"), "", ""); err != nil {
+		t.Fatal(err)
+	}
+}

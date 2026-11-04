@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/lherron/wrkq/internal/useragent"
 	"github.com/lherron/wrkq/internal/workrpc"
 	"github.com/lherron/wrkq/internal/workrpc/bootstrap"
 )
@@ -27,7 +28,7 @@ func NewInProcess(h *bootstrap.Handle, profile Profile) (Transport, error) {
 		_ = serverW.Close()
 		done <- err
 	}()
-	c := &conn{w: clientW, br: bufio.NewReader(serverR), profile: profile}
+	c := &conn{w: clientW, br: bufio.NewReader(serverR), profile: profile, caller: useragent.ResolveCaller(profile.ComponentName)}
 	c.onClose = func() error {
 		_ = clientW.Close()
 		serveErr := <-done
