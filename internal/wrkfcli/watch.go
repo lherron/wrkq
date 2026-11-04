@@ -97,7 +97,7 @@ func runWatch(a *app, cmd *cobra.Command, selector string, flags watchFlags) err
 	snapshot := &snapshotValue
 	eventsCursor := ""
 	if flags.follow {
-		if err := emitWatchEvents(cmd, a, selector, &eventsCursor); err != nil {
+		if err := emitWatchEvents(cmd, a, selector, &eventsCursor, deadline); err != nil {
 			return exitError(3, err)
 		}
 	}
@@ -123,7 +123,7 @@ func runWatch(a *app, cmd *cobra.Command, selector string, flags watchFlags) err
 		}
 
 		if flags.follow {
-			if err := emitWatchEvents(cmd, a, selector, &eventsCursor); err != nil {
+			if err := emitWatchEvents(cmd, a, selector, &eventsCursor, deadline); err != nil {
 				return exitError(3, err)
 			}
 		}
@@ -150,7 +150,7 @@ func parseOptionalDuration(raw, name string) (time.Duration, error) {
 	return d, nil
 }
 
-func emitWatchEvents(cmd *cobra.Command, a *app, selector string, afterCursor *string) error {
+func emitWatchEvents(cmd *cobra.Command, a *app, selector string, afterCursor *string, deadline time.Time) error {
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	for {
 		result, err := rpcCall[wrkfapi.WatchEventsResult](cmd, a, "wrkf.watch.events", wrkfapi.WatchEventsParams{
@@ -166,7 +166,7 @@ func emitWatchEvents(cmd *cobra.Command, a *app, selector string, afterCursor *s
 		}
 		previous := *afterCursor
 		*afterCursor = result.NextCursor
-		if len(result.Events) < 100 || result.NextCursor == previous {
+		if len(result.Events) < 100 || result.NextCursor == previous || (!deadline.IsZero() && !time.Now().Before(deadline)) {
 			return nil
 		}
 	}
