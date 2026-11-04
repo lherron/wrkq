@@ -398,7 +398,7 @@ func (s *Service) insertSupervisorEffect(taskSelector, kind, keyTag, reason stri
 		return nil, err
 	}
 	var effect *Effect
-	err = withTx(s.db.DB, func(tx *sql.Tx) error {
+	err = withTx(s.db, func(tx *sql.Tx) error {
 		id, err := nextSeqID(tx, "workflow_effect_seq", "eff")
 		if err != nil {
 			return err

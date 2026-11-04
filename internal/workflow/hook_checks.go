@@ -241,7 +241,7 @@ func (s *Service) executeCheck(inst *Instance, tr *TransitionSpec, checkID strin
 	}
 	cr.CompletedAt = s.now().Format(time.RFC3339)
 	if persist {
-		if err := withTx(s.db.DB, func(tx *sql.Tx) error {
+		if err := withTx(s.db, func(tx *sql.Tx) error {
 			id, err := nextSeqID(tx, "workflow_check_run_seq", "chk")
 			if err != nil {
 				return err

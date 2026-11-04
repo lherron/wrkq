@@ -324,7 +324,7 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 		}); eerr != nil {
 			return nil, NewInternalError(eerr)
 		}
-		if cerr := tx.Commit(); cerr != nil {
+		if cerr := a.db.CommitEvents(tx); cerr != nil {
 			return nil, NewInternalError(cerr)
 		}
 		return preDTO, nil
@@ -366,7 +366,7 @@ func (a *API) CommentDelete(ctx context.Context, p CommentDeleteParams) (*WrkqCo
 	}); eerr != nil {
 		return nil, NewInternalError(eerr)
 	}
-	if cerr := tx.Commit(); cerr != nil {
+	if cerr := a.db.CommitEvents(tx); cerr != nil {
 		return nil, NewInternalError(cerr)
 	}
 

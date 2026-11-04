@@ -253,7 +253,7 @@ func (s *daemonServer) handleCommentsCreate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := s.db.CommitEvents(tx); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}

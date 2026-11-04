@@ -117,7 +117,7 @@ func (a *API) TaskClaim(ctx context.Context, p TaskClaimParams) (*WrkqTaskClaim,
 	}); err != nil {
 		return nil, NewInternalError(err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := a.db.CommitEvents(tx); err != nil {
 		return nil, NewInternalError(err)
 	}
 	return &WrkqTaskClaim{
@@ -223,7 +223,7 @@ func (a *API) TaskRelease(ctx context.Context, p TaskReleaseParams) (*WrkqTaskCl
 	}); err != nil {
 		return nil, NewInternalError(err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := a.db.CommitEvents(tx); err != nil {
 		return nil, NewInternalError(err)
 	}
 	return prior, nil

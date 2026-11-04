@@ -105,7 +105,7 @@ func (s *daemonServer) handleRelationsCreate(w http.ResponseWriter, r *http.Requ
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.db.CommitEvents(tx); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -184,7 +184,7 @@ func (s *daemonServer) handleRelationsDelete(w http.ResponseWriter, r *http.Requ
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.db.CommitEvents(tx); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}

@@ -75,7 +75,7 @@ func (a *API) HandoffCreate(ctx context.Context, p HandoffCreateParams) (*WrkqHa
 		}
 		return nil, mapHandoffStoreError(err, "")
 	}
-	if err := tx.Commit(); err != nil {
+	if err := a.db.CommitEvents(tx); err != nil {
 		return nil, NewInternalError(err)
 	}
 

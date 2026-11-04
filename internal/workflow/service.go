@@ -299,8 +299,8 @@ func nullIfEmpty(s string) interface{} {
 	return s
 }
 
-func withTx(db *sql.DB, fn func(*sql.Tx) error) error {
-	tx, err := db.Begin()
+func withTx(database *db.DB, fn func(*sql.Tx) error) error {
+	tx, err := database.Begin()
 	if err != nil {
 		return err
 	}
@@ -308,7 +308,7 @@ func withTx(db *sql.DB, fn func(*sql.Tx) error) error {
 	if err := fn(tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return database.CommitEvents(tx)
 }
 
 // withImmediateTx starts a write transaction using SQLite BEGIN IMMEDIATE.
@@ -342,7 +342,7 @@ func withImmediateTx(database *db.DB, fn func(*sql.Tx) error) error {
 	if err := fn(tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return database.CommitEvents(tx)
 }
 
 func insertEventReturning(tx *sql.Tx, instanceID, typ, actor, role, runID string, observed, next int64, key string, taskETag int64, taskHash string, payload interface{}) (workflowEventMetadata, error) {

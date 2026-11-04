@@ -393,7 +393,7 @@ func (a *API) restoreTaskTx(taskUUID string, opts restoreOptions, attr attributi
 		}
 	}
 
-	if cerr := tx.Commit(); cerr != nil {
+	if cerr := a.db.CommitEvents(tx); cerr != nil {
 		return webhooks.EventContext{}, NewInternalError(cerr)
 	}
 	if commentResult != nil {

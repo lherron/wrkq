@@ -6,6 +6,7 @@
 - Indexes three resource types: `task`, `comment`, `handoff`. `wrkq search` queries tasks+comments; `wrkq handoff search` queries handoffs through the same engine. Both go through `internal/search/search.go`.
 - `search_chunks` schema is at version `2` (`internal/search/indexdb/db.go`). On version mismatch the chunk/FTS tables are auto-dropped and the indexer resets `last_indexed_event_id` to `0` so the next `wrkq index update` or `wrkq handoff search` lazily rebuilds.
 - **FTS5 requires the `sqlite_fts5` build tag.** `just build` already passes it. Without the tag, queries silently degrade to a LIKE-based fallback on `search_fts_plain` — works, but no bm25 ranking.
+- `wrkqd` catches up from `last_indexed_event_id` on startup, then wakes after local event-writing commits. Wakes coalesce; a 60-second safety tick catches writers outside the process. While paused it ignores commit wakes and checks again on resume or the safety tick.
 - Lifecycle commands: `wrkq index status`, `wrkq index rebuild [--foreground]`, `wrkq index update`, `wrkq index vacuum`, `wrkq index pause`, `wrkq index resume`.
 - `wrkq handoff search` calls `IndexPending` automatically before each query so freshly created/acked handoffs show up without a manual rebuild.
 

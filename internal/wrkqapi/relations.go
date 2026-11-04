@@ -93,7 +93,7 @@ func (a *API) RelationAdd(ctx context.Context, p RelationAddParams) (*WrkqRelati
 		return nil, NewInternalError(eerr)
 	}
 
-	if cerr := tx.Commit(); cerr != nil {
+	if cerr := a.db.CommitEvents(tx); cerr != nil {
 		return nil, NewInternalError(cerr)
 	}
 
@@ -245,7 +245,7 @@ func (a *API) RelationRemove(ctx context.Context, p RelationRemoveParams) (*Wrkq
 		return nil, NewInternalError(eerr)
 	}
 
-	if cerr := tx.Commit(); cerr != nil {
+	if cerr := a.db.CommitEvents(tx); cerr != nil {
 		return nil, NewInternalError(cerr)
 	}
 

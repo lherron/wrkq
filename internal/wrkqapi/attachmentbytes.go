@@ -413,7 +413,7 @@ func (a *API) finalizeUpload(ctx context.Context, uploadID string, up *attachmen
 		return nil, NewInternalError(eerr)
 	}
 
-	if cerr := tx.Commit(); cerr != nil {
+	if cerr := a.db.CommitEvents(tx); cerr != nil {
 		_ = os.Remove(absPath)
 		return nil, NewInternalError(cerr)
 	}

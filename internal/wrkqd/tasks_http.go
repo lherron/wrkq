@@ -386,7 +386,7 @@ func (s *daemonServer) handleTasksRestore(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := s.db.CommitEvents(tx); err != nil {
 		s.writeError(w, http.StatusBadRequest, err)
 		return
 	}

@@ -386,7 +386,7 @@ func (s *Service) Refresh(taskSelector, actor string) (*Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = withTx(s.db.DB, func(tx *sql.Tx) error {
+	err = withTx(s.db, func(tx *sql.Tx) error {
 		task, err := loadTaskDoc(tx, inst.TaskUUID)
 		if err != nil {
 			return err
@@ -421,7 +421,7 @@ func (s *Service) SyncMeta(taskSelector, actor string) (int, error) {
 			if err != nil {
 				return count, err
 			}
-			if err := withTx(s.db.DB, func(tx *sql.Tx) error { return updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, actor) }); err != nil {
+			if err := withTx(s.db, func(tx *sql.Tx) error { return updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, actor) }); err != nil {
 				return count, err
 			}
 			count++
@@ -432,7 +432,7 @@ func (s *Service) SyncMeta(taskSelector, actor string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if err := withTx(s.db.DB, func(tx *sql.Tx) error { return updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, actor) }); err != nil {
+	if err := withTx(s.db, func(tx *sql.Tx) error { return updateTaskWorkflowMeta(tx, inst.TaskUUID, *inst, actor) }); err != nil {
 		return 0, err
 	}
 	return 1, nil

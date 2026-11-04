@@ -162,7 +162,7 @@ func (a *API) AttachmentAdd(ctx context.Context, p AttachmentAddParams) (*WrkqAt
 		return nil, NewInternalError(eerr)
 	}
 
-	if cerr := tx.Commit(); cerr != nil {
+	if cerr := a.db.CommitEvents(tx); cerr != nil {
 		_ = os.Remove(absPath)
 		return nil, NewInternalError(cerr)
 	}
@@ -329,7 +329,7 @@ func (a *API) AttachmentRemove(ctx context.Context, p AttachmentRemoveParams) (*
 		return nil, NewInternalError(eerr)
 	}
 
-	if cerr := tx.Commit(); cerr != nil {
+	if cerr := a.db.CommitEvents(tx); cerr != nil {
 		return nil, NewInternalError(cerr)
 	}
 

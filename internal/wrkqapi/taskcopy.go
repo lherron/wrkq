@@ -211,7 +211,7 @@ func (a *API) TaskCopy(ctx context.Context, p TaskCopyParams) (*WrkqTaskCopyResu
 		return nil, NewInternalError(eerr)
 	}
 
-	if cerr := tx.Commit(); cerr != nil {
+	if cerr := a.db.CommitEvents(tx); cerr != nil {
 		return nil, NewInternalError(cerr)
 	}
 	committed = true

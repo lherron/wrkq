@@ -412,5 +412,6 @@ func (a *API) IndexResume(ctx context.Context, _ IndexLifecycleParams) (map[stri
 	if err := idx.SetState("status", "ready"); err != nil {
 		return nil, NewInternalError(err)
 	}
+	a.db.SearchResumes.Notify()
 	return map[string]any{"status": "ready"}, nil
 }

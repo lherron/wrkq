@@ -93,7 +93,7 @@ func (s *Service) SetObligationStatusWithAuthority(taskSelector, id, status, evi
 	}
 	now := s.now().Format(time.RFC3339)
 	var out *Obligation
-	err = withTx(s.db.DB, func(tx *sql.Tx) error {
+	err = withTx(s.db, func(tx *sql.Tx) error {
 		current, err := selectObligationTx(tx, id, inst.ID)
 		if err != nil {
 			return err
@@ -164,7 +164,7 @@ func (s *Service) CreateObligation(taskSelector, kind, ownerRole, ownerActor str
 		return nil, err
 	}
 	var out *Obligation
-	err = withTx(s.db.DB, func(tx *sql.Tx) error {
+	err = withTx(s.db, func(tx *sql.Tx) error {
 		id, err := nextSeqID(tx, "workflow_obligation_seq", "obl")
 		if err != nil {
 			return err

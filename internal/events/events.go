@@ -11,8 +11,9 @@ import (
 
 // Writer handles writing events to the event log
 type Writer struct {
-	db          *sql.DB
-	afterCommit []func(*db.DB)
+	db           *sql.DB
+	afterCommit  []func(*db.DB)
+	loggedEvents bool
 }
 
 // EventMetadata is the durable identity assigned by event_log.
@@ -34,8 +35,13 @@ func (w *Writer) AfterCommit(fn func(*db.DB)) {
 	w.afterCommit = append(w.afterCommit, fn)
 }
 
-// RunAfterCommit runs the queued post-commit callbacks once, in order.
+// RunAfterCommit publishes a local wake when events were written, then runs
+// the queued post-commit callbacks once, in order. Call only after commit.
 func (w *Writer) RunAfterCommit(database *db.DB) {
+	if w.loggedEvents {
+		database.EventCommits.Notify()
+		w.loggedEvents = false
+	}
 	queued := w.afterCommit
 	w.afterCommit = nil
 	for _, fn := range queued {
@@ -69,6 +75,7 @@ func (w *Writer) LogEventReturning(tx *sql.Tx, event *domain.Event) (EventMetada
 		return EventMetadata{}, fmt.Errorf("failed to write event: %w", err)
 	}
 
+	w.loggedEvents = true
 	id, err := res.LastInsertId()
 	if err != nil {
 		return EventMetadata{}, fmt.Errorf("failed to read event id: %w", err)

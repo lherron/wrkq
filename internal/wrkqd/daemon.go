@@ -104,7 +104,7 @@ func ServeDaemon(opts DaemonOptions) error {
 		workrpc:  rpcServer,
 		rpcToken: opts.Token,
 	}
-	server.startSearchIndexer()
+	defer server.startSearchIndexer()()
 	if opts.PollSampleWindow > 0 {
 		quietPolls.window = opts.PollSampleWindow
 	}

@@ -329,7 +329,7 @@ func AcknowledgeHandoff(ctx context.Context, database *db.DB, idOrUUID string, a
 		return Handoff{}, err
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := database.CommitEvents(tx); err != nil {
 		return Handoff{}, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return acknowledged, nil

@@ -21,6 +21,10 @@ var migrationsFS embed.FS
 // DB wraps a SQLite database connection
 type DB struct {
 	*sql.DB
+	// EventCommits wakes local readers after event-writing transactions commit.
+	EventCommits ChangeSignal
+	// SearchResumes wakes the indexer even while event wakes are suppressed by pause.
+	SearchResumes ChangeSignal
 	// read is a second pool for read-only transactions. go-sqlite3 ignores
 	// sql.TxOptions.ReadOnly and opens every transaction with the DSN's
 	// _txlock, which on the main pool is IMMEDIATE: a read-only transaction
