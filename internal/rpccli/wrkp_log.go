@@ -65,7 +65,7 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 					return fmt.Errorf("invalid --before value: expected RFC3339 timestamp: %w", err)
 				}
 			}
-			tr, sc, closeFn, err := openMirror(cmd)
+			tr, sc, cfg, closeFn, err := openMirrorConfig(cmd)
 			if err != nil {
 				return err
 			}
@@ -108,8 +108,15 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 			// Take the ephemeral wake token before the first authoritative read.
 			// The timeline cursor alone remains the replay position.
 			token := ""
+			maxWait := 25 * time.Second
+			// Local pipe calls cannot cancel a parked request, and separate
+			// local writers do not share the process commit signal. Keep
+			// these waits short to preserve local cancellation and clocks.
+			if cfg.RemoteEndpoint == "" {
+				maxWait = monitorPollInterval
+			}
 			if follow {
-				token, err = workrpcclient.WaitForCommit(cmd.Context(), tr, "", wrkpFollowDelay(beforeTime, clockSlack(followStarted, lastEntry, timeout, stallAfter)))
+				token, err = workrpcclient.WaitForCommit(cmd.Context(), tr, "", wrkpFollowDelay(beforeTime, min(maxWait, clockSlack(followStarted, lastEntry, timeout, stallAfter))))
 				if err != nil {
 					if cmd.Context().Err() != nil {
 						return nil
@@ -236,7 +243,7 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 				if cursor != "" && cursor != sentCursor {
 					continue
 				}
-				slack := wrkpFollowDelay(beforeTime, clockSlack(followStarted, lastEntry, timeout, stallAfter))
+				slack := wrkpFollowDelay(beforeTime, min(maxWait, clockSlack(followStarted, lastEntry, timeout, stallAfter)))
 				slack = min(slack, max(0, time.Until(fingerprintAt.Add(wrkpFingerprintInterval))))
 				token, err = workrpcclient.WaitForCommit(cmd.Context(), tr, token, slack)
 				if err != nil {
