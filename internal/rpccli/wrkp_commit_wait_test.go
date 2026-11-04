@@ -61,7 +61,7 @@ func TestWrkpFollowCommitWait(t *testing.T) {
 			calls = nil
 			mu.Unlock()
 			cmd := NewWrkpRootCmd()
-			cmd.SetArgs([]string{"--db", "rpc://" + strings.TrimPrefix(httpServer.URL, "http://"), "log", "rpccli-test-proj", "--follow", "--ndjson", "--limit", "1", clock, "1200ms"})
+			cmd.SetArgs([]string{"--db", "rpc://" + strings.TrimPrefix(httpServer.URL, "http://"), "log", "rpccli-test-proj", "--follow", "--since", "2020-01-01T00:00:00Z", "--ndjson", "--limit", "1", clock, "1200ms"})
 			var stdout, stderr bytes.Buffer
 			cmd.SetOut(&stdout)
 			cmd.SetErr(&stderr)
