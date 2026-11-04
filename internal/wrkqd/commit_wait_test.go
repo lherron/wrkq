@@ -124,8 +124,11 @@ func TestCommitWaitWakeAndTokenBeforeRead(t *testing.T) {
 				t.Fatal("commit did not wake within 200ms")
 			}
 			t.Logf("commit + wake: %s", time.Since(start))
-			// Read durable state after taking a token and committing. The next wait
-			// must return immediately even if the broadcast has not flushed yet.
+			// Take a new token, commit without a parked waiter, then read.
+			// The next wait must notice the synchronous sequence even while
+			// this commit's coalesced broadcast is still pending.
+			token = h.wait(t, "", 1000).Token
+			h.must(t, "wrkq.task.update", map[string]any{"task": "inbox/wake", "patch": map[string]any{"title": "crossing " + mutation.method}})
 			h.must(t, "wrkq.task.show", map[string]any{"task": "inbox/wake"})
 			start = time.Now()
 			next := h.wait(t, token, 1000)

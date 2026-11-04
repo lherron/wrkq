@@ -9,7 +9,8 @@ import (
 )
 
 // ProjectEventStore persists foreign facts without producing event_log rows,
-// webhooks, room envelopes, or any other side effect.
+// webhooks, or room envelopes. Successful inserts publish the shared local
+// post-commit wake hint; idempotent replays do not.
 type ProjectEventStore struct {
 	store *Store
 }
@@ -66,7 +67,7 @@ func (ps *ProjectEventStore) Create(p ProjectEventCreateParams) (*domain.Project
 	if err != nil {
 		return nil, false, fmt.Errorf("read inserted project event: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := ps.store.db.CommitEvents(tx); err != nil {
 		return nil, false, fmt.Errorf("commit project event: %w", err)
 	}
 	return event, true, nil
