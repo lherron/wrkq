@@ -5,6 +5,8 @@ package wrkqapi
 import (
 	"context"
 	"database/sql"
+	"slices"
+	"sort"
 	"testing"
 
 	"github.com/lherron/wrkq/internal/attribution"
@@ -83,20 +85,24 @@ func TestEnvelopeReadSweepAttribution(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer func() { _ = rows.Close() }()
-				count := 0
+				var seen []string
 				for rows.Next() {
 					var eventType string
 					if err := rows.Scan(&eventType, &principal, &scope); err != nil {
 						t.Fatal(err)
 					}
 					check(eventType, principal, scope)
-					count++
+					seen = append(seen, eventType)
 				}
 				if err := rows.Err(); err != nil {
 					t.Fatal(err)
 				}
-				if count != 2 { // retry maintenance deliberately emits no event
-					t.Errorf("sweep events = %d, want 2", count)
+				// The re-pend itself is a derived transition and emits no
+				// envelope event; the retry promise it closes logs
+				// promise.resolved so event-tail consumers see it (T-12463).
+				sort.Strings(seen)
+				if want := []string{"envelope.expired", "envelope.failed", "promise.resolved"}; !slices.Equal(seen, want) {
+					t.Errorf("sweep events = %v, want %v", seen, want)
 				}
 			})
 		}

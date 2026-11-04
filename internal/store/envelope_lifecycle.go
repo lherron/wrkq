@@ -3,13 +3,16 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
+	"github.com/lherron/wrkq/internal/webhooks"
 )
 
 // EnvelopeWrongStateError identifies a disposition verb attempted on an
@@ -227,8 +230,9 @@ func (rs *RoomStore) WithdrawEnvelopesWithAttribution(attr attribution.Attributi
 // RependDueDeferrals returns deferred envelopes whose retry time has arrived to
 // pending so the kicker's next sweep re-drives them, and resolves the promise
 // that was carrying the deferral. This is a DERIVED transition back to the
-// pre-defer state, so it emits no event: the kicker wakes on its periodic
-// sweep, exactly as the spec routes it.
+// pre-defer state, so it emits no envelope event: the kicker wakes on its
+// periodic sweep, exactly as the spec routes it. The promise it closes still
+// logs promise.resolved (T-12463).
 func (rs *RoomStore) RependDueDeferrals(attr attribution.Attribution) (int, error) {
 	if err := requireAttribution(attr); err != nil {
 		return 0, err
@@ -247,7 +251,7 @@ func (rs *RoomStore) RependDueDeferrals(attr attribution.Attribution) (int, erro
 		return 0, nil
 	}
 	repended := 0
-	err := rs.store.withTx(func(tx *sql.Tx, _ *events.Writer) error {
+	err := rs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
 		rows, err := tx.Query(`SELECT uuid, retry_promise_uuid FROM envelopes
 			 WHERE state = 'deferred' AND retry_at IS NOT NULL
 			   AND retry_at <= strftime('%Y-%m-%dT%H:%M:%SZ','now')
@@ -284,7 +288,7 @@ func (rs *RoomStore) RependDueDeferrals(attr attribution.Attribution) (int, erro
 				return fmt.Errorf("failed to re-pend deferred envelope: %w", err)
 			}
 			if item.promise.Valid {
-				if err := resolveDeferralPromiseTx(tx, attr, item.promise.String, "deferred envelope re-pended"); err != nil {
+				if err := resolveDeferralPromiseTx(tx, ew, attr, item.promise.String, "deferred envelope re-pended"); err != nil {
 					return err
 				}
 			}
@@ -296,19 +300,60 @@ func (rs *RoomStore) RependDueDeferrals(attr attribution.Attribution) (int, erro
 }
 
 // resolveDeferralPromiseTx closes the open promise that carried a deferral,
-// once the envelope leaves deferred (re-pended or terminal).
-func resolveDeferralPromiseTx(tx *sql.Tx, attr attribution.Attribution, promiseUUID, note string) error {
-	if _, err := tx.Exec(`UPDATE promises
-		SET state = 'resolved',
-		    closed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
-		    last_reviewed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
+// once the envelope leaves deferred (re-pended or terminal). It logs the same
+// promise.resolved event (and fires the same webhook, after commit) as an
+// explicit `promise resolve`, so event-tail consumers see the close (T-12463).
+// A promise already closed by its owner is left alone and logs nothing.
+func resolveDeferralPromiseTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, promiseUUID, note string) error {
+	current, err := getPromiseTx(tx, promiseUUID)
+	var missing *PromiseNotFoundError
+	if errors.As(err, &missing) {
+		return nil // purged by its owner: nothing left to close
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read deferral promise: %w", err)
+	}
+	if current.State != domain.PromiseStateOpen {
+		return nil
+	}
+	closedAt, err := serverNowTx(tx)
+	if err != nil {
+		return err
+	}
+	result, err := tx.Exec(`UPDATE promises
+		SET state = 'resolved', closed_at = ?, last_reviewed_at = ?,
 		    last_review_note = ?,
 		    etag = etag + 1,
 		    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
 		    updated_by_principal_ref = ?, updated_by_scope_ref = ?
-		WHERE uuid = ? AND state = 'open'`, note, attr.PrincipalRef, scopeSQL(attr), promiseUUID); err != nil {
+		WHERE uuid = ? AND state = 'open'`, closedAt, closedAt, note, attr.PrincipalRef, scopeSQL(attr), promiseUUID)
+	if err != nil {
 		return fmt.Errorf("failed to resolve deferral promise: %w", err)
 	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed == 0 {
+		return nil
+	}
+	payload := map[string]interface{}{
+		"state":              domain.PromiseStateResolved,
+		"last_reviewed_at":   closedAt,
+		"last_review_note":   note,
+		"previous_review_at": current.ReviewAt,
+		"note":               note,
+		"closed_at":          closedAt,
+	}
+	metadata, err := logPromiseEvent(tx, ew, attr, promiseUUID, "promise.resolved", current.ETag+1, payload)
+	if err != nil {
+		return err
+	}
+	resolved, err := getPromiseTx(tx, promiseUUID)
+	if err != nil {
+		return err
+	}
+	ew.AfterCommit(func(database *db.DB) {
+		webhooks.DispatchPromiseEvent(database, *resolved, "promise.resolved", payload, metadata, attr.PrincipalRef)
+	})
 	return nil
 }
 
@@ -381,7 +426,7 @@ func disposeEnvelopeTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attributi
 	// the deferral; otherwise its promise stays open with nothing to re-pend.
 	if current.State == domain.EnvelopeStateDeferred && domain.IsEnvelopeTerminal(disposition.State) &&
 		current.RetryPromiseUUID != nil {
-		if err := resolveDeferralPromiseTx(tx, attr, *current.RetryPromiseUUID, "deferred envelope "+string(disposition.State)); err != nil {
+		if err := resolveDeferralPromiseTx(tx, ew, attr, *current.RetryPromiseUUID, "deferred envelope "+string(disposition.State)); err != nil {
 			return nil, err
 		}
 	}

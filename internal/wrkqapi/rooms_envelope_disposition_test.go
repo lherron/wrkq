@@ -84,6 +84,8 @@ func TestDeferWithRetryIsPromiseBackedAndRepends(t *testing.T) {
 	if reloaded.State != "resolved" {
 		t.Fatalf("retry promise state = %s, want resolved", reloaded.State)
 	}
+	// Event-tail consumers learn of the resolution only from the ledger (T-12463).
+	assertPromiseResolvedEvent(t, f, *deferred.RetryPromiseID)
 
 	// Deferred is paused, never terminal: once re-pended, the kicker presents it
 	// again and a later reply acks it.
@@ -147,6 +149,7 @@ func TestExplicitDischargeAcksADeferredEnvelopeAndResolvesItsRetry(t *testing.T)
 	if promise.State != "resolved" {
 		t.Fatalf("retry promise state = %s after its envelope was acked, want resolved", promise.State)
 	}
+	assertPromiseResolvedEvent(t, f, *deferred.RetryPromiseID)
 }
 
 // TestEnvelopeDispositionRequiresTheAddressee carries T-06810's hygiene rule:
@@ -407,5 +410,42 @@ func TestInboxSentFailedListsOnlyLiveFailures(t *testing.T) {
 		if err != nil || shown.State != "failed" {
 			t.Fatalf("show %s after the listing dropped it: %+v %v", id, shown, err)
 		}
+	}
+}
+
+// assertPromiseResolvedEvent requires exactly one promise.resolved ledger event
+// for the promise, carrying the promise's current etag, so an event-tail
+// consumer (the praesidium kernel) sees a deferral promise close (T-12463).
+func assertPromiseResolvedEvent(t *testing.T, f *roomFixture, promiseID string) {
+	t.Helper()
+	var uuid string
+	var etag int64
+	if err := f.s.DB().QueryRow("SELECT uuid, etag FROM promises WHERE id = ?", promiseID).Scan(&uuid, &etag); err != nil {
+		t.Fatalf("read promise %s: %v", promiseID, err)
+	}
+	rows, err := f.s.DB().Query(
+		"SELECT etag, payload FROM event_log WHERE resource_type = 'promise' AND resource_uuid = ? AND event_type = 'promise.resolved'", uuid)
+	if err != nil {
+		t.Fatalf("read promise events: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var seen int
+	for rows.Next() {
+		var eventETag int64
+		var payload string
+		if err := rows.Scan(&eventETag, &payload); err != nil {
+			t.Fatalf("scan promise event: %v", err)
+		}
+		seen++
+		var decoded map[string]interface{}
+		if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+			t.Fatalf("promise.resolved payload %q: %v", payload, err)
+		}
+		if eventETag != etag || decoded["state"] != "resolved" || decoded["closed_at"] == nil {
+			t.Fatalf("promise.resolved event etag=%d payload=%s; want etag %d, state resolved, closed_at set", eventETag, payload, etag)
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("%s has %d promise.resolved events, want 1", promiseID, seen)
 	}
 }

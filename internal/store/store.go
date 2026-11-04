@@ -55,7 +55,11 @@ func (s *Store) withTx(fn func(tx *sql.Tx, ew *events.Writer) error) error {
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	ew.RunAfterCommit(s.db)
+	return nil
 }
 
 // checkETag verifies etag matches if ifMatch > 0, returns ETagMismatchError on mismatch.

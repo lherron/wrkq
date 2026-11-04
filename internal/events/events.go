@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/domain"
 )
 
 // Writer handles writing events to the event log
 type Writer struct {
-	db *sql.DB
+	db          *sql.DB
+	afterCommit []func(*db.DB)
 }
 
 // EventMetadata is the durable identity assigned by event_log.
@@ -22,6 +24,23 @@ type EventMetadata struct {
 // NewWriter creates a new event writer
 func NewWriter(db *sql.DB) *Writer {
 	return &Writer{db: db}
+}
+
+// AfterCommit queues fn to run once the transaction this writer serves has
+// committed; deep transaction helpers use it to fire webhooks for the events
+// they log without threading a collector through every caller. Only the
+// store's withTx runs the queue, and a rolled-back transaction drops it.
+func (w *Writer) AfterCommit(fn func(*db.DB)) {
+	w.afterCommit = append(w.afterCommit, fn)
+}
+
+// RunAfterCommit runs the queued post-commit callbacks once, in order.
+func (w *Writer) RunAfterCommit(database *db.DB) {
+	queued := w.afterCommit
+	w.afterCommit = nil
+	for _, fn := range queued {
+		fn(database)
+	}
 }
 
 // LogEvent writes an event to the event log
