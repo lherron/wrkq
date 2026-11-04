@@ -201,8 +201,14 @@ func assertField(t *testing.T, got, want any, name string) {
 
 // hermeticEnv is a minimal environment: no WRKQ_*/WRKQD_*/HRC_*/GIT_* leaks
 // in from the seat running the tests.
+// hermeticEnv isolates a test-built wrkq/wrkqd from the host. HOME alone is not
+// enough: `wrkq server health` inspects the host's launchd job by label, so on a
+// node whose installed wrkqd is mid-install (new image on disk, job not yet
+// restarted) the test daemon's health failed as "pinned code mismatch"
+// (post-push red at 9e1bc3a on mini). An absent label leaves no launchd owner.
 func hermeticEnv(home string, extra ...string) []string {
-	env := []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "TMPDIR=" + os.TempDir()}
+	env := []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "TMPDIR=" + os.TempDir(),
+		"WRKQ_LAUNCHD_LABEL=com.praesidium.wrkq-e2e-absent"}
 	return append(env, extra...)
 }
 
