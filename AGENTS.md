@@ -116,6 +116,11 @@ example HTTP 401) rather than collapsing them into task-not-found.
 
 Conventional Commits with optional scopes (`fix(mcp): ...`); mention affected commands or migration IDs.
 
+Every wrkq owner-surface change must state in its delivery evidence:
+"projected in the praesidium kernel or declared human-only" (strangler rule S3).
+Include the concrete `prae describe <type>` or document readback showing the
+changed field/operation; for human-only coverage, cite the explicit ruling and scope.
+
 ## Territory docs & further reading
 
 - [Durable architecture law](architecture/README.md) — canonical invariant/risk records, producer contracts, and their generated projections; consult and cite record ids before changing a recorded surface.

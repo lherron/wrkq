@@ -4,6 +4,13 @@ Target-local retro carrier for wrkq's agent-enablement sensors, workflow
 mechanisms, and documentation carriers. Add one dated entry after a pass changes
 the loop. Keep release notes elsewhere.
 
+## 2026-11-04 — Kernel projection delivery evidence (T-12445)
+
+Added the S3 projection decision and concrete readback requirement to the
+AGENTS.md delivery instructions. Proof: `just verify`, prose review and the
+three-owner clause readback recorded on the task. This stays a documentation
+requirement; no hook or service dependency is added.
+
 ## 2026-10-03 — Documentation review at final paths (T-10123)
 
 Corrected validation-gate coverage, rot-sensor scope, diff/watch semantics, and
