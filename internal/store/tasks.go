@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -81,6 +82,11 @@ func (ts *TaskStore) Create(actorUUID string, params CreateParams) (*CreateResul
 func (ts *TaskStore) CreateWithAttribution(attr attribution.Attribution, params CreateParams) (*CreateResult, error) {
 	if err := requireAttribution(attr); err != nil {
 		return nil, err
+	}
+	if params.Meta != nil {
+		if err := CheckTaskMeta(json.RawMessage(*params.Meta)); err != nil {
+			return nil, err
+		}
 	}
 	var result *CreateResult
 	var webhookCtx webhooks.EventContext

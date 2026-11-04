@@ -88,7 +88,8 @@ import (
 // T-12263 adds database incarnation and event-log head to history.tailView.
 // T-12264 adds the side-effect-free envelope.listView and its two DTOs.
 // T-12265 adds promise.listView and workflow.instancesView with four DTOs.
-const pinnedProtocolSchemaHash = "sha256:86b278bb0747f3129b65c29db33a38643aa6fe0f002c358c0e3a54f94cc2df8a"
+// T-12376 replaces META_KEY_MIGRATED with META_KEY_RESERVED for closed task metadata.
+const pinnedProtocolSchemaHash = "sha256:7e5a251483159c9c076e2ea5d18188cf560b75ed1d2758cf5d90833e8bb59b25"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {

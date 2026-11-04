@@ -161,7 +161,7 @@ func (ts *TaskStore) updateFieldsTx(tx *sql.Tx, ew *events.Writer, attr attribut
 			} else {
 				meta = incoming
 			}
-			if err := CheckMigratedMeta(tx, taskUUID, meta); err != nil {
+			if err := CheckTaskMeta(meta); err != nil {
 				return err
 			}
 		}

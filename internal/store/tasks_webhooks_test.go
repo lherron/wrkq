@@ -10,7 +10,7 @@ func TestTaskStoreUpdateFieldsDispatchesWebhook(t *testing.T) {
 	t.Setenv("WRKQ_CAUSATION_REF", "  jrun_parent_123  ")
 	f := newWebhookFixture(t)
 	container := f.project("project")
-	meta := `{"triage_status":"queued"}`
+	meta := `{"workflow":{"triage_status":"queued"}}`
 	result := f.task(container, "task", "open", func(p *CreateParams) { p.Meta = &meta })
 	calls := f.captureWebhooks(container, "/hook/{ticket_id}", "ftp://invalid")
 

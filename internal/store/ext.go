@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -133,95 +132,21 @@ func logExtEvent(tx *sql.Tx, ew *events.Writer, attr attribution.Attribution, ta
 	return ew.LogEvent(tx, &domain.Event{PrincipalRef: attr.PrincipalRef, ScopeRef: attr.ScopeRef, ResourceType: target.Type, ResourceUUID: &target.UUID, EventType: target.Type + ".ext." + verb, ETag: &etag, Payload: &text})
 }
 
-// CheckMigratedMeta runs under the same writer transaction as task.update.
-// It compares only present incoming paths: removal remains admitted.
-func CheckMigratedMeta(tx *sql.Tx, taskUUID string, incoming any) error {
-	var raw sql.NullString
-	if err := tx.QueryRow("SELECT meta FROM tasks WHERE uuid=?", taskUUID).Scan(&raw); err != nil {
-		return err
-	}
-	before := map[string]any{}
-	if raw.Valid {
-		if err := json.Unmarshal([]byte(raw.String), &before); err != nil {
-			return err
-		}
-	}
+// CheckTaskMeta closes task metadata to wrkq-owned keys. Extension bodies belong
+// in the independent register, regardless of whether an extension already exists.
+func CheckTaskMeta(incoming any) error {
 	encoded, err := json.Marshal(incoming)
 	if err != nil {
 		return err
 	}
-	after := map[string]any{}
-	if string(encoded) != "null" {
-		if err := json.Unmarshal(encoded, &after); err != nil {
-			return err
-		}
+	var meta map[string]interface{}
+	if err := json.Unmarshal(encoded, &meta); err != nil {
+		return fmt.Errorf("invalid meta: %w", err)
 	}
-	type moved struct {
-		path         []string
-		ns, kind, id string
-	}
-	paths := []moved{
-		{[]string{"acp", "request"}, "acp", "request", "main"},
-		{[]string{"scribe"}, "scribe", "request", "main"},
-		{[]string{"wrkf.taskStateMirror"}, "agentloop", "taskStateMirror", "main"},
-	}
-	for _, key := range strings.Fields("technique source risk package file apiImpact deltaId target targetSlug gate sourceWorkItem reportPath path") {
-		paths = append(paths, moved{[]string{key}, "archagent", "refactor", ""})
-	}
-	for key := range after {
-		if strings.HasPrefix(key, "hcs_") {
-			paths = append(paths, moved{[]string{key}, "hcs", "launch", "main"})
-		}
-	}
-	for _, p := range paths {
-		next, present := metaPath(after, p.path)
-		if !present {
-			continue
-		}
-		previous, previousPresent := metaPath(before, p.path)
-		a, _ := json.Marshal(previous)
-		b, _ := json.Marshal(next)
-		if previousPresent && string(a) == string(b) {
-			continue
-		}
-		query := "SELECT EXISTS(SELECT 1 FROM ext WHERE task_uuid=? AND ns=? AND kind=?"
-		args := []any{taskUUID, p.ns, p.kind}
-		if p.id != "" {
-			query += " AND id=?"
-			args = append(args, p.id)
-		}
-		query += ")"
-		var exists bool
-		if err := tx.QueryRow(query, args...).Scan(&exists); err != nil {
-			return err
-		}
-		if exists {
-			return extFailure("meta_key_migrated", fmt.Sprintf("meta_key_migrated: meta.%s moved; use wrkq ext put <task> %s %s %s --body <json>", strings.Join(p.path, "."), p.ns, p.kind, defaultExtID(p.id)))
+	for _, key := range sortedFieldNames(meta) {
+		if key != "workflow" && key != "_wrkq_archive_cascade" {
+			return extFailure("meta_key_reserved", fmt.Sprintf("meta_key_reserved: meta.%s is not wrkq-owned; use wrkq ext put <task> <ns> <kind> <id> --body <json>", key))
 		}
 	}
 	return nil
-}
-func defaultExtID(id string) string {
-	if id == "" {
-		return "<id>"
-	}
-	return id
-}
-
-// Paths are explicit segments: a dot inside a literal key is never traversal.
-func metaPath(meta map[string]any, path []string) (any, bool) {
-	for i, p := range path {
-		v, ok := meta[p]
-		if !ok {
-			return nil, false
-		}
-		if i == len(path)-1 {
-			return v, true
-		}
-		meta, ok = v.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-	}
-	return nil, false
 }

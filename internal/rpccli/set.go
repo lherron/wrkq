@@ -218,7 +218,7 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&title, "title", "", "Update task title")
 	cmd.Flags().StringVar(&slug, "slug", "", "Update task slug")
 	cmd.Flags().StringVar(&labels, "labels", "", "Update labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
-	cmd.Flags().StringVar(&meta, "meta", "", "Update task metadata (JSON object or null; --meta-file reads a file)")
+	cmd.Flags().StringVar(&meta, "meta", "", "Update wrkq metadata: workflow/_wrkq_archive_cascade only (JSON object or null)")
 	cmd.Flags().StringVar(&metaFile, "meta-file", "", "Load task metadata from file")
 	cmd.Flags().StringVar(&dueAt, "due-at", "", "Update task due date")
 	cmd.Flags().StringVar(&startAt, "start-at", "", "Update task start date")

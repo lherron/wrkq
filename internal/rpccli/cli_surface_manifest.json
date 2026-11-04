@@ -3860,7 +3860,7 @@
           },
           {
             "name": "meta",
-            "usage": "Update task metadata (JSON object or null; --meta-file reads a file)",
+            "usage": "Update wrkq metadata: workflow/_wrkq_archive_cascade only (JSON object or null)",
             "type": "string",
             "hidden": false
           },
@@ -4094,7 +4094,7 @@
           },
           {
             "name": "meta",
-            "usage": "Initial task metadata (JSON object or null)",
+            "usage": "Initial wrkq metadata: workflow/_wrkq_archive_cascade only (JSON object or null)",
             "type": "string",
             "hidden": false
           },

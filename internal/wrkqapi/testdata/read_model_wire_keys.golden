@@ -37,7 +37,7 @@ start_at: string
 due_at: string
 labels: string
 meta: object
-meta.k: string
+meta.workflow: string
 description: string
 specification: string
 etag: number

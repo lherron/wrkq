@@ -64,6 +64,12 @@ cd "$WV_STATE/client" && bun --env-file=/dev/null run client-drive.ts
 
 ## Gotchas
 
+- **T-12376 changes the protocol identity.** Replacing the conditional migrated-key
+  refusal with `WRKQ_META_KEY_RESERVED` changes the error-code catalog fingerprint.
+  Upgrade the canonical daemon before clients; keep the Go producer and published
+  TypeScript client's protocol hash together. Task metadata admits only `workflow`
+  and `_wrkq_archive_cascade`; use `wrkq.ext.put` for other owners' data.
+
 - **`bun add` without a local `package.json` writes the `~/praesidium` workspace.** Bun walks up to the nearest
   `package.json`, which is the monorepo root. A bare `bun add @wrkq/client@latest` in `$WV_STATE/client` rewrote
   `~/praesidium/package.json` (`"latest"` became a pinned dev version), its `bun.lock` and the root `node_modules`.

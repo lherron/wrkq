@@ -75,7 +75,7 @@ func TestSetMetaFileDashReadsStdin(t *testing.T) {
 		"set", taskID,
 		"--meta-file", "-",
 	})
-	cmd.SetIn(strings.NewReader(`{"from":"stdin"}`))
+	cmd.SetIn(strings.NewReader(`{"workflow":{"from":"stdin"}}`))
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
@@ -92,7 +92,7 @@ func TestSetMetaFileDashReadsStdin(t *testing.T) {
 	if err := database.QueryRow(`SELECT meta FROM tasks WHERE uuid = ?`, seedTaskUUID).Scan(&meta); err != nil {
 		t.Fatalf("query meta: %v", err)
 	}
-	if meta != `{"from":"stdin"}` {
+	if meta != `{"workflow":{"from":"stdin"}}` {
 		t.Fatalf("meta=%q", meta)
 	}
 }

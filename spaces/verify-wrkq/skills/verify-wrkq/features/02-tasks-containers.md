@@ -12,6 +12,11 @@ its cascade, named subtasks, relations, the edit round trip (`cat --output raw` 
 - **Create.** `wrkq mkdir <path> [--kind project|directory|...]` and `wrkq touch <container>/<slug> -t ... -d ...`.
   A leading `/` is root-absolute, which is how you reach another project or make a new one. Mutations are
   attributed to `--as`/`WRKQ_PRINCIPAL_REF` (`created_by_principal_ref`).
+- **Task metadata.** Create/update accepts only the wrkq-owned top-level keys
+  `workflow` and `_wrkq_archive_cascade`. Foreign keys, including null-valued or
+  unchanged keys, refuse `meta_key_reserved` with `wrkq ext put` guidance. This
+  applies to structured RPC metadata and `--meta`/`--meta-file`; empty/null clears
+  and carrying wrkq keys through a read-modify-write remain admitted (T-12376).
 - **Read.** `wrkq cat <sel> --json --one` (one object; without `--one`, JSON `cat` returns an array),
   `--output raw` (the task as Markdown), and `wrkq stat`.
 - **Bare numbers.** A bare 1-4 digit number names the numerically **highest task whose id ends in exactly those
@@ -125,3 +130,8 @@ bare `2` selects T-00012 once it exists (in `cat`, `set` and `log`), while `02` 
 Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/02-tasks-containers/drive.txt`
 (the T-11873 replay, then the `log` bare-number, `--oneline` order and progress drives after the NOTE line).
 T-10355 still reproduces at 5fbf10c.
+
+T-12376 candidate drive, 2026-11-04Z: `var/wrkq-artifacts/T-12376/rehearsal-drive.txt`
+uses the built CLI against a migrated canonical-snapshot copy. It proves ACP/HCS/
+unknown-key refusals and allowed workflow metadata carry. Canonical installed
+rollout evidence is recorded separately in that task's VALIDATION.md.

@@ -95,8 +95,8 @@ func mapExtStoreError(err error) error {
 			return NewConflictError(e.Message, nil)
 		case "ext_quota":
 			return newError("WRKQ_EXT_QUOTA", e.Message, false, nil, err)
-		case "meta_key_migrated":
-			return newError("WRKQ_META_KEY_MIGRATED", e.Message, false, nil, err)
+		case "meta_key_reserved":
+			return newError("WRKQ_META_KEY_RESERVED", e.Message, false, nil, err)
 		}
 	}
 	if errors.Is(err, sql.ErrNoRows) {

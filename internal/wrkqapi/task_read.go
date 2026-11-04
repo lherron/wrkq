@@ -222,6 +222,10 @@ func mapStoreError(err error, selector string) error {
 	if errors.As(err, &domainErr) {
 		return domainErr
 	}
+	var extErr *store.ExtError
+	if errors.As(err, &extErr) {
+		return mapExtStoreError(err)
+	}
 	var mismatch *domain.ETagMismatchError
 	if errors.As(err, &mismatch) {
 		return NewConflictError("task update conflict", map[string]any{"currentEtag": mismatch.Actual})

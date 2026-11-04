@@ -72,7 +72,7 @@ func newTouchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&resolution, "resolution", "", "Task resolution (done, wont_do, duplicate, needs_info)")
 	cmd.Flags().StringVar(&labels, "labels", "", "Initial labels (comma shorthand unless starting '[' for JSON array; empty/[] clears; JSON allows commas)")
 	cmd.Flags().StringVar(&covers, "covers", "", "Workstream coverage JSON object (inline, @file, or - for stdin)")
-	cmd.Flags().StringVar(&meta, "meta", "", "Initial task metadata (JSON object or null)")
+	cmd.Flags().StringVar(&meta, "meta", "", "Initial wrkq metadata: workflow/_wrkq_archive_cascade only (JSON object or null)")
 	cmd.Flags().StringVar(&metaFile, "meta-file", "", "Load task metadata from file (JSON object or null)")
 	cmd.Flags().StringVar(&dueAt, "due-at", "", "Initial task due date")
 	cmd.Flags().StringVar(&startAt, "start-at", "", "Initial task start date")

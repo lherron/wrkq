@@ -73,7 +73,7 @@ func TestTaskStore_Create(t *testing.T) {
 		RequestedByProjectID: strPtr("agent-spaces"),
 		AssignedProjectID:    strPtr("rex"),
 		Resolution:           strPtr("done"),
-		Meta:                 strPtr(`{"triage_status":"completed"}`),
+		Meta:                 strPtr(`{"workflow":{"triage_status":"completed"}}`),
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -247,7 +247,7 @@ func TestTaskStore_UpdateFields_MetaReplace(t *testing.T) {
 		ProjectUUID: containerUUID,
 		State:       "open",
 		Priority:    3,
-		Meta:        strPtr(`{"triage_status":"queued"}`),
+		Meta:        strPtr(`{"workflow":{"triage_status":"queued"}}`),
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -255,7 +255,7 @@ func TestTaskStore_UpdateFields_MetaReplace(t *testing.T) {
 
 	// Replace meta
 	newETag, err := s.Tasks.UpdateFields(actorUUID, createResult.UUID, map[string]interface{}{
-		"meta": `{"triage_status":"completed","triaged_at":"2026-01-04T08:12:00Z"}`,
+		"meta": `{"workflow":{"triage_status":"completed","triaged_at":"2026-01-04T08:12:00Z"}}`,
 	}, 0)
 	if err != nil {
 		t.Fatalf("UpdateFields failed: %v", err)

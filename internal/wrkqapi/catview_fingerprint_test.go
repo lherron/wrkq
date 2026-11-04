@@ -237,7 +237,7 @@ func seedReadModelGolden(t *testing.T, api *API) readModelGoldenFixture {
 		RequestedByProjectID:  "other",
 		AssignedProjectID:     "proj",
 		Labels:                []string{"wire", "golden"},
-		Meta:                  map[string]any{"k": "v"},
+		Meta:                  map[string]any{"workflow": "v"},
 		DueAt:                 "2030-01-02T00:00:00Z",
 		StartAt:               "2030-01-01T00:00:00Z",
 		CausedBy:              []string{cause.ID},

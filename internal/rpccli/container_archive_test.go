@@ -194,7 +194,7 @@ func TestContainerArchiveCascadeRoundTripAndIdempotentRepair(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create cross-residency child: %v", err)
 	}
-	originalMeta := `{"owner":"human"}`
+	originalMeta := `{"workflow":{"owner":"human"}}`
 	preCancelled := createContainerLifecycleTask(t, s, levelTwo.UUID, "pre-cancelled", "cancelled", &originalMeta)
 	terminal := map[string]string{}
 	for _, state := range []string{"completed", "archived", "deleted"} {

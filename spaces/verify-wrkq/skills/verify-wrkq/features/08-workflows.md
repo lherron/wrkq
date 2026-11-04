@@ -69,6 +69,11 @@ T-10349 `08-workflows/drive.txt`).
 
 ## Gotchas
 
+- **Named subtasks cannot attach workflows.** The server refuses them with
+  `WRKF_VALIDATION: named subtasks cannot attach workflows; attach the workflow
+  to the owner`. Use an ordinary task. Observed in T-12376's rehearsal drive,
+  2026-11-04Z; the corrected drive uses its ordinary owner in the isolated copy.
+
 - Template validation and installation reject unknown effect placeholders (including nested data) and
   invalid literal `set_task_state` values in transition and suspension effects. Known placeholders remain
   subject to runtime context/state checks (2026-10-26, T-11953 `08-workflows/drive.txt`).
@@ -110,3 +115,8 @@ two transitioned events.
 
 Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/08-workflows/drive.txt`,
 both fixtures, on T-00009 (pass) and T-00010 (fail), then the `instancesView` frames and the invalid-template drives (fixtures copied to `fixtures/`). Live read: `wrkf workflow list --json` (35 templates, 18 active) in `live/reads.txt`.
+
+T-12376 candidate metadata-closure drive, 2026-11-04Z:
+`var/wrkq-artifacts/T-12376/rehearsal-drive.txt` attaches the existing
+`fitkit-fb2-tail-probe@1`, carries its workflow metadata through the public task
+update, then closes it at revision 1. No hooks or new template install are claimed.

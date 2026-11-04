@@ -8,7 +8,7 @@
 export const PROTOCOL_VERSION = "2026-06-30";
 
 /** Generated from the Go workrpc schema catalog (T-12364). */
-export const PROTOCOL_SCHEMA_HASH = "sha256:86b278bb0747f3129b65c29db33a38643aa6fe0f002c358c0e3a54f94cc2df8a";
+export const PROTOCOL_SCHEMA_HASH = "sha256:7e5a251483159c9c076e2ea5d18188cf560b75ed1d2758cf5d90833e8bb59b25";
 
 export interface InitializeParams {
   protocolVersion?: string;

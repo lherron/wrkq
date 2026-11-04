@@ -2783,13 +2783,15 @@ with event type `task.ext.put`/`task.ext.deleted` (or `container.`/`room.`) and
 payload `{ns, kind, id, etag}`. The ledger excludes bodies. Extension writes do
 not change the subject etag, updated time, or `taskDocHash`; they emit no webhook.
 
-The migrated-key guard refuses `meta_key_migrated` if a task metadata write adds
-or changes a moved key after its extension exists. Unchanged values and removals
-are admitted. Mappings: `acp.request` → `acp/request/main`, `scribe` →
-`scribe/request/main`, literal top-level key `wrkf.taskStateMirror` →
-`agentloop/taskStateMirror/main`, archagent tuple keys → any
-`archagent/refactor/*`, `hcs_*` → `hcs/launch/main`. The error names the
-replacement `wrkq ext put` command.
+Task metadata is closed to the wrkq-owned top-level keys `workflow` and
+`_wrkq_archive_cascade`. Task create/update refuses any other key with
+`WRKQ_META_KEY_RESERVED` (`meta_key_reserved`) and guidance naming `wrkq ext put`.
+This applies to structured `meta` and raw `metaRaw`, including a foreign key
+carried unchanged or set to null, regardless of whether an extension exists.
+Empty/null metadata clears and read-modify-write of the wrkq keys remain admitted.
+The earlier conditional migrated-key mapping is removed. Migration 000073 strips
+foreign keys after the recorded census and backup; it preserves wrkq values and
+leaves clean rows untouched.
 
 ### Workstream task kind and coverage
 

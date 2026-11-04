@@ -21,7 +21,7 @@ func ErrorCodeCatalog() []string {
 	codes := []string{
 		"WRKQ_EXT_INVALID",
 		"WRKQ_EXT_QUOTA",
-		"WRKQ_META_KEY_MIGRATED",
+		"WRKQ_META_KEY_RESERVED",
 		"WRKQ_COVERS_REQUIRES_WORKSTREAM",
 		"WRKQ_WORKSTREAM_NOT_CLAIMABLE",
 		CodeWRKQNotFound,
