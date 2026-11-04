@@ -17,6 +17,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/style"
+	workrpcclient "github.com/lherron/wrkq/pkg/client"
 	"github.com/spf13/cobra"
 )
 
@@ -104,7 +105,18 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 			}
 			followStarted := time.Now()
 			lastEntry := followStarted
-			idleDelay := monitorPollInterval
+			// Take the ephemeral wake token before the first authoritative read.
+			// The timeline cursor alone remains the replay position.
+			token := ""
+			if follow {
+				token, err = workrpcclient.WaitForCommit(cmd.Context(), tr, "", wrkpFollowDelay(beforeTime, clockSlack(followStarted, lastEntry, timeout, stallAfter)))
+				if err != nil {
+					if cmd.Context().Err() != nil {
+						return nil
+					}
+					return wrkpRPCError(err)
+				}
+			}
 			var fingerprintAt time.Time
 			for {
 				readStarted := time.Now()
@@ -136,11 +148,6 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 					return err
 				}
 				delivered += len(view.Entries)
-				if len(view.Entries) > 0 || view.NextCursor != sentCursor {
-					idleDelay = monitorPollInterval
-				} else {
-					idleDelay = min(idleDelay*2, wrkpFollowIdleMaxDelay)
-				}
 				if len(view.Entries) > 0 {
 					lastEntry = time.Now()
 				}
@@ -224,10 +231,19 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 				if stallAfter > 0 && time.Since(lastEntry) >= stallAfter {
 					return writeWrkpTerminal(cmd, mode, monitorResultStall, cursor)
 				}
-				select {
-				case <-cmd.Context().Done():
-					return nil
-				case <-time.After(wrkpFollowDelay(beforeTime, idleDelay)):
+				// Drain all advancing pages (including filtered empty pages)
+				// before parking; a commit token never replaces a view cursor.
+				if cursor != "" && cursor != sentCursor {
+					continue
+				}
+				slack := wrkpFollowDelay(beforeTime, clockSlack(followStarted, lastEntry, timeout, stallAfter))
+				slack = min(slack, max(0, time.Until(fingerprintAt.Add(wrkpFingerprintInterval))))
+				token, err = workrpcclient.WaitForCommit(cmd.Context(), tr, token, slack)
+				if err != nil {
+					if cmd.Context().Err() != nil {
+						return nil
+					}
+					return wrkpRPCError(err)
 				}
 			}
 		},
@@ -337,13 +353,9 @@ func writeWrkpTerminal(cmd *cobra.Command, mode string, result monitorTerminalRe
 	return err
 }
 
-// A tail polls fast while entries flow and backs off to
-// wrkpFollowIdleMaxDelay while idle; the subtree fingerprint refreshes every
-// wrkpFingerprintInterval.
-const (
-	wrkpFollowIdleMaxDelay  = time.Second
-	wrkpFingerprintInterval = 30 * time.Second
-)
+// The advisory subtree fingerprint retains its own clock while a tail waits
+// for commits. Waits also end at --before so the finite window can drain.
+const wrkpFingerprintInterval = 30 * time.Second
 
 func wrkpFollowDelay(before time.Time, idle time.Duration) time.Duration {
 	if !before.IsZero() && time.Until(before) < idle {
