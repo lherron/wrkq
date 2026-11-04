@@ -8,7 +8,17 @@ predicate: >
   `wrkf watch` live-tailing
   surfaces cross the client↔server RPC boundary as BOUNDED POLLING read models — there
   is NO server push / subscribe / long-lived stream in RPC v1 (daedalus ruling #10211).
-  The SERVER owns ONLY stateless, bounded read models: wrkq.monitor.eventsView returns a
+  The one permitted wake-hint operation is `wrkq.commit.wait {since?, timeoutMs?}`,
+  a bounded wait of at most 30 seconds returning only `{token, changed}` after an
+  in-process event-logging commit or its timeout. It carries no events or filters,
+  retains no per-client state across requests, and holds no database connection or
+  transaction while parked. Its opaque process-incarnation/commit-sequence token
+  is not durable and is not a view cursor. Callers take the token before reading;
+  bounded read models and their durable cursors remain authoritative. This is a
+  permission approved for T-12538 spec revision 2, not a claim of implementation
+  or runtime verification; see ADR 0004.
+  Apart from this wake hint, the SERVER owns ONLY stateless, bounded read models:
+  wrkq.monitor.eventsView returns a
   single bounded ASCENDING event_log page (selector resolution, resource_id hydration
   from principal/resource refs, comment→task backfill, isEventIncluded /
   isStateChangeEvent, event-type filtering, and the high-water cursor of the LAST
@@ -40,7 +50,7 @@ predicate: >
   contiguity invariant exists or may be relied upon (daedalus ruling #10262).
 authority:
   repo: wrkq
-  surface: wrkq.monitor.eventsView / wrkq.monitor.stateView / wrkq.history.tailView
+  surface: wrkq.monitor.eventsView / wrkq.monitor.stateView / wrkq.history.tailView / wrkq.commit.wait
 enforced_by: "wrkq.monitor.eventsView/stateView + wrkq.history.tailView (bounded server read models) + the client-owned poll loop in internal/rpccli/monitor.go + watch.go; daedalus ruling hrcchat#10211 (T-05115 / T-05116)"
 source:
   - internal/wrkqapi/monitorview.go             # MonitorEventsView / MonitorStateView / HistoryTailView (server: bounded pages, filter, condition snapshot, high-water)
@@ -49,6 +59,7 @@ source:
   - internal/workrpc/registry.go                # method + DTO catalog registration (both wrkq + wrkf entrypoints via RegisterAPI)
   - internal/wrkfapi/gaps.go                    # bounded workflow snapshot/event page handlers
   - internal/wrkfcli/watch.go                   # wrkf client-owned poll loop and terminal predicate
+  - architecture/adr/0004-bounded-commit-wait.md # T-12538 rev 2 permission; implementation evidence pending
 required_tests:
   - internal/rpccli/parity_test.go              # production contract monitor/*, production contract watch/*
   - internal/rpccli/transport_test.go           # TestTransportEquivalence_InProcVsSubprocess (eventsView/stateView/tailView arms)
@@ -56,11 +67,14 @@ required_tests:
   - internal/wrkqapi/catview_fingerprint_test.go # TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes
   - internal/workrpc/catview_catalog_test.go     # TestCatViewInCatalogs (eventsView/stateView/tailView + DTOs)
   - internal/wrkfcli/watch_test.go               # wrkf bounded polling, cursor identity, and terminal behavior
+# Existing read-model evidence only; the commit.wait permission is not runtime-verified.
 last_verified:
   date: 2026-07-21
   evidence: "T-06757/T-06760 migrated wrkf watch to bounded workrpc snapshot/event pages with import/entrypoint guards; T-06761 exercised the installed remote verb surface from max3 against mini."
 reopen_when:
   - a server push / subscribe / long-lived stream is introduced for monitor or watch
+  - commit.wait exceeds its 30-second bound, carries events or filters, retains per-client state across requests, or holds a database connection while parked
+  - a commit-wait token replaces a durable read-model cursor or the client loses ownership of the loop and clocks
   - the server is given ownership of the timeout/stall clocks or the terminal NDJSON line
   - the per-page server cap (monitorMaxPageLimit) is removed or made client-controlled
   - stateView is allowed to sleep / poll / emit terminal lines (it must stay a single snapshot)
