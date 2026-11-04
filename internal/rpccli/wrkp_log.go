@@ -104,6 +104,8 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 			}
 			followStarted := time.Now()
 			lastEntry := followStarted
+			idleDelay := monitorPollInterval
+			var fingerprintAt time.Time
 			for {
 				readStarted := time.Now()
 				sentCursor := cursor
@@ -134,10 +136,19 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 					return err
 				}
 				delivered += len(view.Entries)
+				if len(view.Entries) > 0 || view.NextCursor != sentCursor {
+					idleDelay = monitorPollInterval
+				} else {
+					idleDelay = min(idleDelay*2, wrkpFollowIdleMaxDelay)
+				}
 				if len(view.Entries) > 0 {
 					lastEntry = time.Now()
 				}
-				if follow {
+				// The fingerprint is advisory and reads the whole container
+				// tree, so a tail refreshes it on a slow clock, not per poll:
+				// per-poll, a dozen idle followers drove wrkqd to ~5 cores.
+				if follow && (containerSet == "" || time.Since(fingerprintAt) >= wrkpFingerprintInterval) {
+					fingerprintAt = time.Now()
 					currentSet, err := wrkpSubtreeFingerprint(cmd.Context(), tr, view.Container.UUID)
 					if err != nil {
 						if cmd.Context().Err() != nil {
@@ -216,7 +227,7 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 				select {
 				case <-cmd.Context().Done():
 					return nil
-				case <-time.After(wrkpFollowDelay(beforeTime)):
+				case <-time.After(wrkpFollowDelay(beforeTime, idleDelay)):
 				}
 			}
 		},
@@ -326,14 +337,22 @@ func writeWrkpTerminal(cmd *cobra.Command, mode string, result monitorTerminalRe
 	return err
 }
 
-func wrkpFollowDelay(before time.Time) time.Duration {
-	if !before.IsZero() && time.Until(before) < monitorPollInterval {
+// A tail polls fast while entries flow and backs off to
+// wrkpFollowIdleMaxDelay while idle; the subtree fingerprint refreshes every
+// wrkpFingerprintInterval.
+const (
+	wrkpFollowIdleMaxDelay  = time.Second
+	wrkpFingerprintInterval = 30 * time.Second
+)
+
+func wrkpFollowDelay(before time.Time, idle time.Duration) time.Duration {
+	if !before.IsZero() && time.Until(before) < idle {
 		if remaining := time.Until(before); remaining > 0 {
 			return remaining
 		}
 		return 0
 	}
-	return monitorPollInterval
+	return idle
 }
 
 // wrkpDefaultLimit matches the server's own default page size, and
