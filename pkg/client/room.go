@@ -10,8 +10,6 @@ import (
 	"github.com/lherron/wrkq/internal/wrkqapi"
 )
 
-const roomWaitPollInterval = 100 * time.Millisecond
-
 // RoomService exposes the wrkc say/inbox/log/show surface.
 type RoomService struct{ client *Client }
 
@@ -214,14 +212,15 @@ func (s RoomService) waitForGroup(result *RoomSayResult, timeout time.Duration) 
 		return &WaitError{Reason: "returned no group", Result: result}
 	}
 	ctx := s.client.ctx
-	var timer <-chan time.Time
+	started := time.Now()
+	slack := 25 * time.Second
 	if timeout > 0 {
-		t := time.NewTimer(timeout)
-		defer t.Stop()
-		timer = t.C
+		slack = min(slack, timeout)
 	}
-	ticker := time.NewTicker(roomWaitPollInterval)
-	defer ticker.Stop()
+	token, err := WaitForCommit(ctx, s.client.transport, "", slack)
+	if err != nil {
+		return &WaitError{Reason: "failed", Result: result, Cause: err}
+	}
 	for {
 		var snapshot struct {
 			Met   bool     `json:"met"`
@@ -238,12 +237,23 @@ func (s RoomService) waitForGroup(result *RoomSayResult, timeout time.Duration) 
 		if snapshot.Met {
 			return s.collectWaitResult(result)
 		}
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return &WaitError{Reason: "cancelled", Unmet: snapshot.Unmet, Result: result, Cause: context.Cause(ctx)}
-		case <-timer:
-			return &WaitError{Reason: "timed out", Unmet: snapshot.Unmet, Result: result, Cause: context.DeadlineExceeded}
-		case <-ticker.C:
+		}
+		slack := 25 * time.Second
+		if timeout > 0 {
+			slack = min(slack, time.Until(started.Add(timeout)))
+			if slack <= 0 {
+				return &WaitError{Reason: "timed out", Unmet: snapshot.Unmet, Result: result, Cause: context.DeadlineExceeded}
+			}
+		}
+		token, err = WaitForCommit(ctx, s.client.transport, token, slack)
+		if err != nil {
+			reason := "failed"
+			if ctx.Err() != nil {
+				reason = "cancelled"
+			}
+			return &WaitError{Reason: reason, Unmet: snapshot.Unmet, Result: result, Cause: err}
 		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/workflow"
 	"github.com/lherron/wrkq/internal/wrkfapi"
+	workrpcclient "github.com/lherron/wrkq/pkg/client"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +54,7 @@ selector. Follow mode emits NDJSON workflow events followed by one summary row.`
 	cmd.Flags().StringVar(&flags.until, "until", workflow.WatchUntilTerminal, "Predicate to wait for: terminal, closed, suspended, or waiting")
 	cmd.Flags().StringVar(&flags.timeout, "timeout", "", "Maximum wait duration (for example 30s, 10m)")
 	cmd.Flags().BoolVar(&flags.follow, "follow", false, "Emit NDJSON workflow events while waiting")
-	cmd.Flags().StringVar(&flags.pollInterval, "poll-interval", defaultWatchPollInterval.String(), "Polling interval")
+	cmd.Flags().StringVar(&flags.pollInterval, "poll-interval", defaultWatchPollInterval.String(), "Legacy polling interval (validated; waits now wake on commits)")
 	return cmd
 }
 
@@ -80,6 +81,15 @@ func runWatch(a *app, cmd *cobra.Command, selector string, flags watchFlags) err
 		deadline = start.Add(timeout)
 	}
 
+	slack := 25 * time.Second
+	if timeout > 0 {
+		slack = min(slack, time.Until(deadline))
+	}
+	token, err := workrpcclient.WaitForCommit(cmd.Context(), a.transport, "", slack)
+	if err != nil {
+		return exitError(2, err)
+	}
+
 	snapshotValue, err := rpcCall[workflow.WatchSnapshot](cmd, a, "wrkf.watch.snapshot", wrkfapi.WatchSnapshotParams{Selector: selector, Until: until})
 	if err != nil {
 		return exitError(2, err)
@@ -103,15 +113,13 @@ func runWatch(a *app, cmd *cobra.Command, selector string, flags watchFlags) err
 			})
 		}
 
-		sleepFor := pollInterval
+		slack := 25 * time.Second
 		if timeout > 0 {
-			remaining := time.Until(deadline)
-			if remaining < sleepFor {
-				sleepFor = remaining
-			}
+			slack = min(slack, time.Until(deadline))
 		}
-		if sleepFor > 0 {
-			time.Sleep(sleepFor)
+		token, err = workrpcclient.WaitForCommit(cmd.Context(), a.transport, token, slack)
+		if err != nil {
+			return exitError(3, err)
 		}
 
 		if flags.follow {
@@ -143,20 +151,25 @@ func parseOptionalDuration(raw, name string) (time.Duration, error) {
 }
 
 func emitWatchEvents(cmd *cobra.Command, a *app, selector string, afterCursor *string) error {
-	result, err := rpcCall[wrkfapi.WatchEventsResult](cmd, a, "wrkf.watch.events", wrkfapi.WatchEventsParams{
-		Selector: selector, AfterCursor: *afterCursor, Limit: 100,
-	})
-	if err != nil {
-		return err
-	}
 	enc := json.NewEncoder(cmd.OutOrStdout())
-	for _, event := range result.Events {
-		if err := enc.Encode(watchEventLine{Type: "event", Event: event}); err != nil {
+	for {
+		result, err := rpcCall[wrkfapi.WatchEventsResult](cmd, a, "wrkf.watch.events", wrkfapi.WatchEventsParams{
+			Selector: selector, AfterCursor: *afterCursor, Limit: 100,
+		})
+		if err != nil {
 			return err
 		}
+		for _, event := range result.Events {
+			if err := enc.Encode(watchEventLine{Type: "event", Event: event}); err != nil {
+				return err
+			}
+		}
+		previous := *afterCursor
+		*afterCursor = result.NextCursor
+		if len(result.Events) < 100 || result.NextCursor == previous {
+			return nil
+		}
 	}
-	*afterCursor = result.NextCursor
-	return nil
 }
 
 func finishWatch(cmd *cobra.Command, follow bool, summary watchSummary) error {

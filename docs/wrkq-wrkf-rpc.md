@@ -100,6 +100,22 @@ so the next wait returns immediately even before a coalesced notification flushe
 Durable view cursors remain authoritative across restarts. This is the sole
 bounded-wait exception in `wrkq.wrkf-rpc.bounded-polling-streaming` (ADR 0004),
 with no subscription, event payload, filter, or retained per-client state.
+
+The Go client exposes `Client.CommitWait(CommitWaitParams)` and the TypeScript
+facade exposes `client.wrkq.commit.wait({ since?, timeoutMs? })`, returning the
+wire `{ token, changed }` unchanged. `since` is opaque and must not be parsed or
+used as a view cursor. Omitting the params acquires the initial token.
+
+The Go CLI/SDK loops (`monitor watch|wait`, raw history follow, `wrkc say --wait`,
+`RoomService.Say` with Wait, and `wrkf watch`) acquire a token before their first
+view read. They drain available bounded pages, then wait with `timeoutMs` bounded
+by 25 seconds and their own nearest timeout/stall clock. A short HTTP request
+context enforces clocks below the server's one-second minimum. The caller still
+renders exactly its existing terminal record and exit code. Capacity refusal
+backs off one condition-poll interval; it does not introduce an old-server
+fallback. `wrkf watch --poll-interval` remains accepted and validated for command
+compatibility, while commits now drive the loop.
+
 Adding the operation changes the exact protocol schema hash and requires the
 coordinated producer/Go-client cutover described in the approved D1 spec.
 

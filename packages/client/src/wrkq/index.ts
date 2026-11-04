@@ -5,6 +5,7 @@
  * package (spec §7.6).
  */
 
+export type * from "./commit.js";
 export type * from "./ext.js";
 export type * from "./attachment.js";
 export type * from "./campaign.js";
@@ -29,6 +30,7 @@ export type {
   WrkqContainerFacade,
   WrkqEnvelopeFacade,
   WrkqFacade,
+  WrkqCommitFacade,
   WrkqExtFacade,
   WrkqIndexFacade,
   WrkqPromiseFacade,

@@ -196,3 +196,11 @@ bun run build       # emit dist/ (js + d.ts)
 
 Integration tests require `just install` (so `wrkq`/`wrkf`/`wrkqadm` are on
 `PATH`). Override discovery with `WRKQ_BIN` / `WRKF_BIN` / `WRKQADM_BIN`.
+
+### Commit wake hints
+
+`client.wrkq.commit.wait()` immediately returns `{ token, changed }`. Take this
+token before reading a bounded view, then call
+`client.wrkq.commit.wait({ since: token, timeoutMs: 25000 })` before reading again.
+Keep durable view cursors for replay and keep deadlines in your own loop. Tokens
+are opaque, ephemeral hints; the server clamps waits to 1–30 seconds.

@@ -213,7 +213,9 @@ func callStdoutPure(ctx context.Context, method string, handler Handler, params 
 	// External execution methods capture child-process stdout themselves. They
 	// must not hold the process-global stdout redirect while waiting on the
 	// child, otherwise one slow hook serializes every unrelated RPC request.
-	if executesExternalProcess(method) {
+	// The commit waiter is stdout-free and must allow other local streams to
+	// commit while it parks. Holding the redirect lock would block those writes.
+	if method == "wrkq.commit.wait" || executesExternalProcess(method) {
 		return handler.HandleRPC(ctx, params)
 	}
 

@@ -40,8 +40,8 @@ type Profile struct {
 }
 
 var (
-	WrkqProfile = Profile{Capability: "wrkq", RequiredMethods: []string{"wrkq.task.show"}}
-	WrkfProfile = Profile{Capability: "wrkf", RequiredMethods: []string{"wrkf.workflow.list"}}
+	WrkqProfile = Profile{Capability: "wrkq", RequiredMethods: []string{"wrkq.task.show", "wrkq.commit.wait"}}
+	WrkfProfile = Profile{Capability: "wrkf", RequiredMethods: []string{"wrkf.workflow.list", "wrkq.commit.wait"}}
 )
 
 // Transport is a command adapter's only boundary to durable workrpc behavior.

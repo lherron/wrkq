@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lherron/wrkq/internal/clifunnel"
+	workrpcclient "github.com/lherron/wrkq/pkg/client"
 	"github.com/spf13/cobra"
 )
 
@@ -20,8 +21,6 @@ import (
 // This is the shared bounded-polling-as-RPC-v1-streaming arch record (with
 // monitor): NO server push/subscribe in v1; the loop lives caller-side.
 // `monitor watch --raw` is its only command; `wrkq watch` is retired.
-
-const watchPollInterval = 1 * time.Second
 
 // watchEvent mirrors the legacy internal/cli watchEvent shape EXACTLY (field order
 // + json tags + pointer/omitempty). Decoding the server's WrkqWatchEvent into this
@@ -58,18 +57,24 @@ func newWatchCmd() *cobra.Command {
 	}
 }
 
-// watchTailLoop polls wrkq.history.tailView for the next bounded ASCENDING page
+// watchTailLoop reads wrkq.history.tailView for the next bounded ASCENDING page
 // from the monotonic cursor, advances the cursor by the server's high-water,
-// writes each row as NDJSON, and sleeps watchPollInterval between polls. It
+// writes each row as NDJSON, and waits for commits between reads. It
 // backs `monitor watch --raw`, and returns when a clock expires: timeout bounds
 // the whole follow, stallAfter the gap since the last event (0 = unbounded).
 func watchTailLoop(ctx context.Context, tr Transport, out io.Writer, sinceID int64, timeout, stallAfter time.Duration) (monitorTerminalResult, error) {
+	now := time.Now()
+	token, err := workrpcclient.WaitForCommit(ctx, tr, "", clockSlack(now, now, timeout, stallAfter))
+	if err != nil {
+		return monitorResultError, monitorStripError(err)
+	}
 	currentID := sinceID
 	encoder := json.NewEncoder(out)
 	started := time.Now()
 	lastEvent := started
 
 	for {
+		previousID := currentID
 		raw, err := tr.Call(ctx, "wrkq.history.tailView", map[string]any{"cursor": currentID})
 		if err != nil {
 			return monitorResultError, monitorStripError(err)
@@ -99,19 +104,25 @@ func watchTailLoop(ctx context.Context, tr Transport, out io.Writer, sinceID int
 		if stallAfter > 0 && time.Since(lastEvent) >= stallAfter {
 			return monitorResultStall, nil
 		}
-		time.Sleep(min(watchPollInterval, clockSlack(started, lastEvent, timeout, stallAfter)))
+		if currentID > previousID {
+			continue
+		}
+		token, err = workrpcclient.WaitForCommit(ctx, tr, token, clockSlack(started, lastEvent, timeout, stallAfter))
+		if err != nil {
+			return monitorResultError, monitorStripError(err)
+		}
 	}
 }
 
 // clockSlack is the time left before the nearer clock expires, so a short
-// --timeout is not overshot by a whole poll interval.
+// --timeout also bounds the commit wait.
 func clockSlack(started, lastEvent time.Time, timeout, stallAfter time.Duration) time.Duration {
-	slack := watchPollInterval
+	slack := 25 * time.Second
 	if timeout > 0 {
 		slack = min(slack, time.Until(started.Add(timeout)))
 	}
 	if stallAfter > 0 {
 		slack = min(slack, time.Until(lastEvent.Add(stallAfter)))
 	}
-	return max(slack, 10*time.Millisecond)
+	return max(slack, 0)
 }

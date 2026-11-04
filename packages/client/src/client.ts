@@ -124,6 +124,9 @@ class WorkClientImpl implements WorkClient {
   };
 
   readonly wrkq: WrkqFacade = {
+    commit: {
+      wait: (p) => this.call("wrkq.commit.wait", p ?? {}),
+    },
     ext: {
       put: (p) => this.call("wrkq.ext.put", p),
       show: (p) => this.call("wrkq.ext.show", p),

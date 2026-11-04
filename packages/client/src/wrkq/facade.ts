@@ -1,3 +1,4 @@
+import type { WrkqCommitWaitParams, WrkqCommitWait } from "./commit.js";
 import type {
   WrkqExtPutParams, WrkqExtPutResult, WrkqExtShowParams, WrkqExtShowResult,
   WrkqExtListViewParams, WrkqExtListView, WrkqExtDeleteParams, WrkqExtDeleteResult,
@@ -439,7 +440,12 @@ export interface WrkqEnvelopeFacade {
   ): Promise<WrkqEnvelopeBirth | null>;
 }
 
+export interface WrkqCommitFacade {
+  wait(params?: WrkqCommitWaitParams): Promise<WrkqCommitWait>;
+}
+
 export interface WrkqFacade {
+  readonly commit: WrkqCommitFacade;
   readonly ext: WrkqExtFacade;
   readonly task: WrkqTaskFacade;
   readonly comment: WrkqCommentFacade;

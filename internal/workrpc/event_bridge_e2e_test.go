@@ -36,6 +36,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,9 +51,10 @@ import (
 // ─── built-binary harness ───────────────────────────────────────────────────
 
 var (
-	e2eBinOnce sync.Once
-	e2eBinPath string
-	e2eBinErr  error
+	e2eBinOnce    sync.Once
+	e2eBinPath    string
+	e2eDaemonPath string
+	e2eBinErr     error
 )
 
 // e2eBinary builds (once per test binary run) a real `wrkq` executable and
@@ -78,12 +81,63 @@ func e2eBinary(t *testing.T) string {
 			t.Logf("go build output:\n%s", out.String())
 			return
 		}
+		daemon := filepath.Join(dir, "wrkqd")
+		buildDaemon := exec.Command("go", "build", "-tags", "sqlite_fts5,wrkq_local", "-o", daemon, "./cmd/wrkqd")
+		buildDaemon.Dir = repoRoot(t)
+		if output, err := buildDaemon.CombinedOutput(); err != nil {
+			e2eBinErr = err
+			t.Logf("build wrkqd: %s", output)
+			return
+		}
+		e2eDaemonPath = daemon
 		e2eBinPath = bin
 	})
 	if e2eBinErr != nil {
 		t.Fatalf("build wrkq e2e binary: %v", e2eBinErr)
 	}
 	return e2eBinPath
+}
+
+// eventBridgeDaemon gives the monitor and mutators the same process-local
+// commit broadcaster. External SQLite writers intentionally only surface at
+// the wait timeout (ADR 0004), so they cannot prove immediate invalidation.
+func eventBridgeDaemon(t *testing.T, dbPath string) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+	cmd := exec.Command(e2eDaemonPath, "--db", dbPath, "--addr", addr, "--token", "event-bridge-test")
+	cmd.Env = scopeFreeAuthorityEnv(t)
+	log, err := os.Create(filepath.Join(t.TempDir(), "daemon.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stdout = log
+	cmd.Stderr = log
+	if err := cmd.Start(); err != nil {
+		_ = log.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Signal(os.Interrupt); _ = cmd.Wait(); _ = log.Close() })
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	for started := time.Now(); time.Since(started) < 5*time.Second; {
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/health", nil)
+		req.Header.Set("Authorization", "Bearer event-bridge-test")
+		resp, err := client.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return "rpc://" + addr
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	diagnostic, _ := os.ReadFile(log.Name())
+	t.Fatalf("scratch event bridge daemon did not become healthy: %s", diagnostic)
+	return ""
 }
 
 // e2eRPC drives one request/response RPC session through the built binary
@@ -107,7 +161,7 @@ func e2eRPC(t *testing.T, bin, dbPath string, reqs ...string) map[string]map[str
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "--db", dbPath, "rpc", "--stdio")
 	// Principal-only attribution: seed writes need a valid caller principal.
-	cmd.Env = append(os.Environ(), "WRKQ_PRINCIPAL_REF=agent:smokey")
+	cmd.Env = append(os.Environ(), "WRKQ_PRINCIPAL_REF=agent:smokey", "WRKQD_TOKEN=event-bridge-test")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatalf("e2eRPC stdin pipe: %v", err)
@@ -212,6 +266,7 @@ func spawnMonitor(t *testing.T, bin, dbPath string, extraArgs ...string) *monito
 	ctx, cancel := context.WithCancel(context.Background())
 	args := append([]string{"--db", dbPath, "monitor", "watch", "--ndjson"}, extraArgs...)
 	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = append(os.Environ(), "WRKQD_TOKEN=event-bridge-test")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
@@ -298,7 +353,7 @@ func TestEventBridge_MutateObserveRefetch(t *testing.T) {
 		t.Skip("skipping built-binary e2e in short mode")
 	}
 	bin := e2eBinary(t)
-	dbPath := migratedDB(t)
+	dbPath := eventBridgeDaemon(t, migratedDB(t))
 
 	// Bridge spawns the watcher first and follows from the start of the log.
 	mon := spawnMonitor(t, bin, dbPath, "--since", "0")

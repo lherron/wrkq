@@ -21,7 +21,7 @@ func healthyInitializeResult(t *testing.T) json.RawMessage {
 		"protocolSchemaHash": workrpc.ProtocolSchemaHash(),
 		"server":             map[string]string{"version": "test", "revision": "abc123"},
 		"capabilities":       map[string]bool{"wrkq": true, "wrkf": true},
-		"methods":            []string{"wrkq.task.show", "wrkf.workflow.list"},
+		"methods":            []string{"wrkq.task.show", "wrkf.workflow.list", "wrkq.commit.wait"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestInitializeProfilesProbeTheirOwnSurface(t *testing.T) {
 		t.Fatalf("wrkf method probe error = %v", err)
 	}
 
-	init["methods"] = []string{"wrkq.task.show", "wrkf.workflow.list"}
+	init["methods"] = []string{"wrkq.task.show", "wrkf.workflow.list", "wrkq.commit.wait"}
 	init["capabilities"] = map[string]bool{"wrkq": true, "wrkf": false}
 	missingCapability, _ := json.Marshal(init)
 	if err := validateInitializeResult(missingCapability, WrkfProfile); err == nil || !strings.Contains(err.Error(), "wrkf capability") {

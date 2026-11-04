@@ -12,6 +12,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/domain"
+	workrpcclient "github.com/lherron/wrkq/pkg/client"
 	"github.com/spf13/cobra"
 )
 
@@ -406,7 +407,7 @@ func monitorClockExitCode(condition string) int {
 	return 0
 }
 
-// monitorFollowLoop is the event-streaming poll loop for `monitor watch`. It polls
+// monitorFollowLoop is the event-streaming client loop for `monitor watch`. It polls
 // wrkq.monitor.eventsView for the next bounded ASCENDING page, advances the
 // monotonic high-water cursor, emits per-event lines, and (when a --until condition
 // is set) re-evaluates wrkq.monitor.stateView each cycle. It returns
@@ -415,6 +416,11 @@ func monitorClockExitCode(condition string) int {
 // terminal evaluation is intentionally race-tolerant (a met condition may land
 // before the matching event is paged in; tests assert race-tolerantly).
 func monitorFollowLoop(ctx context.Context, tr Transport, encoder *json.Encoder, opts monitorStreamOpts) (monitorTerminalResult, []string, int, error) {
+	now := time.Now()
+	token, err := workrpcclient.WaitForCommit(ctx, tr, "", clockSlack(now, now, opts.timeout, opts.stallAfter))
+	if err != nil {
+		return monitorResultError, nil, 3, monitorStripError(err)
+	}
 	// Eager selector validation BEFORE any streaming, matching legacy
 	// resolveMonitorSelectors: the server resolves the scoped selectors and a bad
 	// one returns WRKQ_VALIDATION (exit 2), printed once, and fails before the
@@ -445,6 +451,7 @@ func monitorFollowLoop(ctx context.Context, tr Transport, encoder *json.Encoder,
 	started := time.Now()
 	lastEvent := started
 	for {
+		previousCursor := cursor
 		events, nextCursor, err := monitorPollEvents(ctx, tr, opts, cursor)
 		if err != nil {
 			return monitorResultError, nil, 3, monitorStripError(err)
@@ -487,13 +494,25 @@ func monitorFollowLoop(ctx context.Context, tr Transport, encoder *json.Encoder,
 		if opts.stallAfter > 0 && time.Since(lastEvent) >= opts.stallAfter {
 			return monitorResultStall, unmet, monitorClockExitCode(opts.condition), nil
 		}
-		time.Sleep(monitorPollInterval)
+		// Drain bounded pages, including pages filtered to zero rows, before parking.
+		if cursor > previousCursor {
+			continue
+		}
+		token, err = workrpcclient.WaitForCommit(ctx, tr, token, clockSlack(started, lastEvent, opts.timeout, opts.stallAfter))
+		if err != nil {
+			return monitorResultError, nil, 3, monitorStripError(err)
+		}
 	}
 }
 
 // monitorWaitLoop drives `monitor wait`: re-evaluates the single stateView snapshot
 // each cycle until met, timeout, or stall. Returns (result, unmet, exitCode, err).
 func monitorWaitLoop(ctx context.Context, tr Transport, opts monitorStreamOpts) (monitorTerminalResult, []string, int, error) {
+	now := time.Now()
+	token, err := workrpcclient.WaitForCommit(ctx, tr, "", clockSlack(now, now, opts.timeout, opts.stallAfter))
+	if err != nil {
+		return monitorResultError, nil, 3, monitorStripError(err)
+	}
 	started := time.Now()
 	lastProgress := started
 	for {
@@ -510,7 +529,10 @@ func monitorWaitLoop(ctx context.Context, tr Transport, opts monitorStreamOpts) 
 		if opts.stallAfter > 0 && time.Since(lastProgress) >= opts.stallAfter {
 			return monitorResultStall, unmet, 1, nil
 		}
-		time.Sleep(monitorPollInterval)
+		token, err = workrpcclient.WaitForCommit(ctx, tr, token, clockSlack(started, lastProgress, opts.timeout, opts.stallAfter))
+		if err != nil {
+			return monitorResultError, nil, 3, monitorStripError(err)
+		}
 	}
 }
 
