@@ -82,6 +82,7 @@ func RegisterAPI(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 		return json.RawMessage(`null`), nil
 	}))
 
+	registerCommitWait(s, opts.Database)
 	registerWrkqMethods(s, api, opts)
 	registerWrkfMethods(s, api, opts)
 }

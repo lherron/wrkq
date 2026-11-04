@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"sync"
+	"time"
 )
 
 // ChangeSignal broadcasts a process-local wake to any number of subscribers.
@@ -11,9 +12,11 @@ import (
 // returned channel: a change during the read cannot be lost. Slow subscribers
 // coalesce any number of notifications by taking a fresh snapshot.
 type ChangeSignal struct {
-	mu       sync.Mutex
-	sequence uint64
-	changed  chan struct{}
+	mu           sync.Mutex
+	sequence     uint64
+	changed      chan struct{}
+	coalesced    chan struct{}
+	flushPending bool
 }
 
 func (s *ChangeSignal) Snapshot() (uint64, <-chan struct{}) {
@@ -25,6 +28,18 @@ func (s *ChangeSignal) Snapshot() (uint64, <-chan struct{}) {
 	return s.sequence, s.changed
 }
 
+// CoalescedSnapshot shares the commit sequence, but broadcasts at most once
+// per 100ms. The sequence advances synchronously at commit, so a token taken
+// before a durable read cannot lose a commit while a broadcast is pending.
+func (s *ChangeSignal) CoalescedSnapshot() (uint64, <-chan struct{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.coalesced == nil {
+		s.coalesced = make(chan struct{})
+	}
+	return s.sequence, s.coalesced
+}
+
 func (s *ChangeSignal) Notify() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -33,6 +48,16 @@ func (s *ChangeSignal) Notify() {
 	}
 	s.changed = make(chan struct{})
 	s.sequence++
+	if s.coalesced != nil && !s.flushPending {
+		s.flushPending = true
+		time.AfterFunc(100*time.Millisecond, func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			close(s.coalesced)
+			s.coalesced = make(chan struct{})
+			s.flushPending = false
+		})
+	}
 }
 
 // CommitEvents commits a transaction that may have appended event_log rows.

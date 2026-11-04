@@ -78,7 +78,7 @@ func mapRemoteForwardError(err error) *RPCError {
 func ServeRemoteStdio(ctx context.Context, in io.Reader, out io.Writer, endpoint, token, principalRef string) error {
 	reader := NewReader(in, DefaultMaxFrameBytes)
 	writer := NewWriter(out)
-	client := http.DefaultClient
+	client := &http.Client{Timeout: HTTPResponseTimeout}
 	url := "http://" + endpoint + "/v1/rpc"
 	caller := useragent.ResolveCaller("")
 	shutdown := false

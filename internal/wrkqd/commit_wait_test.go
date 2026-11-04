@@ -175,3 +175,41 @@ func TestCommitWaitIdleNoConnectionsAndIncarnation(t *testing.T) {
 		t.Fatalf("incarnation did not return immediately: %+v", result)
 	}
 }
+
+func TestCommitWaitCapAndDisconnect(t *testing.T) {
+	database, _ := setupTestEnv(t)
+	h := newCommitWaitHarness(t, database)
+	token := h.wait(t, "", 1000).Token
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 512)
+	for i := 0; i < 512; i++ {
+		go func() {
+			_, err := h.call(ctx, "wrkq.commit.wait", map[string]any{"since": token, "timeoutMs": 30000})
+			done <- err
+		}()
+	}
+	// All connections are loopback and handlers do no IO after decoding.
+	time.Sleep(300 * time.Millisecond)
+	start := time.Now()
+	overflow := h.wait(t, token, 30000)
+	if overflow.Changed || overflow.Token != token || time.Since(start) > 200*time.Millisecond {
+		t.Fatalf("513th waiter parked: %+v", overflow)
+	}
+	cancel()
+	for i := 0; i < 512; i++ {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("disconnect did not cancel")
+		}
+	}
+	// Cancellation must release the admission slots on the server as well.
+	time.Sleep(50 * time.Millisecond)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel2()
+	_, err := h.call(ctx2, "wrkq.commit.wait", map[string]any{"since": token, "timeoutMs": 30000})
+	if err == nil {
+		t.Fatal("disconnected waits retained admission slots")
+	}
+}

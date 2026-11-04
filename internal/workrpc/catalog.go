@@ -57,6 +57,7 @@ func ErrorCodeCatalog() []string {
 }
 
 var methodCatalog = []string{
+	"wrkq.commit.wait",
 	"wrkq.ext.put",
 	"wrkq.ext.show",
 	"wrkq.ext.listView",
@@ -249,6 +250,8 @@ var methodCatalog = []string{
 }
 
 var dtoCatalog = []string{
+	"CommitWaitParams",
+	"WrkqCommitWait",
 	"RPCInitializeResult", // rpc.initialize compatibility handshake, including server build provenance
 	"WrkqTask",
 	"WrkqTaskCreateParams",

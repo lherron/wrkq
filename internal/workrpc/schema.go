@@ -10,6 +10,8 @@ import (
 )
 
 var dtoSchemaTypes = map[string]reflect.Type{
+	"CommitWaitParams":                dtoType[wrkqapi.CommitWaitParams](),
+	"WrkqCommitWait":                  dtoType[wrkqapi.WrkqCommitWait](),
 	"RPCInitializeResult":             dtoType[initializeResult](),
 	"WrkqTaskCreateParams":            dtoType[wrkqapi.TaskCreateParams](),
 	"WrkqTaskListParams":              dtoType[wrkqapi.TaskListParams](),

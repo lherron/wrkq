@@ -73,3 +73,31 @@ func TestEventCommitSignal(t *testing.T) {
 	default:
 	}
 }
+
+func TestChangeSignalCoalescesCommitWaitBursts(t *testing.T) {
+	var signal ChangeSignal
+	seq, changed := signal.CoalescedSnapshot()
+	for i := 0; i < 100; i++ {
+		signal.Notify()
+	}
+	current, same := signal.CoalescedSnapshot()
+	if current != seq+100 || same != changed {
+		t.Fatal("sequence must advance immediately without broadcasting the burst")
+	}
+	select {
+	case <-changed:
+		t.Fatal("burst broadcast before coalescing window")
+	default:
+	}
+	select {
+	case <-changed:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("coalesced broadcast too late")
+	}
+	_, next := signal.CoalescedSnapshot()
+	select {
+	case <-next:
+		t.Fatal("extra broadcast without a new commit")
+	case <-time.After(120 * time.Millisecond):
+	}
+}
