@@ -244,7 +244,6 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 					continue
 				}
 				slack := wrkpFollowDelay(beforeTime, min(maxWait, clockSlack(followStarted, lastEntry, timeout, stallAfter)))
-				slack = min(slack, max(0, time.Until(fingerprintAt.Add(wrkpFingerprintInterval))))
 				token, err = workrpcclient.WaitForCommit(cmd.Context(), tr, token, slack)
 				if err != nil {
 					if cmd.Context().Err() != nil {
