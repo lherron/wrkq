@@ -138,7 +138,7 @@ class WrkqMCPServer {
           },
         ],
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Clean up temp file on error
       try {
         await unlink(tempFilePath);
@@ -146,10 +146,15 @@ class WrkqMCPServer {
         // Ignore cleanup errors
       }
 
+      const failure = (typeof error === "object" && error !== null ? error : {}) as {
+        code?: unknown;
+        stderr?: unknown;
+        message?: unknown;
+      };
       const errorMessage =
-        error.code === "ENOENT"
+        failure.code === "ENOENT"
           ? "wrkq command not found. Please ensure wrkq is installed and in PATH."
-          : error.stderr || error.message;
+          : failure.stderr || failure.message;
 
       throw new Error(`Failed to update task: ${errorMessage}`);
     }

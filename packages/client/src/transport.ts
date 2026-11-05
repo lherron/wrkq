@@ -47,7 +47,7 @@ export interface JsonRpcError {
 export interface JsonRpcResponse {
   jsonrpc: "2.0";
   id: string | number | null;
-  result?: any;
+  result?: unknown;
   error?: JsonRpcError;
 }
 
