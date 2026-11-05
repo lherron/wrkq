@@ -71,23 +71,23 @@ Live, read only: `wrkc inbox --output json` as your own seat lists what you owe 
 
 ```bash
 CL=agent:clod:project:wv-<name>:task:primary; CO=agent:cody:project:wv-<name>:task:primary
-wrkq touch inbox/wv-room -t "WV room task"     # T-00004 after the baseline blocks alone; use the id it prints
-printf 'WV rooms drive marker WV-R-1.\n' | wrkc say T-00004 --to cody@wv-<name>:primary --as agent:clod --scope-ref $CL --output json -
-wrkc inbox --as agent:cody --scope-ref $CO --output json | jq -c '[.groups[] | {room: .room.key, items: [.items[] | {id,obligation,state,replyTo}]}]'
-printf 'WV reply.\n' | wrkc say EN-00001 --to clod@wv-<name>:primary --fyi --as agent:cody --scope-ref $CO --output json - | jq -c '{acked, sent: [.envelopes[] | .id]}'
-wrkc show EN-00001 --as agent:clod --scope-ref $CL --output json | jq -c '{id,state,terminal}'   # acked, terminal
-printf 'WV defer probe\n' | wrkc say T-00004 --to cody@wv-<name>:primary --as agent:clod --scope-ref $CL -
-wrkc defer EN-<that id> --as agent:cody --scope-ref $CO --reason 'WV defer probe' --output json
-printf 'WV withdraw probe\n' | wrkc say T-00004 --to cody@wv-<name>:primary --as agent:clod --scope-ref $CL -
-wrkc withdraw EN-<that id> --as agent:clod --scope-ref $CL --reason 'WV withdraw probe' --output json
-wrkc log T-00004 --output json; wrkc members T-00004 --output json; wrkc ls --output json
+~/.local/bin/wrkq touch inbox/wv-room -t "WV room task"     # T-00004 after the baseline blocks alone; use the id it prints
+printf 'WV rooms drive marker WV-R-1.\n' | ~/.local/bin/wrkc say T-00004 --to cody@wv-<name>:primary --as agent:clod --scope-ref $CL --output json -
+~/.local/bin/wrkc inbox --as agent:cody --scope-ref $CO --output json | jq -c '[.groups[] | {room: .room.key, items: [.items[] | {id,obligation,state,replyTo}]}]'
+printf 'WV reply.\n' | ~/.local/bin/wrkc say EN-00001 --to clod@wv-<name>:primary --fyi --as agent:cody --scope-ref $CO --output json - | jq -c '{acked, sent: [.envelopes[] | .id]}'
+~/.local/bin/wrkc show EN-00001 --as agent:clod --scope-ref $CL --output json | jq -c '{id,state,terminal}'   # acked, terminal
+printf 'WV defer probe\n' | ~/.local/bin/wrkc say T-00004 --to cody@wv-<name>:primary --as agent:clod --scope-ref $CL -
+~/.local/bin/wrkc defer EN-<that id> --as agent:cody --scope-ref $CO --reason 'WV defer probe' --output json
+printf 'WV withdraw probe\n' | ~/.local/bin/wrkc say T-00004 --to cody@wv-<name>:primary --as agent:clod --scope-ref $CL -
+~/.local/bin/wrkc withdraw EN-<that id> --as agent:clod --scope-ref $CL --reason 'WV withdraw probe' --output json
+~/.local/bin/wrkc log T-00004 --output json; ~/.local/bin/wrkc members T-00004 --output json; ~/.local/bin/wrkc ls --output json
 # notes
-wrkc say T-00004 --to cody@wv-<name>:primary --note -m 'WV note' --as agent:clod --scope-ref $CL --output json   # acked, terminal
-wrkc inbox --as agent:cody --scope-ref $CO --output json | jq -c '{items: [.groups[].items[].id], recentNotes}'  # recentNotes 1
-wrkc notes --as agent:cody --scope-ref $CO --json | jq -c '[.items[] | {id,obligation,state}]'
-wrkc say T-00004 --to cody@wv-<name>:primary -m 'needs a reply' --as agent:clod --scope-ref $CL --output json
-wrkc say EN-<that id> --to clod@wv-<name>:primary --note -m 'quiet answer' --as agent:cody --scope-ref $CO --output json | jq -c .acked
-wrkc say T-00004 --note -m x --as agent:clod --scope-ref $CL; echo $?                                          # 2
+~/.local/bin/wrkc say T-00004 --to cody@wv-<name>:primary --note -m 'WV note' --as agent:clod --scope-ref $CL --output json   # acked, terminal
+~/.local/bin/wrkc inbox --as agent:cody --scope-ref $CO --output json | jq -c '{items: [.groups[].items[].id], recentNotes}'  # recentNotes 1
+~/.local/bin/wrkc notes --as agent:cody --scope-ref $CO --json | jq -c '[.items[] | {id,obligation,state}]'
+~/.local/bin/wrkc say T-00004 --to cody@wv-<name>:primary -m 'needs a reply' --as agent:clod --scope-ref $CL --output json
+~/.local/bin/wrkc say EN-<that id> --to clod@wv-<name>:primary --note -m 'quiet answer' --as agent:cody --scope-ref $CO --output json | jq -c .acked
+~/.local/bin/wrkc say T-00004 --note -m x --as agent:clod --scope-ref $CL; echo $?                                          # 2
 ```
 
 **Never send test mail on the canonical daemon or to a real seat.**

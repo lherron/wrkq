@@ -43,18 +43,18 @@ Run `eval "$(wv env <name>)"`. The scratch daemon has two node credentials: node
 ```bash
 # Claim T-00002: feature 2 leaves T-00001 completed, and a completed task is refused wrong_state.
 S1=agent:clod:project:wv-<name>:task:T-00002; S2=agent:cody:project:wv-<name>:task:T-00002
-wrkq claim T-00002 --scope $S1 --as agent:clod --json | tee "$WV_STATE/claim1.json"
-wrkq claim T-00002 --scope $S2 --as agent:cody --json                       # already_claimed
-WRKQD_TOKEN_FILE=$WV_STATE/token-wv2 wrkq claim T-00002 --scope $S2 --as agent:cody --take-over --yes --json | tee "$WV_STATE/claim2.json"
-wrkq release T-00002 --scope $S1 --claim-token "$(jq -r .claimToken "$WV_STATE/claim1.json")" --claim-generation 1 --json   # claim_superseded
-WRKQD_TOKEN_FILE=$WV_STATE/token-wv2 wrkq release T-00002 --as agent:cody --scope $S2 \
+~/.local/bin/wrkq claim T-00002 --scope $S1 --as agent:clod --json | tee "$WV_STATE/claim1.json"
+~/.local/bin/wrkq claim T-00002 --scope $S2 --as agent:cody --json                       # already_claimed
+WRKQD_TOKEN_FILE=$WV_STATE/token-wv2 ~/.local/bin/wrkq claim T-00002 --scope $S2 --as agent:cody --take-over --yes --json | tee "$WV_STATE/claim2.json"
+~/.local/bin/wrkq release T-00002 --scope $S1 --claim-token "$(jq -r .claimToken "$WV_STATE/claim1.json")" --claim-generation 1 --json   # claim_superseded
+WRKQD_TOKEN_FILE=$WV_STATE/token-wv2 ~/.local/bin/wrkq release T-00002 --as agent:cody --scope $S2 \
   --claim-token "$(jq -r .claimToken "$WV_STATE/claim2.json")" --claim-generation 2 --json
-wrkq promise add --task T-00001 --subject "WV promise" --question "Still green?" --review-at 2026-01-01T00:00:00Z --json
-wrkq promise ready --json | jq -c '[.[] | {id,state,ready,etag}]'
-wrkq promise renew PR-00001 --if-match 9 --in 7d --note stale --json      # WRKQ_CONFLICT
-wrkq promise renew PR-00001 --if-match 1 --in 7d --note "WV reviewed" --json
-wrkq promise resolve PR-00001 --if-match 2 --note "WV done" --json
-wrkq log PR-00001 --oneline
+~/.local/bin/wrkq promise add --task T-00001 --subject "WV promise" --question "Still green?" --review-at 2026-01-01T00:00:00Z --json
+~/.local/bin/wrkq promise ready --json | jq -c '[.[] | {id,state,ready,etag}]'
+~/.local/bin/wrkq promise renew PR-00001 --if-match 9 --in 7d --note stale --json      # WRKQ_CONFLICT
+~/.local/bin/wrkq promise renew PR-00001 --if-match 1 --in 7d --note "WV reviewed" --json
+~/.local/bin/wrkq promise resolve PR-00001 --if-match 2 --note "WV done" --json
+~/.local/bin/wrkq log PR-00001 --oneline
 ```
 
 ## Gotchas

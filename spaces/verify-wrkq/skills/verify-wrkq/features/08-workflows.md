@@ -48,9 +48,9 @@ reference hook ids from that catalog. The fixture template is `~/praesidium/wrkq
 
 ```bash
 WF=~/praesidium/wrkq/spaces/verify-wrkq/fixtures/wv-flow.json
-R="wrkf --principal-ref agent:clod --role coordinator"
-wrkf workflow validate $WF --json && $R workflow install $WF --json
-wrkq touch inbox/wv-flow -t "WV workflow task" --json | jq -r '.[0].id'   # T-00005 when only the baseline blocks ran; use what it prints
+R="$HOME/.local/bin/wrkf --principal-ref agent:clod --role coordinator"
+~/.local/bin/wrkf workflow validate $WF --json && $R workflow install $WF --json
+~/.local/bin/wrkq touch inbox/wv-flow -t "WV workflow task" --json | jq -r '.[0].id'   # T-00005 when only the baseline blocks ran; use what it prints
 $R task attach T-00005 --workflow wv_flow@1 --json
 $R next T-00005 --json | jq -c '{actions: [.actions[].id], blocked: [.blockedTransitions[].id]}'
 $R transition T-00005 plan_ready --json                           # WRKF_TRANSITION_BLOCKED

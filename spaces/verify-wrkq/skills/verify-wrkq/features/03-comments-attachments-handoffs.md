@@ -35,22 +35,22 @@ are `<agent>@wv-<name>`.
 ## Driving it
 
 ```bash
-wrkq comment add T-00002 -m "WV comment marker WV-C-1" && wrkq comment ls T-00002 --json
-echo "wv attachment payload" > "$WV_STATE/note.txt" && wrkq attach put T-00002 "$WV_STATE/note.txt"
-echo "piped payload" | wrkq attach put T-00002 - --name piped.txt
-wrkq attach ls T-00002 --json && wrkq attach get ATT-00001
+~/.local/bin/wrkq comment add T-00002 -m "WV comment marker WV-C-1" && ~/.local/bin/wrkq comment ls T-00002 --json
+echo "wv attachment payload" > "$WV_STATE/note.txt" && ~/.local/bin/wrkq attach put T-00002 "$WV_STATE/note.txt"
+echo "piped payload" | ~/.local/bin/wrkq attach put T-00002 - --name piped.txt
+~/.local/bin/wrkq attach ls T-00002 --json && ~/.local/bin/wrkq attach get ATT-00001
 find "$WV_STATE/attachments" -type f
-printf 'Objective: wv drive.\nNext: acknowledge.\n' | wrkq handoff create --scope clod@wv-<name> -t "WV handoff" --body-file - --json
-wrkq handoff acknowledge H-00001 --as agent:clod:project:wv-<name> --if-match 2 --note "stale" --json   # etag_mismatch, exit 6
-wrkq handoff acknowledge H-00001 --as agent:clod:project:wv-<name> --if-match 1 --note "Consumed; wv drive" --json
-wrkq handoff list --scope clod@wv-<name> --json | jq -c '.handoffs'      # []
-wrkq handoff get H-00001 --json | jq -c '{id,status,etag,acknowledgement_note}'
-H=$(printf 'Next: cody acks.\n' | wrkq handoff create --to cody@wv-<name> --as agent:clod -t "WV successor handoff" --body-file - --json | jq -r .handoff.id)
-wrkq handoff list --scope cody@wv-<name> --as agent:cody --human        # ID Scope From Status ...: From = clod
-wrkq handoff get "$H" --human | grep -E '^(Agent|From):'                 # Agent: cody / From: clod
-wrkq handoff create --to cody@wv-<name> --scope cody@wv-<name> --as agent:clod -t x --body y   # mutually exclusive, exit 2
-wrkq handoff create --scope cody@wv-<name> --as agent:clod -t x --body y                       # self_scope_violation, exit 1
-wrkq handoff acknowledge "$H" --as agent:cody --if-match 1 --note "Consumed by successor" --json | jq -c '.handoff | {status,acknowledged_by_agent_id,created_by_agent_id}'
+printf 'Objective: wv drive.\nNext: acknowledge.\n' | ~/.local/bin/wrkq handoff create --scope clod@wv-<name> -t "WV handoff" --body-file - --json
+~/.local/bin/wrkq handoff acknowledge H-00001 --as agent:clod:project:wv-<name> --if-match 2 --note "stale" --json   # etag_mismatch, exit 6
+~/.local/bin/wrkq handoff acknowledge H-00001 --as agent:clod:project:wv-<name> --if-match 1 --note "Consumed; wv drive" --json
+~/.local/bin/wrkq handoff list --scope clod@wv-<name> --json | jq -c '.handoffs'      # []
+~/.local/bin/wrkq handoff get H-00001 --json | jq -c '{id,status,etag,acknowledgement_note}'
+H=$(printf 'Next: cody acks.\n' | ~/.local/bin/wrkq handoff create --to cody@wv-<name> --as agent:clod -t "WV successor handoff" --body-file - --json | jq -r .handoff.id)
+~/.local/bin/wrkq handoff list --scope cody@wv-<name> --as agent:cody --human        # ID Scope From Status ...: From = clod
+~/.local/bin/wrkq handoff get "$H" --human | grep -E '^(Agent|From):'                 # Agent: cody / From: clod
+~/.local/bin/wrkq handoff create --to cody@wv-<name> --scope cody@wv-<name> --as agent:clod -t x --body y   # mutually exclusive, exit 2
+~/.local/bin/wrkq handoff create --scope cody@wv-<name> --as agent:clod -t x --body y                       # self_scope_violation, exit 1
+~/.local/bin/wrkq handoff acknowledge "$H" --as agent:cody --if-match 1 --note "Consumed by successor" --json | jq -c '.handoff | {status,acknowledged_by_agent_id,created_by_agent_id}'
 ```
 
 ## Gotchas

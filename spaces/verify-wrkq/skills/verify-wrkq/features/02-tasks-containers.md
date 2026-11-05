@@ -78,19 +78,19 @@ The scratch project starts with no containers, so `wrkq mkdir inbox` comes first
 
 ```bash
 export WRKQ_PRINCIPAL_REF=agent:<you>
-wrkq mkdir inbox
-wrkq touch inbox/wv-alpha -t "WV alpha" -d "body one" --json | jq -c '.[0] | {id,path,state}'
-wrkq set inbox/wv-alpha --state in_progress --priority 1 && wrkq cat inbox/wv-alpha --json --one | jq -c '{id,state,priority,etag}'
-wrkq set inbox/wv-alpha --if-match 1 --priority 3          # refused: etag precondition failed
-wrkq mkdir /wv-<name>/area2 && wrkq touch inbox/wv-beta -t "WV beta" && wrkq mv inbox/wv-beta area2/
-wrkq log T-00001 --oneline
-wrkq set inbox/wv-alpha --state completed && wrkq find --state open --type t --json | jq -c '[.[].id]'
-wrkq rm T-00002 && wrkq restore T-00002
-wrkq archive area2 --yes && wrkq cat T-00002 --json --one | jq -r .state   # cancelled
-wrkq unarchive area2 && wrkq cat T-00002 --json --one | jq -r .state       # open
-wrkq touch T-00002.check --subtask -t "WV named subtask"
-wrkq relation add T-00002 blocks T-00001 && wrkq relation ls T-00002
-wrkq index update && wrkq search alpha --state all --json | jq -c '[.results[].resource_id]'
+~/.local/bin/wrkq mkdir inbox
+~/.local/bin/wrkq touch inbox/wv-alpha -t "WV alpha" -d "body one" --json | jq -c '.[0] | {id,path,state}'
+~/.local/bin/wrkq set inbox/wv-alpha --state in_progress --priority 1 && ~/.local/bin/wrkq cat inbox/wv-alpha --json --one | jq -c '{id,state,priority,etag}'
+~/.local/bin/wrkq set inbox/wv-alpha --if-match 1 --priority 3          # refused: etag precondition failed
+~/.local/bin/wrkq mkdir /wv-<name>/area2 && ~/.local/bin/wrkq touch inbox/wv-beta -t "WV beta" && ~/.local/bin/wrkq mv inbox/wv-beta area2/
+~/.local/bin/wrkq log T-00001 --oneline
+~/.local/bin/wrkq set inbox/wv-alpha --state completed && ~/.local/bin/wrkq find --state open --type t --json | jq -c '[.[].id]'
+~/.local/bin/wrkq rm T-00002 && ~/.local/bin/wrkq restore T-00002
+~/.local/bin/wrkq archive area2 --yes && ~/.local/bin/wrkq cat T-00002 --json --one | jq -r .state   # cancelled
+~/.local/bin/wrkq unarchive area2 && ~/.local/bin/wrkq cat T-00002 --json --one | jq -r .state       # open
+~/.local/bin/wrkq touch T-00002.check --subtask -t "WV named subtask"
+~/.local/bin/wrkq relation add T-00002 blocks T-00001 && ~/.local/bin/wrkq relation ls T-00002
+~/.local/bin/wrkq index update && ~/.local/bin/wrkq search alpha --state all --json | jq -c '[.results[].resource_id]'
 ```
 
 ## Gotchas

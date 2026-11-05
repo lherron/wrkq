@@ -52,14 +52,14 @@ the canonical daemon.
 ## Driving it
 
 ```bash
-W=$(wrkq touch inbox/wv-watch -t "WV monitor target" --json | jq -r '.[0].id')        # id depends on how many drives ran before
-( wrkq monitor wait $W --until state=completed --timeout 30s; echo "exit=$?" ) & sleep 2
-wrkq set $W --state completed; wait                                                  # result met, exit 0
-wrkq monitor wait $W --until state=cancelled --timeout 3s; echo "exit=$?"      # timeout, exit 1
-wrkq monitor watch --raw --timeout 3s | jq -c 'select(.id) | {id,event_type}' | tail -3   # not `| head`: SIGPIPE = exit 141
+W=$(~/.local/bin/wrkq touch inbox/wv-watch -t "WV monitor target" --json | jq -r '.[0].id')        # id depends on how many drives ran before
+( ~/.local/bin/wrkq monitor wait $W --until state=completed --timeout 30s; echo "exit=$?" ) & sleep 2
+~/.local/bin/wrkq set $W --state completed; wait                                                  # result met, exit 0
+~/.local/bin/wrkq monitor wait $W --until state=cancelled --timeout 3s; echo "exit=$?"      # timeout, exit 1
+~/.local/bin/wrkq monitor watch --raw --timeout 3s | jq -c 'select(.id) | {id,event_type}' | tail -3   # not `| head`: SIGPIPE = exit 141
 python3 ~/praesidium/wrkq/spaces/verify-wrkq/fixtures/sink.py <port> "$WV_STATE/sink.jsonl" &
-wrkq container set inbox --webhook-url "http://127.0.0.1:<port>/hook/{ticket_id}" --webhook-events task
-wrkq touch inbox/wv-hook -t "WV webhook target"; wrkq set inbox/wv-hook --priority 1; sleep 3
+~/.local/bin/wrkq container set inbox --webhook-url "http://127.0.0.1:<port>/hook/{ticket_id}" --webhook-events task
+~/.local/bin/wrkq touch inbox/wv-hook -t "WV webhook target"; ~/.local/bin/wrkq set inbox/wv-hook --priority 1; sleep 3
 jq -c '{path, user_agent, body: (.body|fromjson|{event, ticket_id, event_seq})}' "$WV_STATE/sink.jsonl"
 kill %2   # stop the sink before wv down
 ```

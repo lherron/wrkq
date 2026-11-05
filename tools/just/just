@@ -8,6 +8,9 @@
 #
 # and otherwise execs the real just untouched. The shim must never break just:
 # without wrkp it execs the real binary directly.
+#
+# wrkp is named by its install path, never looked up on PATH (T-12652, D2): a
+# prae seat's PATH filter hides wrkp, and run.settled must not depend on it.
 
 self_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)
 if [ -z "${WRKP_JUST_BIN:-}" ] || [ ! -x "$WRKP_JUST_BIN" ]; then
@@ -29,7 +32,8 @@ if [ -z "$WRKP_JUST_BIN" ]; then
 fi
 export WRKP_JUST_BIN
 
-if command -v wrkp >/dev/null 2>&1; then
-  exec wrkp just -- "$@"
+wrkp="$HOME/.local/bin/wrkp"
+if [ -x "$wrkp" ]; then
+  exec "$wrkp" just -- "$@"
 fi
 exec "$WRKP_JUST_BIN" "$@"

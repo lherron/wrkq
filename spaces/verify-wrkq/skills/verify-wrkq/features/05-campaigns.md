@@ -27,17 +27,17 @@ Run `eval "$(wv env <name>)"`, then create a container in the scratch project to
 ## Driving it
 
 ```bash
-wrkq mkdir /wv-<name>/camp1 && wrkq touch camp1/member-a -t "resident member"
-wrkq campaign convert camp1 --state draft -d "WV campaign brief" --specification "WV spec v1" --json
-wrkq campaign activate camp1 --json
-wrkq touch inbox/wv-enrolled -t "enrolled from inbox"
-wrkq set inbox/wv-enrolled --campaign P-<camp1 id> && wrkq cat inbox/wv-enrolled --json --one | jq -c .campaign
-wrkq find --campaign P-<camp1 id> --state all --json | jq -c '[.[] | {id,path}]'
-wrkq campaign portfolio --json | jq -c '[.. | objects | select(.id? == "P-<camp1 id>")][0] | {id,campaignState}'
-wrkq campaign close P-<camp1 id> --state completed --json        # refused: blocked by 2 open member(s)
-wrkq set camp1/member-a inbox/wv-enrolled --state completed
-wrkq campaign close P-<camp1 id> --state completed --json | jq -c '{previousState,campaignState,missingOutcomes}'
-wrkq log P-<camp1 id> --oneline
+~/.local/bin/wrkq mkdir /wv-<name>/camp1 && ~/.local/bin/wrkq touch camp1/member-a -t "resident member"
+~/.local/bin/wrkq campaign convert camp1 --state draft -d "WV campaign brief" --specification "WV spec v1" --json
+~/.local/bin/wrkq campaign activate camp1 --json
+~/.local/bin/wrkq touch inbox/wv-enrolled -t "enrolled from inbox"
+~/.local/bin/wrkq set inbox/wv-enrolled --campaign P-<camp1 id> && ~/.local/bin/wrkq cat inbox/wv-enrolled --json --one | jq -c .campaign
+~/.local/bin/wrkq find --campaign P-<camp1 id> --state all --json | jq -c '[.[] | {id,path}]'
+~/.local/bin/wrkq campaign portfolio --json | jq -c '[.. | objects | select(.id? == "P-<camp1 id>")][0] | {id,campaignState}'
+~/.local/bin/wrkq campaign close P-<camp1 id> --state completed --json        # refused: blocked by 2 open member(s)
+~/.local/bin/wrkq set camp1/member-a inbox/wv-enrolled --state completed
+~/.local/bin/wrkq campaign close P-<camp1 id> --state completed --json | jq -c '{previousState,campaignState,missingOutcomes}'
+~/.local/bin/wrkq log P-<camp1 id> --oneline
 ```
 
 ## Gotchas

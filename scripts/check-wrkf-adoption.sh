@@ -19,10 +19,11 @@ if [ -n "${WRKF_BIN:-}" ]; then
   WRKF="$WRKF_BIN"
 elif [ -x "$ROOT/bin/wrkf" ]; then
   WRKF="$ROOT/bin/wrkf"
-elif command -v wrkf >/dev/null 2>&1; then
-  WRKF="$(command -v wrkf)"
+elif [ -x "$HOME/.local/bin/wrkf" ]; then
+  # The install path, never a bare PATH lookup (T-12652, D2).
+  WRKF="$HOME/.local/bin/wrkf"
 else
-  echo "FAIL: wrkf CLI not found (build bin/wrkf or set WRKF_BIN)" >&2
+  echo "FAIL: wrkf CLI not found (build bin/wrkf, install ~/.local/bin/wrkf, or set WRKF_BIN)" >&2
   exit 1
 fi
 

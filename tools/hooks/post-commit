@@ -1,3 +1,5 @@
 #!/bin/sh
 # wrkq post-commit hook — canonical tracked source for .git/hooks/post-commit.
-command -v wrkp >/dev/null 2>&1 && wrkp git commit || true
+# wrkp by install path, never bare on PATH (T-12652, D2).
+wrkp="$HOME/.local/bin/wrkp"
+[ -x "$wrkp" ] && "$wrkp" git commit || true

@@ -102,7 +102,7 @@ files other than README.md, and `head` is `git rev-parse HEAD` after the ship. P
 task comment, so its `occurred_at` is the time the pass finished:
 
 ```bash
-wrkp post wrkq --type verify.upkeep --key verify-upkeep:<task> -m "verify-wrkq upkeep <task>: <outcome>" \
+~/.local/bin/wrkp post wrkq --type verify.upkeep --key verify-upkeep:<task> -m "verify-wrkq upkeep <task>: <outcome>" \
   --attr outcome=<clean|changed|blocked> --attr features=<n> --attr driven=<n> --attr head=<sha> --attr task=<task>
 ```
 

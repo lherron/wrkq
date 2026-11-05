@@ -43,8 +43,9 @@
 # only when every requested check passed.
 set -euo pipefail
 
-WRKC="${WRKC:-wrkc}"
-WRKQ="${WRKQ:-wrkq}"
+# Installed binaries by path, never bare on PATH (T-12652, D2).
+WRKC="${WRKC:-$HOME/.local/bin/wrkc}"
+WRKQ="${WRKQ:-$HOME/.local/bin/wrkq}"
 REF="" SEAT="" HUMAN="agent:note-smoke" REPLIER="" HRC_DB="" SETTLE=30 CHECK_FYI=0 FYI_TIMEOUT=120 OUT=""
 CALLER_SCOPE="${HRC_SESSION_REF:-}"
 unset HRC_SESSION_REF

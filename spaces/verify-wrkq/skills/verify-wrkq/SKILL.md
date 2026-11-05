@@ -12,6 +12,14 @@ how to drive it, what bites, and what "proven" looks like.
 Only the wrkq project composes this skill. `asp-targets.toml` in the wrkq repo merges it into clod, cody and
 the foundry resident when they run in project wrkq.
 
+## Binaries
+
+Name every owner CLI by its install path: `~/.local/bin/wrkq`, `wrkc`, `wrkf` and `wrkp` there, and
+`~/.bun/bin/hrc` and `~/.bun/bin/asp`. A prae seat's PATH filter hides the bare names, so `wrkq ...` is
+`command not found` there, and putting `~/.local/bin` back on PATH defeats the filter (T-12646 D2). The code
+blocks in this skill already use the paths. A bare name in prose (`wrkq log`) names the verb, not a command
+to paste. `wv` runs the installed binaries from `~/.local/bin` itself.
+
 ## Launch
 
 You can drive on a scratch daemon or read the live one:
@@ -48,8 +56,8 @@ Start with these three checks, and run them again after anything surprising. All
 
 ```bash
 eval "$(wv env <name>)"
-wrkq whoami --json                                     # db_locator must be the scratch rpc://127.0.0.1:<port>
-wrkq server health --addr "127.0.0.1:${WRKQ_DB##*:}"   # {"status":"ok"}
+~/.local/bin/wrkq whoami --json                                     # db_locator must be the scratch rpc://127.0.0.1:<port>
+~/.local/bin/wrkq server health --addr "127.0.0.1:${WRKQ_DB##*:}"   # {"status":"ok"}
 wrkqadm --db "$WV_STATE/wrkq.db" doctor --json | jq -c '[.checks[] | select(.status!="ok")]'
 ```
 

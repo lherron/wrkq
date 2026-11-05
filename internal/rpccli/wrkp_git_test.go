@@ -446,7 +446,7 @@ func TestWrkpGitG8WrkqHookPostsBestEffortWithoutVerify(t *testing.T) {
 	positions := []int{
 		strings.Index(source, "--start pre-push </dev/null"),
 		strings.Index(source, "trap hook_settled 0"),
-		strings.LastIndex(source, `command -v wrkp >/dev/null 2>&1 && wrkp git push "$@" || true`),
+		strings.LastIndex(source, `[ -x "$wrkp" ] && "$wrkp" git push "$@" || true`),
 		strings.LastIndex(source, "exit 0"),
 	}
 	for i, position := range positions {

@@ -59,8 +59,12 @@ def start(hook):
     return record
 
 
+# wrkp by install path, never bare on PATH (T-12652, D2).
+WRKP = str(Path.home() / '.local/bin/wrkp')
+
+
 def post(record):
-    args = ['wrkp', 'post', 'wrkq', '--type', 'hook.settled', '--key', 'hook:' + record['run_id'],
+    args = [WRKP, 'post', 'wrkq', '--type', 'hook.settled', '--key', 'hook:' + record['run_id'],
             '--occurred-at', record['finished_at'], '--message',
             f"{record['hook']} {record['result']} in {record['duration_ms']}ms"]
     for key, value in record.items():

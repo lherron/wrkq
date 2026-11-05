@@ -1,5 +1,7 @@
 // verify-wrkq feature 10: drive the published @wrkq/client against a wv scratch.
 // Run from a dir with its own package.json where `bun add @wrkq/client@latest` installed it, with `wv env` evaluated.
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createClient, isWorkRpcError } from "@wrkq/client";
 import type { WrkqTaskCreateParams } from "@wrkq/client";
 
@@ -8,7 +10,8 @@ const projectRoot = process.env.WRKQ_PROJECT_ROOT;
 if (!dbLocator || !projectRoot) throw new Error("run after: eval \"$(wv env <name>)\"");
 
 const client = await createClient({
-  command: "wrkq",
+  // The installed binary by path, never a bare PATH lookup (T-12652, D2).
+  command: join(homedir(), ".local/bin/wrkq"),
   dbLocator,
   principalRef: "agent:clod",
   clientInfo: { name: "verify-wrkq", version: "0" },

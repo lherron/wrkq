@@ -73,12 +73,12 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
 
 ```bash
 wv up --name <task> && eval "$(wv env <task>)"
-wrkq version --json | jq -c '{version,commit,build_date}'
+~/.local/bin/wrkq version --json | jq -c '{version,commit,build_date}'
 curl -sS -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:${WRKQ_DB##*:}/v1/health"   # 401
-wrkq server health --addr "127.0.0.1:${WRKQ_DB##*:}"                                    # {"status":"ok"}
-WRKQD_TOKEN_FILE=/dev/null wrkq projects                                                # 401 refusal naming the token inputs
-WRKQ_DB=rpc://127.0.0.1:1 wrkq projects                                                 # unreachable, "retrying is safe"
-wrkq whoami --json
+~/.local/bin/wrkq server health --addr "127.0.0.1:${WRKQ_DB##*:}"                                    # {"status":"ok"}
+WRKQD_TOKEN_FILE=/dev/null ~/.local/bin/wrkq projects                                                # 401 refusal naming the token inputs
+WRKQ_DB=rpc://127.0.0.1:1 ~/.local/bin/wrkq projects                                                 # unreachable, "retrying is safe"
+~/.local/bin/wrkq whoami --json
 wrkqadm --db "$WV_STATE/wrkq.db" doctor --json | jq -c '[.checks[] | select(.status!="ok")]'
 wrkqadm --db "$WV_STATE/wrkq.db" migrate --status | tail -3
 wrkqadm --db "$WV_STATE/wrkq.db" migrate        # refused: MIGRATION_DATABASE_SERVING
@@ -87,8 +87,8 @@ wrkqadm --db "$WV_STATE/wrkq.db" migrate        # refused: MIGRATION_DATABASE_SE
 Then the additions (offline admin reads run on the scratch store file):
 
 ```bash
-WRKQD_TOKEN=wv-bogus WRKQD_TOKEN_FILE= wrkq server health --addr "127.0.0.1:${WRKQ_DB##*:}"   # auth: unauthorized, exit 0
-WRKQ_PROFILE=1 wrkq projects --json >/dev/null                                           # breakdown on stderr
+WRKQD_TOKEN=wv-bogus WRKQD_TOKEN_FILE= ~/.local/bin/wrkq server health --addr "127.0.0.1:${WRKQ_DB##*:}"   # auth: unauthorized, exit 0
+WRKQ_PROFILE=1 ~/.local/bin/wrkq projects --json >/dev/null                                           # breakdown on stderr
 D="--db $WV_STATE/wrkq.db"
 wrkqadm $D config doctor
 wrkqadm $D db snapshot --out "$WV_STATE/snap0.db" --json

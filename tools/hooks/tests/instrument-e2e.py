@@ -23,7 +23,11 @@ def run_case(hook, gate_rc=0, publisher='ok', skip=None, leak_rc=0, measurement=
         for tool in ('git', 'sh', 'python3', 'cat'):
             (bins / tool).symlink_to(shutil.which(tool))
         shutil.copytree(SOURCE, root / 'tools/hooks')
-        env = dict(BASE_ENV, PATH=str(bins),
+        # The hooks name wrkp by install path ($HOME/.local/bin/wrkp, T-12652), so
+        # HOME is a fixture too: the real installed wrkp is never reachable.
+        home_bin = root / 'home/.local/bin'
+        home_bin.mkdir(parents=True)
+        env = dict(BASE_ENV, PATH=str(bins), HOME=str(root / 'home'),
                    TRACE=str(root / 'trace'), POSTS=str(root / 'posts'),
                    REFS=str(root / 'refs'), GATE_RC=str(gate_rc), LEAK_RC=str(leak_rc),
                    PUBLISHER=publisher, LEFTHOOK='', WRKQ_SKIP_VERIFY_HOOK='')
@@ -49,7 +53,7 @@ if name == 'wrkp':
 if name == 'gitleaks': sys.exit(int(os.environ['LEAK_RC']))
 sys.exit(int(os.environ['GATE_RC']))
 '''
-            path = bins / name
+            path = (home_bin if name == 'wrkp' else bins) / name
             path.write_text(script)
             path.chmod(0o755)
         assert subprocess.check_output(['git', 'config', '--get', 'core.bare'], cwd=root, env=env).strip() == b'false'

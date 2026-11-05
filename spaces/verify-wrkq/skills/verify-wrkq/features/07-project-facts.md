@@ -47,25 +47,24 @@ throwaway git repo under `$WV_STATE` for the producers.
 ## Driving it
 
 ```bash
-C=$(wrkp cursor wv-<name>)
-wrkp post wv-<name> --type wv.probe --key wv-probe:1 -m "WV fact WV-P-1" --attr outcome=ok --attr n=1 --json | jq -r .uuid
-wrkp post wv-<name> --type wv.probe --key wv-probe:1 -m "repeat" --attr outcome=ok --json | jq -r .uuid     # same uuid
-wrkp log wv-<name> --after "$C" --ndjson | jq -c '.projectEvent | {type, summary, attributes}'
-wrkp types wv-<name>                                                                          # wv.probe count 1
+C=$(~/.local/bin/wrkp cursor wv-<name>)
+~/.local/bin/wrkp post wv-<name> --type wv.probe --key wv-probe:1 -m "WV fact WV-P-1" --attr outcome=ok --attr n=1 --json | jq -r .uuid
+~/.local/bin/wrkp post wv-<name> --type wv.probe --key wv-probe:1 -m "repeat" --attr outcome=ok --json | jq -r .uuid     # same uuid
+~/.local/bin/wrkp log wv-<name> --after "$C" --ndjson | jq -c '.projectEvent | {type, summary, attributes}'
+~/.local/bin/wrkp types wv-<name>                                                                          # wv.probe count 1
 mkdir -p "$WV_STATE/repo" && cd "$WV_STATE/repo" && git init -q -b main \
   && printf '# wrkp: run.settled\nhello:\n\techo wv-just-ok\nfail:\n\texit 3\n' > justfile \
   && git add justfile && git -c user.name=wv -c user.email=wv@local commit -qm "wv seed"
-wrkp git commit                                   # "wrkp git: ... is not a registered project root; skipping", exit 0
-wrkq set wv-<name> --root "$WV_STATE/repo"
-wrkp git commit && wrkp log wv-<name> --type git.commit --json | jq -c '[.[].projectEvent | {summary, attributes}]'
-[ "$(command -v just)" = "$HOME/.local/bin/just" ] || PATH="$HOME/.local/bin:$PATH"   # the shim must lead PATH (Gotchas)
-just hello; just fail; just --list >/dev/null
-wrkp log wv-<name> --type run.settled --json | jq -c '[.[].projectEvent | {summary, recipe: .attributes.recipe, status: .attributes.status, load1: .attributes.load1, ncpu: .attributes.ncpu}]'
-C1=$(wrkp cursor wv-<name>); wrkq touch inbox/wv-visible -t "WV visible"; wrkq set inbox/wv-visible --priority 1; wrkq mv inbox/wv-visible area2/
-wrkp log wv-<name> --after "$C1" --ndjson | jq -c .type                      # "task.created" only
-wrkp log wv-<name> --after "$C1" --type 'task.*' --ndjson | jq -c .type      # task.created, task.edited, task.moved
+~/.local/bin/wrkp git commit                                   # "wrkp git: ... is not a registered project root; skipping", exit 0
+~/.local/bin/wrkq set wv-<name> --root "$WV_STATE/repo"
+~/.local/bin/wrkp git commit && ~/.local/bin/wrkp log wv-<name> --type git.commit --json | jq -c '[.[].projectEvent | {summary, attributes}]'
+~/.local/bin/just hello; ~/.local/bin/just fail; ~/.local/bin/just --list >/dev/null   # the shim by path (Gotchas)
+~/.local/bin/wrkp log wv-<name> --type run.settled --json | jq -c '[.[].projectEvent | {summary, recipe: .attributes.recipe, status: .attributes.status, load1: .attributes.load1, ncpu: .attributes.ncpu}]'
+C1=$(~/.local/bin/wrkp cursor wv-<name>); ~/.local/bin/wrkq touch inbox/wv-visible -t "WV visible"; ~/.local/bin/wrkq set inbox/wv-visible --priority 1; ~/.local/bin/wrkq mv inbox/wv-visible area2/
+~/.local/bin/wrkp log wv-<name> --after "$C1" --ndjson | jq -c .type                      # "task.created" only
+~/.local/bin/wrkp log wv-<name> --after "$C1" --type 'task.*' --ndjson | jq -c .type      # task.created, task.edited, task.moved
 printf 'refs/heads/main %s refs/heads/main %s\n' "$(git rev-parse HEAD)" 0000000000000000000000000000000000000000 \
-  | wrkp git push origin file:///dev/null                                     # one git.push
+  | ~/.local/bin/wrkp git push origin file:///dev/null                                     # one git.push
 ```
 
 Live, read only: `wrkp types wrkq` and `wrkp log wrkq --type verify.upkeep --limit 1 --json`.
@@ -80,7 +79,9 @@ Live, read only: `wrkp types wrkq` and `wrkp log wrkq --type verify.upkeep --lim
   just'` is `/opt/homebrew/bin/just` (`~/.zprofile`'s `brew shellenv` prepends `/opt/homebrew/bin` after `.zshenv`
   set `~/.local/bin` first), while `zsh -c` finds the shim. A Claude Code Bash shell inherits the login order, so
   the replayed `just hello; just fail` posted **no** `run.settled` and still exited 0 and 3. Check `command -v just`
-  before the drive. Product task T-12310 (2026-11-02, T-12309 `07-project-facts/drive.txt`).
+  before the drive. Product task T-12310 (2026-11-02, T-12309 `07-project-facts/drive.txt`). The drive above
+  calls `~/.local/bin/just` by path rather than prepending `~/.local/bin` to PATH, which on a prae seat would
+  re-expose the owner CLIs its PATH filter hides (T-12652).
 - The shim posts with the caller's environment, so a `just` run inside a shell with `wv env` evaluated posts to
   the **scratch** daemon. A `just` run in the real wrkq checkout from that shell would post its `run.settled`
   to the scratch, not to canonical.

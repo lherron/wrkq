@@ -32,7 +32,9 @@ stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rid
 - **Idempotency.** `idempotencyKey` on create replays the same task. The replay returns the original response,
   so its `etag` can be stale. Read the current etag (`wrkq.task.show`) before a CAS update.
 - **CAS.** `expectEtag` on update. A stale etag fails `WRKQ_CONFLICT`.
-- **The client.** `createClient({command: "wrkq"|"wrkf", dbLocator, principalRef, role, clientInfo})` runs
+- **The client.** `createClient({command, dbLocator, principalRef, role, clientInfo})` takes `command` as the
+  binary to spawn; pass the install path (`~/.local/bin/wrkq` or `~/.local/bin/wrkf`), since a bare name is a
+  PATH lookup a prae seat cannot make (T-12652). It runs
   `rpc.initialize` before it resolves. An `rpc://` locator goes through `WRKQ_DB`, so the client never parses
   CLI output and never calls wrkqd HTTP itself. Errors are `WorkRpcError` with `domainCode` and `retryable`.
 - **Publishing.** A main-checkout `just install` on a producer node with a clean tracked tree (source read: `justfile`) publishes a timestamped `@wrkq/client` to the node's
@@ -55,9 +57,9 @@ Live, read only: one `rpc.initialize` frame against canonical names the serving 
 INIT='{"jsonrpc":"2.0","id":1,"method":"rpc.initialize","params":{"protocolVersion":"2026-06-30","client":{"name":"wv","version":"0"}}}'
 printf '%s\n' "$INIT" '{"jsonrpc":"2.0","id":2,"method":"wrkq.nope"}' \
   '{"jsonrpc":"2.0","id":3,"method":"wrkq.task.show","params":{"task":"T-00001"}}' \
-  | wrkq rpc --stdio | jq -c '{id, hash: .result.protocolSchemaHash, task: (.result.id // null), err: .error.code}'
+  | ~/.local/bin/wrkq rpc --stdio | jq -c '{id, hash: .result.protocolSchemaHash, task: (.result.id // null), err: .error.code}'
 printf '%s\n' "$INIT" '{"jsonrpc":"2.0","id":2,"method":"wrkq.task.create","params":{"title":"x","path":"wv-<name>/inbox/x"}}' \
-  | wrkq --principal-ref agent:clod rpc --stdio | jq -c '{id, by: .result.createdByPrincipalRef, err: .error.data.code}' # see Gotchas
+  | ~/.local/bin/wrkq --principal-ref agent:clod rpc --stdio | jq -c '{id, by: .result.createdByPrincipalRef, err: .error.data.code}' # see Gotchas
 cd "$WV_STATE/client" && bun --env-file=/dev/null run client-drive.ts
 # {"created":{...,"by":"agent:clod"}} {"replay_same_id":true} {"stale_update_refused":"WRKQ_CONFLICT"} {"cas_update":{"priority":1,...}}
 ```
