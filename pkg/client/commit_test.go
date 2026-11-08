@@ -92,3 +92,33 @@ func TestRoomWaitTakesTokenBeforeSnapshot(t *testing.T) {
 		t.Fatalf("calls=%v", calls)
 	}
 }
+
+// The server answers a timed-out wait with changed:false at timeoutMs, so the
+// request deadline must sit after it; a deadline at the same instant cancels
+// the call first, wrkqd logs it as -32603 and the connection is torn down
+// (T-12724 census: 224 errored timeout-length waits / 10 min from 12 followers).
+func TestWaitForCommitLetsTheServerAnswerItsOwnTimeout(t *testing.T) {
+	tr := &commitDeadlineTransport{}
+	start := time.Now()
+	token, err := WaitForCommit(t.Context(), tr, "same", 25*time.Second)
+	if err != nil || token != "same" {
+		t.Fatalf("token=%s err=%v", token, err)
+	}
+	if margin := tr.deadline.Sub(start) - time.Duration(tr.timeoutMs)*time.Millisecond; margin < time.Second {
+		t.Fatalf("request deadline is %s after the server's own %d ms timeout, want >= 1s so the server answers first", margin, tr.timeoutMs)
+	}
+}
+
+// commitDeadlineTransport records the request deadline and answers unchanged.
+type commitDeadlineTransport struct {
+	deadline  time.Time
+	timeoutMs int
+}
+
+func (c *commitDeadlineTransport) Call(ctx context.Context, _ string, params any) (json.RawMessage, error) {
+	c.deadline, _ = ctx.Deadline()
+	c.timeoutMs = *params.(CommitWaitParams).TimeoutMs
+	return json.RawMessage(`{"token":"same","changed":false}`), nil
+}
+
+func (*commitDeadlineTransport) Close() error { return nil }

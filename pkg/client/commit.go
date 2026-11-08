@@ -10,6 +10,11 @@ import (
 )
 
 type CommitWaitParams = wrkqapi.CommitWaitParams
+
+// commitWaitAnswerMargin is how long past the server's own timeout a client
+// waits for its changed:false answer before giving up on the request.
+const commitWaitAnswerMargin = 2 * time.Second
+
 type CommitWaitResult = wrkqapi.WrkqCommitWait
 
 // CommitWait returns an ephemeral wake hint, never a durable view cursor.
@@ -34,9 +39,19 @@ func WaitForCommit(ctx context.Context, tr Transport, since string, slack time.D
 	if slack <= 0 {
 		return since, nil
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, slack)
-	defer cancel()
 	ms := max(1, int((slack+time.Millisecond-1)/time.Millisecond))
+	// The server answers its own timeout with changed:false at ms, so for a
+	// wait it honours (>= its 1 s minimum) the request deadline sits a margin
+	// after it: a deadline at the same instant cancels the call first, wrkqd
+	// logs -32603 and the connection is torn down (T-12724 census). Shorter
+	// slacks keep the tight deadline, because the server's 1 s floor would
+	// overshoot the caller's clock.
+	deadline := slack
+	if slack >= time.Second {
+		deadline = slack + commitWaitAnswerMargin
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
 	started := time.Now()
 	raw, err := tr.Call(waitCtx, "wrkq.commit.wait", CommitWaitParams{Since: since, TimeoutMs: &ms})
 	if err != nil {
