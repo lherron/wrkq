@@ -246,13 +246,39 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 				if cursor != "" && cursor != sentCursor {
 					continue
 				}
-				slack := wrkpFollowDelay(beforeTime, min(maxWait, clockSlack(followStarted, lastEntry, timeout, stallAfter)))
-				token, err = workrpcclient.WaitForCommit(cmd.Context(), tr, token, slack)
-				if err != nil {
+				// Against a remote wrkqd the commit token is authoritative: an
+				// unchanged token (timeout, capacity refusal) means nothing was
+				// committed in wrkqd, so park again instead of re-reading the
+				// timeline. Writes outside wrkqd (wrkqadm, migrations, restores)
+				// never move the token, so a read is still forced every
+				// wrkpFollowForcedReadInterval (ADR 0004 unsupported list).
+				// Locally, other processes' writes never move the token, so
+				// every wait return still reads.
+				for {
+					prev := token
+					slack := wrkpFollowDelay(beforeTime, min(maxWait, clockSlack(followStarted, lastEntry, timeout, stallAfter)))
+					if forcedIn := wrkpFollowForcedReadInterval - time.Since(readStarted); forcedIn < slack {
+						slack = forcedIn
+					}
+					token, err = workrpcclient.WaitForCommit(cmd.Context(), tr, token, slack)
+					if err != nil {
+						if cmd.Context().Err() != nil {
+							return nil
+						}
+						return wrkpRPCError(err)
+					}
+					if cfg.RemoteEndpoint == "" || token == "" || token != prev || slack <= 0 {
+						break
+					}
+					if timeout > 0 && time.Since(followStarted) >= timeout {
+						return writeWrkpTerminal(cmd, mode, monitorResultTimeout, cursor)
+					}
+					if stallAfter > 0 && time.Since(lastEntry) >= stallAfter {
+						return writeWrkpTerminal(cmd, mode, monitorResultStall, cursor)
+					}
 					if cmd.Context().Err() != nil {
 						return nil
 					}
-					return wrkpRPCError(err)
 				}
 			}
 		},
@@ -365,6 +391,11 @@ func writeWrkpTerminal(cmd *cobra.Command, mode string, result monitorTerminalRe
 // The advisory subtree fingerprint retains its own clock while a tail waits
 // for commits. Waits also end at --before so the finite window can drain.
 const wrkpFingerprintInterval = 30 * time.Second
+
+// wrkpFollowForcedReadInterval bounds how long a remote follower trusts an
+// unchanged commit token: it re-reads at least this often, so writes made
+// outside wrkqd surface within it. A var only so tests can shorten it.
+var wrkpFollowForcedReadInterval = 5 * time.Minute
 
 func wrkpFollowDelay(before time.Time, idle time.Duration) time.Duration {
 	if !before.IsZero() && time.Until(before) < idle {

@@ -26,6 +26,10 @@ detects commits crossing that read; the existing durable view cursors remain
 the replay authority. Restart changes the token incarnation. External-process
 writes surface at timeout; time-based materialization remains governed by
 caller clocks and authoritative reads. These are explicit product boundaries.
+A remote caller may treat an unchanged token as proof that wrkqd committed
+nothing and park again without reading, provided it still forces an
+authoritative read at a bounded interval; that interval is then its latency
+bound for external-process writes (`wrkp log --follow`: 5 minutes).
 
 The client still owns its loop, clocks, terminal record, rendering, and exit
 codes. Existing bounded read-model contracts and exact schema-hash verification

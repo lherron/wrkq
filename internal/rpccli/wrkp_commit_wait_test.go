@@ -93,6 +93,67 @@ func TestWrkpFollowCommitWait(t *testing.T) {
 			if waits < 2 || reads > 8 {
 				t.Fatalf("idle polling or backlog not drained: reads=%d waits=%d calls=%v", reads, waits, observed)
 			}
+			// A wait that returns without a commit (timeout or unchanged
+			// token) proves nothing new exists: the follower must not read.
+			if last := observed[len(observed)-1]; last != "wrkq.commit.wait" {
+				t.Fatalf("timeline read after an unchanged commit wait: %v", observed)
+			}
 		})
 	}
+	// An unchanged token is trusted only for wrkpFollowForcedReadInterval:
+	// past it the follower re-reads, so writes made outside wrkqd surface.
+	// With the default (5 min) an idle 4 s follow reads only its opening drain;
+	// with a 1.2 s interval the same follow is forced to read again.
+	t.Run("forced-read-bound", func(t *testing.T) {
+		endpoint := "rpc://" + strings.TrimPrefix(httpServer.URL, "http://")
+		idleReads := func() int {
+			mu.Lock()
+			calls = nil
+			mu.Unlock()
+			cmd := NewWrkpRootCmd()
+			cmd.SetArgs([]string{"--db", endpoint, "log", "rpccli-test-proj", "--follow", "--ndjson", "--timeout", "4s"})
+			var stdout, stderr bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+			if err := cmd.ExecuteContext(t.Context()); err != nil {
+				t.Fatalf("follow: %v %s", err, stderr.String())
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			return strings.Count(strings.Join(calls, " "), "wrkq.container.timelineView")
+		}
+		// The opening drain reads until the cursor stops moving; after that a
+		// default-bound idle follow never reads again within 4 s.
+		baseline := idleReads()
+		if baseline > 2 {
+			t.Fatalf("idle follow under the default bound read %d times, want only the opening drain (<= 2)", baseline)
+		}
+		previous := wrkpFollowForcedReadInterval
+		wrkpFollowForcedReadInterval = 1200 * time.Millisecond
+		defer func() { wrkpFollowForcedReadInterval = previous }()
+		if reads := idleReads(); reads < baseline+2 {
+			t.Fatalf("idle 4 s follow with a 1.2 s forced-read bound read %d times, want >= %d (baseline %d + forced)", reads, baseline+2, baseline)
+		}
+	})
+	// A real commit on the server still wakes a parked follower and is read.
+	t.Run("live-commit", func(t *testing.T) {
+		endpoint := "rpc://" + strings.TrimPrefix(httpServer.URL, "http://")
+		cmd := NewWrkpRootCmd()
+		cmd.SetArgs([]string{"--db", endpoint, "log", "rpccli-test-proj", "--follow", "--ndjson", "--timeout", "4s"})
+		var stdout, stderr bytes.Buffer
+		cmd.SetOut(&stdout)
+		cmd.SetErr(&stderr)
+		go func() {
+			time.Sleep(800 * time.Millisecond)
+			if out, err := runCampaignCLI(t, endpoint, "comment", "add", taskID, "-m", "live-after-park"); err != nil {
+				t.Errorf("live comment: %v %s", err, out)
+			}
+		}()
+		if err := cmd.ExecuteContext(t.Context()); err != nil {
+			t.Fatalf("follow: %v %s", err, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "live-after-park") {
+			t.Fatalf("parked follower missed a live commit: %s", stdout.String())
+		}
+	})
 }
