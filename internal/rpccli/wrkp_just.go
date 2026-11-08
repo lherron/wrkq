@@ -203,6 +203,10 @@ func newWrkpJustCmd() *cobra.Command {
 					justfile = found
 				}
 			}
+			if justfile != "" && !wrkpJustRecipeKnown(justBin, justfile, inv) {
+				// A typo is not a run: let just refuse it, and post nothing.
+				justfile = ""
+			}
 			if justfile == "" {
 				// Not observed: become just.
 				return syscall.Exec(justBin, append([]string{"just"}, args...), os.Environ())
@@ -214,6 +218,32 @@ func newWrkpJustCmd() *cobra.Command {
 			return exitErrorReported(code, fmt.Errorf("just exited %d", code))
 		},
 	}
+}
+
+// wrkpJustRecipeKnown reports whether the invocation names something the
+// justfile can run: the default recipe, a recipe or alias (`--show` resolves
+// both, module paths `mod::recipe` included), or a module given space
+// separated (`just mod recipe`). A justfile just cannot parse counts as known,
+// so a broken justfile still posts its failed run.
+func wrkpJustRecipeKnown(justBin, justfile string, inv wrkpJustInvocation) bool {
+	if inv.recipe == "(default)" {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), wrkpJustTimeout)
+	defer cancel()
+	summary, err := exec.CommandContext(ctx, justBin, "--justfile", justfile, "--summary").Output()
+	if err != nil {
+		return true
+	}
+	if exec.CommandContext(ctx, justBin, "--justfile", justfile, "--show", inv.recipe).Run() == nil {
+		return true
+	}
+	for _, name := range strings.Fields(string(summary)) {
+		if name == inv.recipe || strings.HasPrefix(name, inv.recipe+"::") {
+			return true
+		}
+	}
+	return false
 }
 
 func runWrkpJustObserved(cmd *cobra.Command, justBin string, args []string, inv wrkpJustInvocation, justfile string) int {
