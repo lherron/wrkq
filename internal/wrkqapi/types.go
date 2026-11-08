@@ -641,7 +641,10 @@ type ContainerCreateParams struct {
 	Slug       string `json:"slug,omitempty"`
 	Title      string `json:"title,omitempty"`
 	Kind       string `json:"kind,omitempty"`
-	Actor      string `json:"actor,omitempty"`
+	// CampaignState (draft|active) converts the new container to a campaign in
+	// the same transaction; omitted creates a plain container.
+	CampaignState string `json:"campaignState,omitempty"`
+	Actor         string `json:"actor,omitempty"`
 }
 
 // ContainerShowParams mirrors WrkqContainerShowParams.

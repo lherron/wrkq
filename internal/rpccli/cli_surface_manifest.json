@@ -2180,6 +2180,12 @@
         "available": true,
         "flags": [
           {
+            "name": "campaign",
+            "usage": "Create as a campaign: draft or active (bare --campaign means active)",
+            "type": "string",
+            "hidden": false
+          },
+          {
             "name": "json",
             "usage": "Output JSON",
             "type": "bool",
@@ -2195,7 +2201,7 @@
           {
             "name": "parents",
             "shorthand": "p",
-            "usage": "Create parent containers as needed",
+            "usage": "Create missing parent containers; an existing container is not an error",
             "type": "bool",
             "default": "false",
             "hidden": false

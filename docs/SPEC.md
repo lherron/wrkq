@@ -336,7 +336,10 @@ selects tasks whose current outcome is present.
 A campaign is an ordinary container with a canonical lifecycle adornment. Its
 states are `draft`, `active`, `completed`, and `cancelled`; container `kind` and
 `archived_at` remain independent. Conversion supports plain-to-draft and
-plain-to-active (the default). Draft campaigns can have resident and explicitly
+plain-to-active (the default). `wrkq.container.create` takes an optional
+`campaignState` (`draft` or `active`) that converts the new container in the
+same transaction, writing the same `container.created` and campaign-state
+events as a create followed by a convert; a refused conversion creates nothing. Draft campaigns can have resident and explicitly
 enrolled tasks, activate explicitly, or cancel without running. Active campaigns
 can complete or cancel. Terminal campaigns retain their current members but
 reject every new admission path, including create, move, copy, and explicit
@@ -344,7 +347,10 @@ enrollment; moving or unenrolling a member out remains legal.
 
 Effective membership is exclusive and is defined as resident-or-enrolled.
 `wrkq set <task> --campaign <campaign>` remains the canonical explicit
-enrollment mutation. A resident task cannot simultaneously enroll in a foreign
+enrollment mutation. Enrolling into a plain container or a terminal campaign is
+refused with the stable prefix `campaign enrollment target must be a draft or
+active campaign`, followed by the target's id and either the convert command or
+its terminal state. A resident task cannot simultaneously enroll in a foreign
 campaign. Campaigns cannot nest under another campaign.
 
 Campaign labels use the exact task-label value semantics: an ordered string

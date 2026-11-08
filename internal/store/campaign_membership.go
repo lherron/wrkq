@@ -42,7 +42,7 @@ func validateEffectiveMembershipTx(tx *sql.Tx, v campaignValidation) error {
 		if v.enrollmentChange && enrolledUUID.Valid &&
 			(!enrolledState.Valid ||
 				(enrolledState.String != CampaignStateDraft && enrolledState.String != CampaignStateActive)) {
-			return fmt.Errorf("campaign enrollment target must be a draft or active campaign")
+			return enrollmentTargetError(tx, enrolledUUID.String, enrolledState)
 		}
 		if v.residentAdmission && residentState.Valid &&
 			(residentState.String == CampaignStateCompleted || residentState.String == CampaignStateCancelled) {
@@ -155,4 +155,19 @@ func stampTaskCampaignJSON(tx *sql.Tx, taskUUID string, payload map[string]any) 
 	}
 	b, err := json.Marshal(payload)
 	return string(b), err
+}
+
+// enrollmentTargetError names the refused target and how to proceed. Callers
+// match on the stable prefix "campaign enrollment target must be a draft or
+// active campaign".
+func enrollmentTargetError(tx *sql.Tx, containerUUID string, state sql.NullString) error {
+	const base = "campaign enrollment target must be a draft or active campaign"
+	var id string
+	if err := tx.QueryRow("SELECT id FROM containers WHERE uuid = ?", containerUUID).Scan(&id); err != nil || id == "" {
+		id = containerUUID
+	}
+	if !state.Valid {
+		return fmt.Errorf("%s: %s is a plain container; convert it first with `wrkq campaign convert %s` or `prae work group update %s --action convert`", base, id, id, id)
+	}
+	return fmt.Errorf("%s: %s is %s and accepts no new members", base, id, state.String)
 }

@@ -17,6 +17,8 @@ export interface WrkqContainerCreateParams {
   slug?: string;
   title?: string;
   kind?: string;
+  /** Converts the new container to a campaign in the same write. */
+  campaignState?: "draft" | "active";
   actor?: string;
 }
 

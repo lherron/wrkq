@@ -40,17 +40,29 @@ func (a *API) ContainerCreate(ctx context.Context, p ContainerCreateParams) (*Wr
 		return nil, NewValidationError(serr.Error(), map[string]any{"field": "slug"})
 	}
 
+	campaignState := strings.TrimSpace(p.CampaignState)
+	if campaignState != "" && campaignState != store.CampaignStateDraft && campaignState != store.CampaignStateActive {
+		return nil, NewValidationError(
+			"campaignState must be draft or active",
+			map[string]any{"field": "campaignState"},
+		)
+	}
+
 	attr, aerr := a.attributionFor(ctx, p.Actor)
 	if aerr != nil {
 		return nil, aerr
 	}
 	result, err := a.store.Containers.CreateWithAttribution(attr, store.ContainerCreateParams{
-		Slug:       normalizedSlug,
-		Title:      strings.TrimSpace(p.Title),
-		ParentUUID: parentUUID,
-		Kind:       strings.TrimSpace(p.Kind),
+		Slug:          normalizedSlug,
+		Title:         strings.TrimSpace(p.Title),
+		ParentUUID:    parentUUID,
+		Kind:          strings.TrimSpace(p.Kind),
+		CampaignState: campaignState,
 	})
 	if err != nil {
+		if campaignState != "" {
+			return nil, mapCampaignStoreError(err, "")
+		}
 		return nil, mapContainerStoreError(err, "")
 	}
 	return a.loadContainer(result.UUID)

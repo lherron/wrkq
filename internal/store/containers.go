@@ -22,6 +22,9 @@ type ContainerCreateParams struct {
 	Title      string // defaults to Slug if empty
 	ParentUUID *string
 	Kind       string // project, directory, feature, area - defaults to "directory"
+	// CampaignState, when draft or active, converts the new container to a
+	// campaign in the same transaction. Empty creates a plain container.
+	CampaignState string
 }
 
 // ContainerCreateResult contains the result of container creation.
@@ -29,6 +32,8 @@ type ContainerCreateResult struct {
 	UUID string
 	ID   string
 	ETag int64
+	// Campaign is set when the create also converted the container.
+	Campaign *CampaignTransitionResult
 }
 
 // Create creates a new container and logs a container.created event.
@@ -128,8 +133,19 @@ func (cs *ContainerStore) CreateWithAttribution(attr attribution.Attribution, pa
 			ID:   id,
 			ETag: etag,
 		}
+		if params.CampaignState != "" {
+			campaign, err := convertCampaignTx(tx, ew, attr, uuid, params.CampaignState, nil, nil, nil, 0)
+			if err != nil {
+				return err
+			}
+			result.ETag = campaign.ETag
+			result.Campaign = campaign
+		}
 		return nil
 	})
+	if err == nil && result != nil && result.Campaign != nil {
+		dispatchCampaignConvert(cs.store, result.UUID, result.Campaign, attr)
+	}
 
 	return result, err
 }

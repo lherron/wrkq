@@ -56,7 +56,11 @@ Run `eval "$(wv env <name>)"`, then create a container in the scratch project to
   open members as they are (2026-10-05, T-10349 `05-campaigns/drive.txt`).
 - `convert` with no `--state` makes an active campaign. A draft can only be activated or cancelled. A terminal
   campaign refuses every transition (`terminal campaigns cannot transition`), and enrolling into one is refused
-  (`campaign enrollment target must be a draft or active campaign`).
+  (`campaign enrollment target must be a draft or active campaign: P-… is completed and accepts no new
+  members`). Enrolling into a plain container gets the same prefix, then `P-… is a plain container; convert it first
+  with …`.
+- `wrkq mkdir --campaign[=draft]` creates and converts in one write; `-p --campaign` converts an existing plain
+  container and leaves a campaign alone (T-12731).
 - `wrkq stat <container> --json` returns an array, and `wrkq cat P-<n> --json --one` doesn't carry the
   campaign state. Read the state from the `convert`/`activate`/`close` results or from `portfolio`.
 - After `close`, the campaign drops out of the default `portfolio` aggregate.

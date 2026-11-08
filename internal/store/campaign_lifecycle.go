@@ -77,6 +77,41 @@ func (cs *ContainerStore) ConvertCampaignWithAttribution(
 	}
 	var result *CampaignTransitionResult
 	err := cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
+		var err error
+		result, err = convertCampaignTx(tx, ew, attr, containerUUID, targetState, description, specification, labels, ifMatch)
+		return err
+	})
+	if err == nil && result != nil {
+		dispatchCampaignConvert(cs.store, containerUUID, result, attr)
+	}
+	return result, err
+}
+
+// dispatchCampaignConvert posts the campaign webhook for a committed conversion.
+func dispatchCampaignConvert(s *Store, containerUUID string, result *CampaignTransitionResult, attr attribution.Attribution) {
+	webhooks.DispatchCampaignTransition(
+		s.db,
+		containerUUID,
+		result.PreviousState,
+		result.CampaignState,
+		events.EventMetadata{ID: result.EventID, Timestamp: result.EventTimestamp},
+		attr.PrincipalRef,
+	)
+}
+
+// convertCampaignTx converts a plain container to a draft or active campaign
+// inside the caller's transaction. Both convert and create-as-campaign use it,
+// so the two paths write the same rows and events.
+func convertCampaignTx(
+	tx *sql.Tx,
+	ew *events.Writer,
+	attr attribution.Attribution,
+	containerUUID, targetState string,
+	description, specification, labels *string,
+	ifMatch int64,
+) (*CampaignTransitionResult, error) {
+	var result *CampaignTransitionResult
+	err := func() error {
 		var currentETag int64
 		var currentState sql.NullString
 		var kind string
@@ -160,17 +195,7 @@ func (cs *ContainerStore) ConvertCampaignWithAttribution(
 			EventTimestamp: meta.Timestamp,
 		}
 		return nil
-	})
-	if err == nil && result != nil {
-		webhooks.DispatchCampaignTransition(
-			cs.store.db,
-			containerUUID,
-			result.PreviousState,
-			result.CampaignState,
-			events.EventMetadata{ID: result.EventID, Timestamp: result.EventTimestamp},
-			attr.PrincipalRef,
-		)
-	}
+	}()
 	return result, err
 }
 

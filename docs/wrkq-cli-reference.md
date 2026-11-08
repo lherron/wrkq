@@ -93,6 +93,16 @@ wrkq mkdir /myproject --kind project
 # Create a nested container
 wrkq mkdir /myproject/backend
 
+# Ensure a path exists: creates missing parent directories, succeeds if it exists.
+# Never creates a missing top-level project.
+wrkq mkdir -p /myproject/backend/api
+
+# Create a campaign in one write (bare --campaign means active)
+wrkq mkdir --campaign /myproject/launch
+wrkq mkdir --campaign=draft /myproject/next-wave
+# Retry-safe: converts an existing plain container, leaves a campaign alone
+wrkq mkdir -p --campaign /myproject/launch
+
 # List top-level projects
 wrkq projects
 

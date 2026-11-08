@@ -19,16 +19,31 @@ import (
 func newMkdirCmd() *cobra.Command {
 	var parents bool
 	var kind string
+	var campaign string
 	cmd := &cobra.Command{
 		Use:   "mkdir <path>...",
 		Short: "Create one or more containers",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Creates one or more containers.
+
+-p creates missing parent directories and succeeds on a container that already
+exists. It never creates a missing top-level project; create that with
+--kind project first.
+
+--campaign creates the container as a campaign in one write (draft or active;
+--campaign alone means active). With -p, an existing plain container is
+converted and an existing campaign is left as it is.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMkdir(cmd, args, kind)
+			if campaign != "" && campaign != "draft" && campaign != "active" {
+				return &clifunnel.UsageError{Err: fmt.Errorf("--campaign must be draft or active"), Cmd: cmd}
+			}
+			return runMkdir(cmd, args, mkdirOptions{kind: kind, parents: parents, campaign: campaign})
 		},
 	}
-	cmd.Flags().BoolVarP(&parents, "parents", "p", false, "Create parent containers as needed")
+	cmd.Flags().BoolVarP(&parents, "parents", "p", false, "Create missing parent containers; an existing container is not an error")
 	cmd.Flags().StringVar(&kind, "kind", "", "Container kind: project, directory, feature, area (default: directory)")
+	cmd.Flags().StringVar(&campaign, "campaign", "", "Create as a campaign: draft or active (bare --campaign means active)")
+	cmd.Flags().Lookup("campaign").NoOptDefVal = "active"
 	cmd.Flags().Bool("json", false, "Output JSON")
 	return refuseRepeatedFlags(cmd)
 }
@@ -190,7 +205,13 @@ func loadContainerArchivePreflight(ctx context.Context, tr Transport, selector s
 	return containerArchivePreflight{}, fmt.Errorf("container task count not found: %s", selector)
 }
 
-func runMkdir(cmd *cobra.Command, args []string, kind string) error {
+type mkdirOptions struct {
+	kind     string
+	parents  bool
+	campaign string
+}
+
+func runMkdir(cmd *cobra.Command, args []string, opts mkdirOptions) error {
 	tr, sc, closeFn, err := openMirror(cmd)
 	if err != nil {
 		return err
@@ -207,11 +228,38 @@ func runMkdir(cmd *cobra.Command, args []string, kind string) error {
 	for _, path := range paths {
 		// Legacy mkdir infers kind: top-level containers must be projects;
 		// nested default to directory (mirrors internal/rpccli/containers.go:98-112).
-		segKind, err := mkdirKindFor(path, kind)
+		segKind, err := mkdirKindFor(path, opts.kind)
 		if err != nil {
 			return err
 		}
+		if opts.parents {
+			if err := mkdirParents(cmd, tr, path, actor); err != nil {
+				return err
+			}
+			existing, err := mkdirShow(cmd, tr, path)
+			if err != nil {
+				return err
+			}
+			if existing != nil {
+				if opts.campaign != "" && existing.CampaignState == nil {
+					params := map[string]any{"container": existing.ID, "state": opts.campaign}
+					if actor != "" {
+						params["actor"] = actor
+					}
+					if _, err := tr.Call(cmd.Context(), "wrkq.container.campaignConvert", params); err != nil {
+						return err
+					}
+					results = append(results, map[string]interface{}{"path": path, "created": false, "converted": true})
+					continue
+				}
+				results = append(results, map[string]interface{}{"path": path, "created": false})
+				continue
+			}
+		}
 		params := map[string]any{"path": path, "kind": segKind}
+		if opts.campaign != "" {
+			params["campaignState"] = opts.campaign
+		}
 		if actor != "" {
 			params["actor"] = actor
 		}
@@ -223,11 +271,70 @@ func runMkdir(cmd *cobra.Command, args []string, kind string) error {
 
 	if !jsonOutput(cmd) {
 		for _, r := range results {
-			fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", r["path"])
+			switch {
+			case r["created"] == true:
+				fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", r["path"])
+			case r["converted"] == true:
+				fmt.Fprintf(cmd.OutOrStdout(), "Converted: %s\n", r["path"])
+			default:
+				fmt.Fprintf(cmd.OutOrStdout(), "Exists: %s\n", r["path"])
+			}
 		}
 		return nil
 	}
 	return encodeJSONIndent(cmd, results)
+}
+
+type mkdirExisting struct {
+	ID            string  `json:"id"`
+	CampaignState *string `json:"campaignState"`
+}
+
+// mkdirShow returns the container at path, or nil when it does not exist.
+func mkdirShow(cmd *cobra.Command, tr Transport, path string) (*mkdirExisting, error) {
+	raw, err := tr.Call(cmd.Context(), "wrkq.container.show", map[string]any{"path": path})
+	if err != nil {
+		if re, ok := err.(*Error); ok && re.DomainID == "WRKQ_NOT_FOUND" {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var c mkdirExisting
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// mkdirParents creates each missing intermediate directory of path. The
+// top-level segment must already exist: -p never invents a project.
+func mkdirParents(cmd *cobra.Command, tr Transport, path, actor string) error {
+	lead := ""
+	if strings.HasPrefix(path, "/") {
+		lead = "/"
+	}
+	segs := strings.Split(strings.Trim(path, "/"), "/")
+	for i := 1; i < len(segs); i++ {
+		prefix := lead + strings.Join(segs[:i], "/")
+		existing, err := mkdirShow(cmd, tr, prefix)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			continue
+		}
+		if i == 1 {
+			return clifunnel.NotFound("container", prefix)
+		}
+		params := map[string]any{"path": prefix, "kind": "directory"}
+		if actor != "" {
+			params["actor"] = actor
+		}
+		if _, err := tr.Call(cmd.Context(), "wrkq.container.create", params); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // newRmdirCmd mirrors `wrkq rmdir` on the caller-owned-confirmation seam
