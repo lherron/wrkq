@@ -38,6 +38,13 @@ func TestMkdirParentsEnsuresPath(t *testing.T) {
 		t.Fatalf("mkdir without -p on an existing container succeeded: %s", out)
 	}
 
+	// A one-character slug is refused as invalid input, not as a retryable
+	// "already exists" conflict.
+	out, err := runCampaignCLI(t, f.dbPath, "mkdir", "campaign-cli-a/x")
+	if err == nil || !strings.Contains(err.Error(), "at least 2 characters") || strings.Contains(err.Error()+out, "already exists") {
+		t.Fatalf("one-character slug: err=%v out=%q", err, out)
+	}
+
 	if out, err := runCampaignCLI(t, f.dbPath, "mkdir", "-p", "no-such-project/child"); err == nil {
 		t.Fatalf("mkdir -p invented a top-level project: %s", out)
 	}

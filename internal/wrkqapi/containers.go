@@ -695,6 +695,14 @@ func mapContainerStoreError(err error, selector string) error {
 			"cannot delete campaign container with enrolled members; unenroll them first",
 			map[string]any{"container": selector},
 		)
+	case strings.Contains(lower, "check constraint failed: slug"):
+		// The schema's slug GLOB needs two leading [a-z0-9]/[a-z0-9-]
+		// characters, so a one-character slug fails here. It is not a
+		// collision, and retrying cannot succeed.
+		return NewValidationError(
+			"container slug must be at least 2 characters of a-z, 0-9 or -, starting with a-z or 0-9",
+			map[string]any{"field": "slug"},
+		)
 	case strings.Contains(lower, "unique") || strings.Contains(lower, "constraint"):
 		// A slug collision surfaces as a SQLite UNIQUE-constraint failure on
 		// (parent_uuid, slug). Map it to a STABLE, implementation-free conflict
