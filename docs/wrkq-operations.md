@@ -137,12 +137,14 @@ A snapshot is the complete *task-ledger domain* (T-07498):
   archived containers and tasks, deleted-state tasks and soft-deleted comments
   included, because live rows reference them;
 - every domain column of those rows, written back verbatim on import (ids,
-  etags, timestamps, attribution, claims);
+  etags, timestamps, attribution, claims), except `tasks.covers`: a
+  workstream's coverage is not yet exported and restores as NULL (T-12717);
 - friendly-id high-water marks (`meta.sequences`), so a restore never reissues
   the id of a purged row.
 
 Outside the snapshot model, and therefore NOT restored by import: rooms,
-room members, envelopes and presentations, handoffs, wrkf workflow runtime
+room members, envelopes and presentations, handoffs, extension records
+(`ext`), wrkf workflow runtime
 (`workflow_*`), attachments and their blobs, task causes / role assignments /
 transitions / evidence items, the event log and project events
 (`--include-events` adds those two for reading; import does not replay them),
@@ -364,8 +366,9 @@ method catalog — no handoff HTTP routes exist, for example:
 The full JSON-RPC method catalog (`wrkq.task.*`, `wrkq.comment.*`,
 `wrkq.attachment.*`, `wrkq.relation.*`, `wrkq.container.*`, `wrkq.project.*`,
 `wrkq.promise.*`, `wrkq.handoff.*`, `wrkq.room.*`, `wrkq.envelope.*`,
-`wrkq.projectEvent.*`, `wrkq.webhook.*`, `wrkq.search.listView`,
-`wrkq.index.*`, `wrkq.history.*`, `wrkq.monitor.*`, `wrkq.workflow.*`, and
+`wrkq.projectEvent.*`, `wrkq.webhook.*`, `wrkq.ext.*`, `wrkq.commit.wait`,
+`wrkq.search.listView`, `wrkq.index.*`, `wrkq.history.*`, `wrkq.monitor.*`,
+`wrkq.workflow.*`, and
 the `wrkf.*` workflow engine) is reachable only via `POST /v1/rpc`, not the
 narrower REST routes — this is why handoffs, rooms, search, and monitoring
 require an RPC-capable client (production `wrkq` CLI, `@wrkq/client`, or the

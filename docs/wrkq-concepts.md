@@ -18,7 +18,8 @@ in [the CLI reference](/docs/wrkq/cli-reference).
 ## Handoffs
 
 A handoff is an intentional context record an agent leaves for a **later
-session of the same agent**. It is explicitly not a task, not a comment, and
+session of the same agent** (or, addressed with `--to`, a named successor
+agent). It is explicitly not a task, not a comment, and
 not memory in the LLM-context sense — it's a durable, queryable row scoped to
 one agent/project pair.
 
@@ -29,6 +30,10 @@ one agent/project pair.
 - **Statuses**: `pending`, `acknowledged`. Acknowledgement is the only
   retirement mechanism — handoffs do not auto-expire.
 - **Creation requires** a non-empty title and body.
+- **Successor addressing**: `wrkq handoff create --to <agent>@<project>` files
+  the handoff in the successor agent's scope with you recorded as its author,
+  so the successor lists and acknowledges it as its own. A task in the handle
+  is ignored.
 - **Defaults**: `handoff list` and `handoff search` both default to
   `status=pending`, so a session picking up where another left off sees only
   unresolved handoffs unless it asks for more.
@@ -37,7 +42,8 @@ one agent/project pair.
   just-created handoff is searchable without a manual `wrkq index rebuild`,
   as long as indexing succeeds.
 
-Use handoffs for continuity between an agent's own successive runs. Use
+Use handoffs for continuity between an agent's own successive runs, or with
+`--to` for a named successor taking over the same work. Use
 `wrkc` rooms and addressed envelopes for inter-agent requests and replies.
 
 ## Search and the index sidecar
