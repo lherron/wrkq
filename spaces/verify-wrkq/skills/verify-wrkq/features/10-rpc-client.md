@@ -1,7 +1,8 @@
 # 10. RPC and @wrkq/client
 
 wrkq and wrkf share one JSON-RPC protocol (`protocolVersion` `2026-06-30`, pinned by `protocolSchemaHash`;
-`sha256:c79874ef...` since the bootstrap views below, 5fbf10c; it was `sha256:3d3ffa73...` from 95b3340).
+`sha256:7ef5b72a852709bf...` since `wrkq.commit.wait` and the `ext` methods, 6c0582b..b3339db; it was
+`sha256:c79874ef...` from 5fbf10c and `sha256:3d3ffa73...` from 95b3340).
 `wrkq rpc --stdio` and `wrkf rpc --stdio` serve it over stdin and stdout, either against a local store
 (`--db path`) or bridged to a daemon (`rpc://`). `@wrkq/client` is the Bun TypeScript client. It spawns that
 stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rides the same protocol. Code:
@@ -18,7 +19,12 @@ stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rid
   more. An unknown method fails with JSON-RPC `-32601 method not found`. Domain errors carry
   `error.data.code` (`WRKQ_VALIDATION`, `WRKQ_CONFLICT`, ...) and `retryable`. An unknown param key is refused
   `-32602 invalid params: unknown field "tsak" for wrkq.task.show`, with `data.field`, so a misspelled selector
-  no longer slips through. `wrkq rpc` without `--stdio` is refused.
+  no longer slips through. `wrkq rpc` without `--stdio` is refused. The catalog at 401c525 has 190 methods, among them
+  `wrkq.commit.wait` (feature 1) and `wrkq.ext.put|show|listView|delete` (feature 2); new codes include
+  `WRKQ_EXT_INVALID`, `WRKQ_EXT_QUOTA`, `WRKQ_META_KEY_RESERVED`, `WRKQ_COVERS_REQUIRES_WORKSTREAM` and
+  `WRKQ_WORKSTREAM_NOT_CLAIMABLE` (all but `WRKQ_EXT_QUOTA`, 256 records per subject by source read, driven
+  2026-11-09, T-12762). A string
+  `timeoutMs` is a bare `-32602 invalid params` with no `data.field`.
 - **Bootstrap views.** Three read-only, bounded, cross-owner pages with no CLI verb, for consumers that rebuild
   state (96051e4, 5fbf10c): `wrkq.promise.listView {states?, limit?, cursor?}` (default `["open"]`),
   `wrkq.envelope.listView {states?, ids?, limit?, cursor?}` (default `pending`/`presented`/`deferred` unless `ids`
@@ -30,13 +36,22 @@ stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rid
   exposes them as `client.wrkq.promise.listView`, `client.wrkq.envelope.listView` and
   `client.wrkq.workflow.instancesView`. Features 4, 6 and 8 say what each shows. Driven 2026-11-02, T-12309.
 - **Idempotency.** `idempotencyKey` on create replays the same task. The replay returns the original response,
-  so its `etag` can be stale. Read the current etag (`wrkq.task.show`) before a CAS update.
+  so its `etag` can be stale. Read the current etag (`wrkq.task.show`) before a CAS update. `wrkq.task.update`
+  replays the same way (a30b776, feature 2): the same frame returns its first result before any etag or claim
+  check, and a changed request under the key is `WRKQ_CONFLICT`.
+- **Caller attribution.** Each frame may carry a top-level `caller`; the stdio bridge fills it from
+  `PRAESIDIUM_CALLER`, then `ASP_HANDLE`, and the client from `componentName`. It reaches wrkqd's request log as
+  `data.caller` (feature 1): `PRAESIDIUM_CALLER=wvcaller`, a frame `"caller":"wvframe"` and
+  `createClient({componentName:"wvclient"})` each logged their name. Over `rpc://` the bridge also forwards the seat
+  scope as `X-Wrkq-Scope-Ref` when it matches the principal. Driven 2026-11-09, T-12762.
 - **CAS.** `expectEtag` on update. A stale etag fails `WRKQ_CONFLICT`.
 - **The client.** `createClient({command, dbLocator, principalRef, role, clientInfo})` takes `command` as the
   binary to spawn; pass the install path (`~/.local/bin/wrkq` or `~/.local/bin/wrkf`), since a bare name is a
   PATH lookup a prae seat cannot make (T-12652). It runs
   `rpc.initialize` before it resolves. An `rpc://` locator goes through `WRKQ_DB`, so the client never parses
   CLI output and never calls wrkqd HTTP itself. Errors are `WorkRpcError` with `domainCode` and `retryable`.
+  `client.wrkq.commit.wait()` acquires (`changed:true`) and `commit.wait({since, timeoutMs:1000})` times out
+  `changed:false` with the same token (published `0.1.0-dev.20261108093348`, driven 2026-11-09, T-12762).
 - **Publishing.** A main-checkout `just install` on a producer node with a clean tracked tree (source read: `justfile`) publishes a timestamped `@wrkq/client` to the node's
   Verdaccio (`npm view @wrkq/client dist-tags`). Consumers pin it. A new client refuses an old server on a
   protocol-hash mismatch.
@@ -88,13 +103,16 @@ cd "$WV_STATE/client" && bun --env-file=/dev/null run client-drive.ts
   before calling it a defect. A malformed header value is refused `WRKQ_VALIDATION`, never ignored.
 - **The daemon's request log never names your `clientInfo`.** The client and a raw `wrkq rpc --stdio` both reach
   wrkqd through the stdio bridge, which sends `User-Agent: wrkq/<version>`. A frame initialized with
-  `client: {name: "wvprobe"}` left no `wvprobe` in the log (2026-10-26, T-11873 `10-rpc-client/drive.txt`; feature 1).
+  `client: {name: "wvprobe"}` left no `wvprobe` in the log (2026-10-26, T-11873 `10-rpc-client/drive.txt`; replay
+  identical 2026-11-09). Name a caller with `caller`/`componentName` instead (Sub-features).
 - `dbPath` and `dbLocator` must not disagree, and the client refuses `actor` as a session option. Pass
   `principalRef`.
 - The repo's `packages/client/dist` may not be what consumers run. Drive the published version and record it
   (`jq -r .version node_modules/@wrkq/client/package.json`).
 - On a stale `expectEtag`, the update is refused `WRKQ_CONFLICT` before the principal check runs, so a missing
-  principal can hide behind a conflict.
+  principal can hide behind a conflict. Re-driven 2026-11-09 (T-12762) with `WRKQ_PRINCIPAL_REF`, `HRC_SESSION_REF`,
+  `AGENT_SCOPE_REF` and `ASP_AGENT_ID` unset: still `WRKQ_CONFLICT`, though source (`task_update.go:33`) now
+  attributes first, so a principal may still resolve from the remaining seat env.
 
 ## Proven when
 
@@ -102,8 +120,10 @@ On the scratch, raw frames return the protocol hash, `-32601` for an unknown met
 `task.show`, and the three bootstrap views page with a cursor and refuse a bad `limit`. The published client
 creates a task attributed to your principal, replays the same id on the same
 `idempotencyKey`, refuses a stale `expectEtag` with `WRKQ_CONFLICT`, and applies a correct CAS update (etag +1).
-The published client's three view methods answer. Live: `rpc.initialize` names the canonical revision.
+The published client's three view methods and `commit.wait` answer. Live: `rpc.initialize` names the canonical
+revision and the same hash.
 
-Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/10-rpc-client/drive.txt`, published
-`@wrkq/client@0.1.0-dev.20261102005525` with `spaces/verify-wrkq/fixtures/client-drive.ts` and the pass's
-`fixtures/client-views.ts`. Live: `live/reads.txt` (canonical serves 5fbf10c, hash `sha256:c79874ef...`).
+Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/10-rpc-client/drive.txt`, published
+`@wrkq/client@0.1.0-dev.20261108093348` with `spaces/verify-wrkq/fixtures/client-drive.ts` and T-12309's
+`fixtures/client-views.ts` (copied, `command` by install path). Live: `live/reads.txt` (canonical serves e9c5054,
+hash `sha256:7ef5b72a...`, 190 methods).

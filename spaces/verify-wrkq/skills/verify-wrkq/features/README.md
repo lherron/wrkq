@@ -5,14 +5,14 @@ and Proven when. The last lines of each file name the drive that last proved it 
 
 | # | Feature | File | Drive on |
 | --- | --- | --- | --- |
-| 1 | Store and daemon (`wrkqadm init/migrate/doctor`, `wrkqd` serve and auth, request log, health, locator precedence, whoami, `WRKQ_PROFILE`, offline `config`/`db`/`state`/`patch`) | [01-store-daemon.md](01-store-daemon.md) | scratch; health and initialize read-only on canonical |
-| 2 | Tasks and containers (create, cat, etag set, ls/tree/find/search, mv, cp, rm/restore, container archive, rmdir, rename, named subtasks, relations, apply, diff, ack, check-inbox, timeline, log) | [02-tasks-containers.md](02-tasks-containers.md) | scratch |
+| 1 | Store and daemon (`wrkqadm init/migrate/doctor`, `wrkqd` serve and auth, request log and `caller`, `wrkq.commit.wait`, health, locator precedence, whoami, `WRKQ_PROFILE`, offline `config`/`db`/`state`/`patch`) | [01-store-daemon.md](01-store-daemon.md) | scratch; health and initialize read-only on canonical |
+| 2 | Tasks and containers (create, `mkdir -p`, cat, etag set, update replay, ls/tree/find/search, mv, cp, rm/restore, container archive, rmdir, rename, named subtasks, relations, `ext` extensions, workstreams, apply, diff, ack, check-inbox, timeline, log) | [02-tasks-containers.md](02-tasks-containers.md) | scratch |
 | 3 | Comments, attachments and handoffs (comment add/ls, attach put/ls/get, handoff create/list/acknowledge, successor `--to`) | [03-comments-attachments-handoffs.md](03-comments-attachments-handoffs.md) | scratch |
 | 4 | Claims and promises (node-authenticated claim, takeover, release; promise add/ready/renew/resolve) | [04-claims-promises.md](04-claims-promises.md) | scratch |
-| 5 | Campaigns (convert, activate, close, enrollment, members, portfolio) | [05-campaigns.md](05-campaigns.md) | scratch |
+| 5 | Campaigns (convert, `mkdir --campaign`, activate, close, enrollment, members, portfolio) | [05-campaigns.md](05-campaigns.md) | scratch |
 | 6 | Rooms, wrkc (say, body source and routing, obligations, notes, reply-is-ack, inbox, defer, withdraw, log, members) | [06-rooms.md](06-rooms.md) | scratch; own inbox read-only on canonical |
-| 7 | Project facts, wrkp (post and idempotency, show, log and cursor, types, git producers, the `just` shim and `run.settled`, project roots) | [07-project-facts.md](07-project-facts.md) | scratch; types read-only on canonical |
-| 8 | Workflows, wrkf (templates, attach, next, evidence, blocked and checked transitions, inspect, timeline) | [08-workflows.md](08-workflows.md) | scratch; template list read-only on canonical |
+| 7 | Project facts, wrkp (post and idempotency, show, log, cursor and follow, types, git producers, the `just` shim and `run.settled`, project roots) | [07-project-facts.md](07-project-facts.md) | scratch; types read-only on canonical |
+| 8 | Workflows, wrkf (templates, attach, next, evidence, blocked and checked transitions, inspect, timeline, watch) | [08-workflows.md](08-workflows.md) | scratch; template list read-only on canonical |
 | 9 | Monitor and webhooks (`monitor wait/watch`, container and global webhooks) | [09-monitor-webhooks.md](09-monitor-webhooks.md) | scratch with a local sink; global list read-only |
 | 10 | RPC and `@wrkq/client` (stdio JSON-RPC, errors, idempotency, CAS, the bootstrap views, the published client) | [10-rpc-client.md](10-rpc-client.md) | scratch; initialize read-only on canonical |
 

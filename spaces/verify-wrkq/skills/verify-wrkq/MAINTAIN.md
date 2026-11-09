@@ -64,6 +64,16 @@ and added `triage.md`, one row per difference. Three traps (2026-11-02, T-12309)
 - A replay runs in your harness shell, and its `just` must be the wrkp shim (feature 7 Gotchas). Check
   `command -v just` first.
 
+Two more (2026-11-09, T-12762):
+
+- Create every `NN-<feature>/` directory before the replay. `replay.sh` appends each `NOTE replay` line with a plain
+  `>>` before `wv rec` (which makes the directory), so a missing directory drops the first NOTE, half-writes the
+  drive.txt and leaves the scratch dirty: split the partial run out, `wv down`/`wv up`, and rerun.
+- In a prae seat a replayed bare `wrkq ...` is `command not found` (SKILL.md "Binaries"). Have `gen.py` rewrite
+  owner CLIs in command position to `~/.local/bin/<cli>` (and to `$HOME/.local/bin/<cli>` inside double quotes),
+  drop `PATH="$HOME/.local/bin:$PATH"` prepends, and have `compare.py` strip those prefixes before diffing.
+  T-12762's `replay/gen.py` and `compare.py` do this.
+
 Run Doctor first, and again after any surprise. Drive each feature's "Driving it" section on the scratch, **plus
 every drift or new behavior that step 2 flagged**, with `wv rec` into `NN-<feature>/drive.txt`. Do the canonical
 read-only reads (SKILL.md "Launch") into `live/`. Check each result against "Proven when". Run

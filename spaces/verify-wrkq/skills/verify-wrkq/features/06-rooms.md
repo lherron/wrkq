@@ -5,7 +5,8 @@ addressee, with an obligation (`reply_required` by default, `fyi`, or `note`). A
 standing obligations from that counterparty in the room. `defer` pauses an obligation, and `withdraw` takes
 back unpresented mail. HRC delivers envelopes to live seats by tailing the ledger. That delivery side lives in
 hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.go`, `wrkc_room.go`,
-`wrkc_envelope.go`, `wrkc_identity.go`) and `internal/store/` (rooms, envelopes). Guide:
+`wrkc_envelope.go`, `wrkc_identity.go`), `internal/wrkqapi/` (`envelope_reads.go`, `envelope_dispositions.go`)
+and `internal/store/` (rooms, envelopes, `envelope_lifecycle.go`). Guide:
 `internal/rpccli/embedded/WRKC-USAGE.md` (`wrkc info`) and `docs/wrkc-reference.md`.
 
 ## Sub-features
@@ -45,13 +46,24 @@ hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.
   `recentNotes` counts the notes addressed to you in the last 24h. Notes never appear in `groups`. The human
   inbox ends with `1 note in the last 24h: wrkc notes` when the count is non-zero.
 - **Defer and withdraw.** `wrkc defer EN-<n> --reason ... [--retry-after ...]` pauses an obligation (paused,
-  never terminal). `wrkc withdraw EN-<n> --reason ...` withdraws unpresented mail and returns
+  never terminal). With `--retry-after` the result carries `retryAt` and a `retryPromiseId` (`PR-<n>`, owned by the
+  deferrer). When the retry comes due, the next inbox sweep re-pends the envelope and logs `promise.resolved`
+  ("deferred envelope re-pended"), attributed to **whoever read first**, the sender included
+  (`updated_by_scope_ref` in handle form, 289acbd); a `--discharges` reply resolves it too, by the replier
+  (9e1bc3a, T-12463). Driven 2026-11-09, T-12762. `wrkc withdraw EN-<n> --reason ...` withdraws unpresented mail and returns
   `{withdrawn[], refused[]}`. Only the sender (or a scope-less operator) may withdraw. The addressee gets
   `WRKQ_FORBIDDEN`.
 - **Reads.** `wrkc show <EN|R>`, `wrkc log <room>`, `wrkc members <room>` (`items[].memberRef`, `source`),
   `wrkc ls` (a bare JSON array of rooms), and `hide`/`unhide`, `join`/`leave`/`invite`. `wrkc ack` is labelled
   operator-only, but the daemon doesn't enforce it: an agent scope acked an envelope (`terminalActor: agent:cody`).
-  Product task T-10358 (2026-10-05, T-10349 `06-rooms/drive.txt`; still reproduces at 5fbf10c, 2026-11-02).
+  Product task T-10358 (2026-10-05, T-10349 `06-rooms/drive.txt`; still reproduces at 401c525, 2026-11-09).
+- **Wait for the reply.** `wrkc say ... --wait --timeout 20s` parks on `wrkq.commit.wait` (feature 1) and returns
+  when the addressee's reply lands (about 2 s after it here), with both envelopes `acked`. A timeout prints `wrkc say
+  --wait ended timeout; still open: EN-<n>` and exits 1, with no `-32603` in the request log. Driven 2026-11-09,
+  T-12762. A `--wait` on an fyi can't finish on a scratch: an fyi is acked only at presentation.
+- **Expiry.** `--ttl 2s` mail expires at the next sweep after its TTL. An inbox sweep stamps the reader's scope; a
+  `wrkc show` sweep leaves `updated_by_scope_ref` null. The sender sees it in `inbox ... sentExpired`. Driven
+  2026-11-09, T-12762.
 - **Ledger page.** The RPC-only `wrkq.envelope.listView {states?, ids?, limit?, cursor?}` (96051e4, no CLI verb)
   reads stored envelope state in `EN-` sequence order **without** presenting, acking or sweeping anything: by
   default the live states (`pending`, `presented`, `deferred`), and with `ids` the named envelopes in any state.
@@ -117,9 +129,11 @@ On the scratch, the addressed say produces one `reply_required` envelope with `r
 the addressee's inbox. The addressee's `--to` reply returns `acked: [that id]` and turns the original
 `acked`/`terminal`. Defer moves the next one to `deferred[]`, and withdraw marks one `withdrawn`. A `--note` is
 written acked and terminal with `note_recorded`, shows only in the addressee's `recentNotes` and `wrkc notes`, and a
-`--note` reply acks the envelope it answers. `wrkc log`
+`--note` reply acks the envelope it answers. A `--retry-after` defer re-pends at its time with a `promise.resolved`,
+`--wait` returns on the reply, and `--ttl` mail lands in the sender's `sentExpired`. `wrkc log`
 shows every envelope with its sender and addressee. Live, read only: your own `wrkc inbox` matches what you
 know you owe.
 
-Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/06-rooms/drive.txt`
-(the T-11873 replay, then the `envelope.listView` frames). T-10358 still reproduces at 5fbf10c. Live inbox read: `live/reads.txt`.
+Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/06-rooms/drive.txt`
+(the T-12309 replay, then retry defer, `--discharges`, expiry scope, `--wait` and the T-10358 restamp after the NOTE
+drift line). T-10358 still reproduces at 401c525. Live inbox read: `live/reads.txt`.

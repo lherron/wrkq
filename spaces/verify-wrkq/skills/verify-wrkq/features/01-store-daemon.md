@@ -3,12 +3,18 @@
 wrkq keeps one SQLite store and serves it through `wrkqd`. Every client (`wrkq`, `wrkc`, `wrkf`, `wrkp`,
 `@wrkq/client`) reaches it over `rpc://host[:port]` (port 7171 by default) with a bearer token. `wrkqadm` owns
 the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Code: `cmd/wrkqd/main.go`,
-`internal/wrkqd/`, `internal/admincli/` (`initadm.go`, `migrateadm.go`, `doctoradm.go`), `internal/db/`
+`internal/wrkqd/`, `internal/workrpc/commit_wait.go`, `internal/admincli/` (`initadm.go`, `migrateadm.go`, `doctoradm.go`), `internal/db/`
 (`sequences.go`) and `internal/rpccli/server.go`. Operations: AGENTS.md "Justfile is the lifecycle" and
 `docs/wrkq-operations.md`.
 
 ## Sub-features
 
+- **Commit wait.** `wrkq.commit.wait {since?, timeoutMs?}` (065bfbb, T-12538) returns `{token, changed}`, a wake hint,
+  never a durable cursor. No `since`, or a stale or foreign one (`bogus`), answers `changed:true` at once with the
+  current token (`<incarnation uuid>:<n>`). A current token parks until the next commit (`changed:true`, new token)
+  or `timeoutMs` (`changed:false`, the same token). `timeoutMs` defaults to 25000 and is clamped to 1000..30000, so
+  10 waits about 1 s. An unknown key (`sinse`) or a string `timeoutMs` is `-32602`. `monitor`, `wrkf watch`,
+  `wrkp log --follow` and `wrkc say --wait` park on it between reads (7f26a88). Driven 2026-11-09, T-12762.
 - **Init.** `wrkqadm --db P init` creates and migrates a store, creates `attachments/` next to it, and seeds the
   principal-owned and plain `inbox` projects.
 - **Serve.** `wrkqd -addr H:P -db P` takes either `-token` or `-node-tokens`/`-node-tokens-file`. With node
@@ -22,15 +28,19 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
   file, plus `binaryStale`.
 - **Request log.** `wrkqd` writes one JSON line per HTTP request on **stdout**
   (`internal/wrkqd/request_log.go`, a01fa92..e36728f): `{level, component: "http", event: "http.request",
-  data: {method, path, route, listener, client, status, durationMs, remote, op?, suppressed?, code?, message?}, ts}`,
+  data: {method, path, route, listener, client, caller, status, durationMs, remote, op?, suppressed?, code?, message?}, ts}`,
   plus one `http.listen` line per listener at startup. `client` is the User-Agent's leading `<name>/<version>`
   (`unknown` without one). Every wrkq binary, and the stdio bridge that `@wrkq/client` spawns, sends
-  `wrkq/<version>`, so the caller's `rpc.initialize` `clientInfo` never reaches the log. A `/v1/rpc` line names
+  `wrkq/<version>`, so the caller's `rpc.initialize` `clientInfo` never reaches the log. `caller` (fef364a, T-12517)
+  names the seat instead: the `X-Praesidium-Caller` header beats the frame's `caller` member, and a client fills them
+  from `PRAESIDIUM_CALLER`, then `ASP_HANDLE` (a seat logs `clod@wrkq:T-12762`), then `unknown`; `@wrkq/client`'s
+  `componentName` sets it too. An invalid value logs `unknown` and is still served. A `/v1/rpc` line names
   its JSON-RPC method as `op`. A frame that fails inside HTTP 200 logs `warn` with the JSON-RPC `code` and
   `message`, and a non-2xx logs `warn` (`error` at 5xx) with the body's message (`unauthorized` for a 401).
   Successful polls (`rpc.initialize`, `wrkq.envelope.pendingView`, monitor, timeline, history and `wrkf.watch.*`
-  views) log at most once per `-poll-sample-window` (default 1m) per client, remote and op, and the next admitted
-  line carries `suppressed: N`. Diagnostics stay on stderr. On mini, launchd sends stdout to
+  views) log at most once per `-poll-sample-window` (default 1m) per client, caller, remote and op, and the next
+  admitted line carries `suppressed: N`. `wrkq.commit.wait` is not sampled: every parked wait logs one line, at its
+  end (`durationMs` up to the wait). Diagnostics stay on stderr. On mini, launchd sends stdout to
   `var/logs/wrkq/wrkqd.log` and stderr to `var/logs/wrkq/wrkqd.err.log`. Driven 2026-10-26, T-11873.
 - **Locator and auth precedence.** CLI flags, then env, then `./.env.local`, then `~/praesidium/.env.local`,
   then `~/.config/wrkq/config.yaml`. A client with no token is refused with a message naming both token inputs.
@@ -50,7 +60,8 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
   serving scratch store. `wrkqadm config doctor` prints the effective DB, attachment dir, project root and
   principal, with the source of each. `wrkqadm db snapshot --out F [--json]` takes an online-backup copy.
   `wrkqadm state export --out F` writes the canonical task-ledger JSON snapshot (containers, tasks, comments,
-  promises, links; not rooms, handoffs, workflows or events), and `state verify F` checks the file is
+  promises, links; not rooms, handoffs, workflows, events or `ext` rows; a workstream's `covers` exports as null,
+  product task T-12717, reproduced 2026-11-09 T-12762), and `state verify F` checks the file is
   byte-identical to the canonical encoding of its content: a `state export --no-canonical` file or a `jq -S`
   reformat fails `✗ snapshot is not canonical: difference at byte N`, exit 4 (8bc0075; before it, every
   parseable file passed). `wrkqadm patch create --from S0 --to S1 --out P`, `patch summarize --patch P` and
@@ -129,7 +140,7 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 - **`wrkqadm config doctor` misreports the principal.** In a seat it says `Principal: (not set) ... ✗ Not
   configured` although `wrkq whoami` resolves one from the seat scope, and `WRKQ_PRINCIPAL_REF` beats `--as`.
   Read the principal from `wrkq whoami`. Product task T-11431 (2026-10-20, T-11374 `01-store-daemon/drive.txt`; still
-  reproduces at 5fbf10c, 2026-11-02).
+  reproduces at 401c525, 2026-11-09 replay 01 #13).
 - Doctor's `sequence_drift` checks `event_log` against its own AUTOINCREMENT row in `sqlite_sequence`
   (named `event_log`). Before T-10327 it read the dead `event_seq` row and flagged every store with an event.
 - Doctor's `attach_dir_exists` needs `WRKQ_ATTACH_DIR` (or `attach_dir` in config) on the **caller's** side.
@@ -137,6 +148,14 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
   read the rows (2026-10-05, T-10349 `01-store-daemon/drive.txt`).
 - A malformed `X-Wrkq-Principal-Ref` header on `/v1/rpc` is refused `WRKQ_VALIDATION` ("principal attribution
   only supports agent identities"). The CLI validates the flag first, so prove the server side with `curl`.
+- **`X-Wrkq-Scope-Ref` (b72248e).** A scope header without a project (`agent:probe`) is refused `WRKQ_VALIDATION`
+  "caller scope must include a project"; a valid one is stamped on the write (`created_by_scope_ref:
+  probe@wv-<name>`, handle form). Only `wrkq rpc --stdio`, `wrkq ext`, wrkc and `@wrkq/client`/`pkg/client` send it,
+  so a plain `wrkq touch` from a seat leaves `created_by_scope_ref` null (2026-11-09, T-12762).
+- **A sub-second wait logs a false `-32603`.** `monitor wait --timeout 500ms` (or `1s`, when the slack lands under
+  1 s) ends correctly, but wrkqd logs the cancelled `wrkq.commit.wait` as `warn` `-32603 "internal error"`.
+  401c525 keeps the tight client deadline below 1 s by design; waits of 1.2 s and up log nothing. Product task
+  T-12764 (2026-11-09, T-12762 `09-monitor-webhooks/drive.txt`). Don't count these as daemon faults.
 - In an agent seat an unattributed write doesn't reach the "principalRef is required" refusal: the CLI resolves
   the principal from `ASP_AGENT_ID`/`AGENT_ACTOR` even with `WRKQ_PRINCIPAL_REF`, `HRC_SESSION_REF` and
   `AGENT_SCOPE_REF` unset (T-10349).
@@ -152,15 +171,16 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 
 On a fresh `wv up`, health is ok with the token and 401 without it, a tokenless client gets the token refusal,
 a dead locator gets the "retrying is safe" refusal, `whoami` names the scratch locator, doctor reports every row
-ok, `migrate --status` lists every migration as applied (000070 last at 5fbf10c), and `migrate` refuses
+ok, `migrate --status` lists every migration as applied (000073_task_meta_closure last at 401c525), and `migrate` refuses
 the serving store. `WRKQ_PROFILE=1` prints the breakdown, the snapshot, `state verify` and `patch validate`
 reads succeed on the scratch file, `state verify` refuses a `--no-canonical` export (exit 4), and `patch rebase`
 emits no `remove` ops. The daemon log has an `http.listen` line and one `http.request` line per request
-with `client: wrkq/<installed version>` and an `op`, the refusals as `warn` lines with their code and message, and
-sampled polls with a `suppressed` count. On the canonical daemon, read only: health is ok and `rpc.initialize`
+with `client: wrkq/<installed version>`, a `caller` and an `op`, the refusals as `warn` lines with their code and
+message, and sampled polls with a `suppressed` count. `commit.wait` answers a fresh acquire `changed:true`, a
+current token `changed:false` after the 1 s clamp, and wakes within about 1 s of a write. On the canonical daemon, read only: health is ok and `rpc.initialize`
 names a revision.
 
-Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/01-store-daemon/drive.txt`,
-`evidence/t-12309/`, live reads in `live/reads.txt` (canonical serves 5fbf10c). Every feature's drive.txt starts with
-a replay of T-11873's drives (each entry after a `NOTE replay T-11873 ...` line, diffed in `replay/compare.txt`,
-triaged in `replay/triage.md`), then its drift drives after a `NOTE drift drives` line.
+Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/01-store-daemon/drive.txt`,
+`evidence/t-12762/`, live reads in `live/reads.txt` (canonical serves e9c5054, same protocol hash). Every feature's
+drive.txt starts with a replay of T-12309's drives (each entry after a `NOTE replay T-12309 ...` line, diffed in
+`replay/compare.txt`, triaged in `replay/triage.md`), then its drift drives after a `NOTE drift T-12762` line.

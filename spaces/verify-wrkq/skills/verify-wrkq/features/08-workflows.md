@@ -33,8 +33,15 @@ supervisor role sit on top. Code: `cmd/wrkf/`, `internal/wrkfcli/`, `internal/wo
   CLI verb) pages instances across tasks in `(created_at, id)` order, `open`/`active`/`waiting` by default, so a
   `closed` instance needs `statuses: ["closed"]`. `tasks` takes any task selector, bare numbers included. Feature 10
   has its shape and refusals. Driven 2026-11-02, T-12309.
+- **Watch.** `wrkf watch <task> --until closed [--timeout T] [--follow] [--json]` parks on `wrkq.commit.wait`
+  (7f26a88, 131c843): a watch ended about 1 s after `finish`, not at its 60 s timeout or its `--poll-interval 1h`.
+  `--poll-interval` is still validated (`0s` is `must be greater than zero`, exit 2) but no longer paces anything.
+  `--follow` prints `{"type":"event"}` lines (`workflow.attached`, `workflow.transitioned` x2) then one
+  `{"type":"summary","result":"met","class":"success","exitCode":0}`; a timeout is `result: timeout`, exit 1. A
+  transition written straight to the store file (`wrkf --db <file>`) reaches a remote watch only at its next wait
+  expiry, about 25 s later. Driven 2026-11-09, T-12762.
 - **The rest.** `wrkf ledger append|list`, `wrkf obligation`, `wrkf effect`, `wrkf suspension`, `wrkf instance cancel`,
-  `wrkf run`, `wrkf supervisor`, `wrkf hook`, `wrkf check`, `wrkf watch`, `wrkf action`.
+  `wrkf run`, `wrkf supervisor`, `wrkf hook`, `wrkf check`, `wrkf action`.
 
 ## How to get to it
 
@@ -80,7 +87,8 @@ T-10349 `08-workflows/drive.txt`).
 - **An invalid literal `set_task_state` install is misreported.** `validate` names the bad state, but `install`
   refuses it as `WRKF_TRANSITION_BLOCKED "transition is blocked"`: wrkfapi's error fallback matches the word
   `blocked` in the list of valid states. An unknown placeholder is correctly `WRKF_VALIDATION`. Read `validate`
-  for the reason. Product task T-12313 (2026-11-02, T-12309 `08-workflows/drive.txt`; also in T-11953's drive).
+  for the reason. Product task T-12313 (2026-11-02, T-12309 `08-workflows/drive.txt`; also in T-11953's drive;
+  replay identical at 401c525, 2026-11-09).
 
 - **The workflow's closed state doesn't change the task's state.** After the workflow closed `completed`,
   `wrkq cat` still said `state: open` (2026-10-05, T-10298 `08-workflows/drive.txt`). Task state and workflow
@@ -93,12 +101,13 @@ T-10349 `08-workflows/drive.txt`).
 - `wrkf` errors with `--json` print `{"error":{code,message}}` with exit 1, on **stderr**: a stdout-only capture
   is empty (`... 2>/dev/null | wc -c` is 0). Driven 2026-10-20, T-11374.
 - After the instance closes, the task's `meta.workflow.state` reads `closed`/`completed` while its `state` stays
-  `open`.
+  `open`. `meta` holds only `workflow` (000073): `wrkq set --meta '{"wrkf.taskStateMirror":{...}}'` or any added key
+  is `meta_key_reserved`, while writing back the workflow-only meta you read is admitted (2026-11-09, T-12762).
 - **A transition on a closed instance returns `WRKF_INTERNAL "internal error"`.** The from-state refusal is
-  uncoded, so the cause is lost. Product task T-10356 (still reproduces at 5fbf10c, 2026-11-02).
+  uncoded, so the cause is lost. Product task T-10356 (still reproduces at 401c525, 2026-11-09).
 - **`wrkf ledger append` over `rpc://` is refused even with `--principal-ref`** (`requires an explicit canonical
   agent:<id> principal`). The same call in local mode succeeds. The wrkf remote transport doesn't send the
-  principal. Product task T-10357 (still reproduces at 5fbf10c, 2026-11-02; `ledger append` also needs
+  principal. Product task T-10357 (still reproduces at 401c525, 2026-11-09; `ledger append` also needs
   `--about`, or it refuses `--task, --kind, --about, and --body are required` first).
 - A remote client can't pass `--hook-catalog`. The catalog belongs to the canonical node, and `@wrkq/client`
   throws `hookCatalogPath is local-only` in remote mode. The wrkf CLI refuses with `--hook-catalog is local-only;
@@ -111,10 +120,13 @@ T-10349 `08-workflows/drive.txt`).
 On the scratch, the template validates and installs. The attached instance starts at `plan`, revision 0. `next`
 names the missing evidence. The transition is refused until that evidence exists. `plan_ready` and then
 `finish --run-checks` leave the instance `closed`/`completed` at revision 2, with a timeline of attached plus
-two transitioned events.
+two transitioned events. A `wrkf watch --follow` on the instance ends `met` within about 1 s of the last
+transition.
 
-Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/08-workflows/drive.txt`,
-both fixtures, on T-00009 (pass) and T-00010 (fail), then the `instancesView` frames and the invalid-template drives (fixtures copied to `fixtures/`). Live read: `wrkf workflow list --json` (35 templates, 18 active) in `live/reads.txt`.
+Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/08-workflows/drive.txt`,
+the T-12309 replay (both fixtures on T-00009/T-00010, the `instancesView` frames, the invalid-template drives with
+T-12309's fixtures copied to `fixtures/`), then watch, meta closure, the out-of-band transition and the T-10356/T-10357
+restamps after the NOTE drift line. Live read: `wrkf workflow list --json` in `live/reads.txt`.
 
 T-12376 candidate metadata-closure drive, 2026-11-04Z:
 `var/wrkq-artifacts/T-12376/rehearsal-drive.txt` attaches the existing

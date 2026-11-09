@@ -17,7 +17,15 @@ MAINTAIN.md. Code: `cmd/wrkp/`, `internal/rpccli/wrkp*.go` (`wrkp.go`, `wrkp_log
   quiet: they show only when `--type` names them (`task.*` or exactly). Driven 2026-10-20, T-11374: an unfiltered
   read after a create, an edit and a move returned only `task.created`.
 - **Forward cursor.** `wrkp cursor <project>` captures a point, and `wrkp log --after C` reads oldest-first from
-  it up to now.
+  it up to now. A cursor binds its request: resuming with a different `--type` is refused `WRKQ_VALIDATION
+  "timeline cursor does not match the request"`.
+- **Follow.** `wrkp log --follow --timeout T [--type ...] --ndjson` parks on `wrkq.commit.wait` (feature 1): a post
+  through wrkqd shows within about 1 s (0d11ab7), and the stream ends with `{"type":"wrkp.log.terminal",
+  "result":"timeout", cursor}` and exit 0. A remote (`rpc://`) follower trusts an unchanged commit token and forces a
+  read only every 5 min (0c9a663), so a fact written straight to the store file (`wrkp --db <file> post`) stayed
+  invisible to a 40 s follow; `--after <its terminal cursor>` with the same `--type` then returns it. `--all-types`
+  is accepted. `--since 1s` with nothing new prints `wrkp: no entries in <p> since 1s; newest is ...` on stderr.
+  Driven 2026-11-09, T-12762.
 - **Types.** `wrkp types <project>` lists every stored fact type with its count.
 - **Show.** `wrkp show <uuid> --json` returns the full row, including `idempotencyKey`, `occurredAt`,
   `principalRef` and `scopeRef`.
@@ -30,12 +38,19 @@ MAINTAIN.md. Code: `cmd/wrkp/`, `internal/rpccli/wrkp*.go` (`wrkp.go`, `wrkp_log
   and posts from an unregistered checkout, but still needs a git checkout as its cwd. `wrkp git push <remote>
   <url>` reads pre-push ref lines on stdin and posts one `git.push` per ref (`local_ref`, `local_sha`,
   `remote_ref`, `remote_sha`, `commits`, `forced`); with no ref lines it posts nothing (driven 2026-10-20, T-11374).
-- **just producer.** The shim at `~/.local/bin/just` (installed by `just install`, ahead of the real `just`)
-  hands every invocation to `wrkp just`. A justfile that contains the line `# wrkp: run.settled` gets one
+- **just producer.** The shim at `~/.local/bin/just` (installed by `just install`) hands every invocation to
+  `wrkp just` (always `$HOME/.local/bin/wrkp`, d2f7508, so a `WV_BIN` build is never exercised through it). On max3
+  it leads PATH through `~/.local/shims/just`, a symlink to it, with `WRKP_JUST_BIN=/opt/homebrew/bin/just` naming the
+  real just (`~/.zprofile`, 2026-11-05). A justfile that contains the line `# wrkp: run.settled` gets one
   `run.settled` fact per top-level recipe run (`recipe`, `status`, `duration_ms`, `source: wrkp-just`, ...,
   then `load1` and `ncpu`, the machine load sampled once before just starts, omitted together when unreadable;
   f05b312, T-10466).
-  Listings and other non-run modes go straight to the real `just`. The exit status is always just's.
+  Listings and other non-run modes go straight to the real `just`, and so does a recipe the justfile lacks
+  (`just nope`, `just x=1 nope`: just's own error, exit 1, no fact; 09c5444). A `just` run inside a recipe posts
+  nothing (only the outer recipe posts). With no real just besides itself on PATH and no `WRKP_JUST_BIN`, the shim
+  exits 127 `no real just binary on PATH besides this shim`. The exit status is always just's. The attributes are
+  `argv, duration_ms, justfile, load1, ncpu, node, recipe, repo, source, started_at, status`. Driven 2026-11-09,
+  T-12762.
 - **Project roots.** `wrkq set <project> --root <dir>` stores a top-level project's checkout root (as `~/...`
   under `$HOME`). `wrkq projects --json` shows it as `root`.
 
@@ -75,13 +90,13 @@ Live, read only: `wrkp types wrkq` and `wrkp log wrkq --type verify.upkeep --lim
   (`wrkp git --project <slug>` skips the root lookup, driven 2026-10-20). They
   skip with a one-line stderr notice and exit 0, so nothing fails visibly. A linked worktree resolves to the
   registered main checkout that owns it.
-- **The shim only works when it leads PATH, and login shells on max3 put Homebrew first.** `zsh -lc 'command -v
-  just'` is `/opt/homebrew/bin/just` (`~/.zprofile`'s `brew shellenv` prepends `/opt/homebrew/bin` after `.zshenv`
-  set `~/.local/bin` first), while `zsh -c` finds the shim. A Claude Code Bash shell inherits the login order, so
-  the replayed `just hello; just fail` posted **no** `run.settled` and still exited 0 and 3. Check `command -v just`
-  before the drive. Product task T-12310 (2026-11-02, T-12309 `07-project-facts/drive.txt`). The drive above
-  calls `~/.local/bin/just` by path rather than prepending `~/.local/bin` to PATH, which on a prae seat would
-  re-expose the owner CLIs its PATH filter hides (T-12652).
+- **The shim only works when it leads PATH.** On 2026-11-02 (T-12309) max3 login shells put Homebrew first, so a
+  plain `just` posted no `run.settled` (T-12310). Since the 2026-11-05 `~/.zprofile` change `command -v just` is
+  `~/.local/shims/just` in the Claude Code bash shell and `zsh -lc`, and `zsh -c` in a prae seat finds the farm's
+  `~/.local/bin/just` (also the shim); the replayed plain `just hello; just fail` posted both facts (2026-11-09,
+  T-12762). Nothing reports it if the order regresses (T-12310 stays open for that check), so check `command -v
+  just` before the drive. The drive above calls `~/.local/bin/just` by path rather than prepending `~/.local/bin`
+  to PATH, which on a prae seat would re-expose the owner CLIs its PATH filter hides (T-12652).
 - The shim posts with the caller's environment, so a `just` run inside a shell with `wv env` evaluated posts to
   the **scratch** daemon. A `just` run in the real wrkq checkout from that shell would post its `run.settled`
   to the scratch, not to canonical.
@@ -103,9 +118,10 @@ exactly the new fact, with its attributes and your principal. `wrkp git commit` 
 posts a `git.commit` (sha, branch, author, `files_changed`, plus node, insertions, deletions, parents) after it. `just hello`/`just fail` post
 `run.settled` with status 0 and 3, each carrying `load1` and `ncpu`, the listing and `just -n` post nothing, and
 just's exit code passes through (3). An unfiltered `wrkp log` shows a new task's `task.created` but not its
-`task.edited` or `task.moved`.
+`task.edited` or `task.moved`. A plain `just` posts (the shim leads PATH), an unknown recipe posts nothing, a
+followed post arrives within about 1 s and the follow ends with a `wrkp.log.terminal` row.
 
-Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/07-project-facts/drive.txt`
-(the replayed `just` drives post nothing because of T-12310; the drives after the NOTE line re-run them with the shim
-first on PATH).
-Live reads: `live/reads.txt` (`wrkp types wrkq`; the T-11873 `verify.upkeep` fact).
+Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/07-project-facts/drive.txt`
+(the T-12309 replay, whose plain `just` drives now post, then shim resolution, unknown and nested recipes, the 127
+shim, follow wake and the out-of-band follow after the NOTE drift line).
+Live reads: `live/reads.txt` (`wrkp types wrkq`).

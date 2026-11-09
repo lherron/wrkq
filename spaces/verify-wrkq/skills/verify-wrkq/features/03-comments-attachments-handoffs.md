@@ -3,13 +3,18 @@
 These are the records hung on tasks and seats: comments on a task, attachment files stored by the daemon, and
 session handoffs that a seat creates for its successor and the successor acknowledges. Code:
 `internal/rpccli/` (`comment.go`, `comment_rm.go`, `attach.go`, `handoff*.go`), `internal/attach/`,
-`internal/store/handoffs.go` and `internal/admincli/attachadm.go`.
+`internal/store/handoffs.go`, `internal/admincli/attachadm.go`, and the server side in `internal/wrkqapi/`
+(`comments.go`, `attachments*.go`, `handoffs.go`, `api.go` for the scope header).
 
 ## Sub-features
 
 - **Comments.** `wrkq comment add <task> -m ...` and `wrkq comment ls <task> --json` give
   `C-<n>` ids attributed to the caller. `comment add --json` is inert: the output mode follows only whether
-  stdout is a TTY (on a TTY it prints `Comment created: C-<n>` even with `--json`).
+  stdout is a TTY (on a TTY it prints `Comment created: C-<n>` even with `--json`). A container target
+  (`comment add inbox -m ...`) falls back to the container and the JSON carries `container_id`, not `task_id`.
+  `wrkq comment rm C-<n> --yes` soft-deletes (hidden from `ls`, shown with `ls --include-deleted` with
+  `deleted_at`); `--purge` hard-deletes. Comment `--meta` stays open (000073 closes task meta only). Driven
+  2026-11-09, T-12762.
 - **Attachments.** `wrkq attach put <task> <file>`, `wrkq attach put <task> - --name x` (stdin),
   `wrkq attach ls <task> --json`, `wrkq attach get ATT-<n>` (to stdout by default) and
   `wrkq attach rm ATT-<n> --yes`. The daemon stores files under its own attachment dir at
@@ -26,6 +31,14 @@ session handoffs that a seat creates for its successor and the successor acknowl
   column only on a page holding a handoff someone else wrote, and human `get` prints `From: <author>`. `--to` with
   `--scope` is refused (`validation_error`, exit 2), and `--scope` naming another agent still is
   (`self_scope_violation`, exit 1). Driven 2026-11-02, T-12309.
+- **Handoff idempotency.** `handoff create --idempotency-key K` returns the same `H-<n>` with
+  `idempotent_replay: true` on a repeat, and a different body under K is `idempotency_payload_mismatch`, exit 3.
+  `wrkqadm --db F attach path ATT-<n>` prints the stored file's path. Driven 2026-11-09, T-12762.
+- **Scope on the record (b72248e).** A raw `wrkq rpc --stdio` frame whose `actor` isn't the seat's agent is refused
+  `request scope must match actor` (`field: X-Wrkq-Scope-Ref`); unsetting `HRC_SESSION_REF`/`AGENT_SCOPE_REF` alone
+  doesn't lift it (`ASP_*` still resolve the seat). A matching frame's `comment.created` event carries the handle
+  (`clod@wrkq:T-12762`), a plain `comment add` the full seat scope (`agent:clod:project:wrkq:task:T-12762`). Comment
+  and attachment commits wake `wrkq.commit.wait` within about 1 s (feature 1). Driven 2026-11-09, T-12762.
 
 ## How to get to it
 
@@ -76,6 +89,9 @@ H=$(printf 'Next: cody acks.\n' | ~/.local/bin/wrkq handoff create --to cody@wv-
   `status` (`pending`/`acknowledged`), not `state`, and the note is `acknowledgement_note`. `handoff list`
   filters with `--status pending|acknowledged|all`; there is no `--state` (2026-10-20, T-11374
   `03-comments-attachments-handoffs/drive.txt`).
+- **A stale `comment rm --if-match` exits 0.** `comment rm C-<n> --if-match 99 --yes --json` prints `Warning: etag
+  mismatch ... skipping`, `[]` and exits 0, and the comment survives (`set --if-match` exits 1). Check `comment ls`,
+  not the exit code. Product task T-12765 (2026-11-09, T-12762 `03-comments-attachments-handoffs/drive.txt`).
 - `comment add` keeps its own `--json`, so the every-verb `--json` (feature 2) doesn't reach it. On a TTY,
   `script -q /dev/null wrkq comment add T-2 -m x --json` still prints `Comment created: C-<n>` (2026-10-20, T-11374).
 
@@ -84,7 +100,10 @@ H=$(printf 'Next: cody acks.\n' | ~/.local/bin/wrkq handoff create --to cody@wv-
 The comment comes back attributed to you, both attachments are listed and `get` returns the bytes you put, the
 files exist under the daemon's attachment dir, a stale-etag acknowledge is refused, the right one moves the
 handoff to `acknowledged` with your note, and the pending list is empty afterwards. A `--to` handoff lands in the
-successor's scope with you as author, shows `From`, and the successor acknowledges it as itself.
+successor's scope with you as author, shows `From`, and the successor acknowledges it as itself. A repeated
+idempotency key replays the handoff, a soft-deleted comment shows only with `--include-deleted`, and a raw frame for
+another agent is refused on the scope header.
 
-Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/03-comments-attachments-handoffs/drive.txt`
-(the `--to` drives after the NOTE line; the successor handoff is H-00003 after the replay).
+Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/03-comments-attachments-handoffs/drive.txt`
+(the T-12309 replay, then the scope-header, wake, comment rm, meta, idempotency and `attach path` drives after the
+NOTE drift line).

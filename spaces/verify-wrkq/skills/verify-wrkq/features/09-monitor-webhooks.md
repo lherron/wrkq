@@ -10,7 +10,12 @@ downward) or global, on the internal root. Code: `internal/rpccli/monitor.go`, `
 
 - **monitor wait.** `wrkq monitor wait <TASK|EN...> --until state=<s>|all-terminal|terminal --timeout D
   [--stall-after D]` prints one `wrkq.monitor.terminal` line. Exit codes: 0 when the condition is met, 1 when
-  the timeout or stall leaves it unmet, 2 for a selector error, 3 for a stream error.
+  the timeout or stall leaves it unmet, 2 for a selector error, 3 for a stream error. Since 7f26a88 `wait` and
+  `watch` take a commit token before their first read and park on `wrkq.commit.wait` (feature 1) between reads,
+  for the shortest of 25 s, the time left to `--timeout` and to `--stall-after`, instead of polling: a `wait`
+  started 2 s before the `set` returned 2.1 s after start. Stall (2.0 s) and timeout exits are unchanged. A wait
+  whose remaining slack is under 1 s logs a false `-32603` in wrkqd's request log (feature 1 Gotchas, T-12764).
+  Driven 2026-11-09, T-12762.
 - **monitor watch.** `wrkq monitor watch [TASK...] [--state-only] [--until ...] [--raw] [--since <event id>]
   [--timeout D]` streams events. `--raw` gives event-log rows (`id`, `event_type`, `resource_id`, `principal_ref`,
   `scope_ref`, `payload` as a JSON string, so use `fromjson`). Without `--since` it **replays the whole log from
@@ -30,7 +35,9 @@ downward) or global, on the internal root. Code: `internal/rpccli/monitor.go`, `
   plus `--add-webhook-url`, `--remove-webhook-url`, `--webhook-urls '<json>'` and `--all`. `{ticket_id}` in a URL
   expands to the task id and `{project_id}` to the subscribing container's `P-<n>`. The body carries `event`,
   `ticket_id`, `event_seq` and more. Every POST carries `User-Agent: wrkq/<version>` (0655f69; all 15 sink rows
-  read `wrkq/v0.1.0-514-g5fbf10c`, driven 2026-11-02, T-12309). A comment on a task posts `comment_added` to the `task` class.
+  read `wrkq/v0.1.0-555-g401c525`, driven 2026-11-09, T-12762). A comment on a task posts `comment_added` to the `task` class.
+  An `ext put` writes a `task.ext.put` row to the raw feed and POSTs nothing, and a replayed `task.update`
+  idempotency key POSTs one `updated`, not two (driven 2026-11-09, T-12762).
   `--webhook-events` without a URL is refused. `--webhook-url` replaces the container's whole list, and
   `--add-webhook-url` appends. Without `--webhook-events` the result lists plain URL strings, with it
   `{url, events}` objects (driven 2026-10-20, T-11374).
@@ -77,10 +84,12 @@ kill %2   # stop the sink before wv down
 
 ## Proven when
 
-`monitor wait` returns `result: met` and exits 0 once the task completes, and returns `result: timeout` with exit 1
-for a state that never arrives. `watch --raw` streams event rows. With the container subscription set, creating
+`monitor wait` returns `result: met` and exits 0 within about 0.1 s of the task completing, and returns `result:
+timeout` with exit 1 for a state that never arrives. `watch --raw` streams event rows. With the container subscription set, creating
 and then updating a task in it POSTs exactly two `task` events (`created`, `updated`) to `/hook/<task id>`, with
 increasing `event_seq` (a comment adds a third, `comment_added`).
 
-Driven 2026-11-02 on wv `t-12309` (T-12309 upkeep) with installed 5fbf10c: `var/wrkq-artifacts/T-12309/09-monitor-webhooks/drive.txt`
-and `sink.jsonl` (with `user_agent`), then the `tailView` frames. Live read of the global sinks (three): `live/reads.txt`.
+Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/09-monitor-webhooks/drive.txt`
+and `evidence/t-12762/sink.jsonl` (with `user_agent`): the T-12309 replay (with its `tailView` frames), then the
+sub-second `-32603` measurement, wake latency, stall, ext and replay webhook drives after the NOTE drift lines. Live read
+of the global sinks (three: ACP loopback and tailnet, taskboard): `live/reads.txt`.
