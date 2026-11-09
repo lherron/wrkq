@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lherron/wrkq/internal/clifunnel"
 	"github.com/lherron/wrkq/internal/config"
 	"github.com/lherron/wrkq/internal/db"
 	"github.com/lherron/wrkq/internal/workrpc"
@@ -17,7 +18,8 @@ import (
 )
 
 // TestCommentDeleteParams_ForwardsIfMatch drives `wrkq comment rm --if-match`
-// end to end. A stale --if-match is a warn+skip that leaves the comment live; a
+// end to end. A stale --if-match is a typed WRKQ_CONFLICT failure (exit 1) that
+// leaves the comment live (T-12765: it used to warn, skip and exit 0); a
 // matching one soft-deletes (or purges under --purge); no --if-match deletes
 // unconditionally. The "edited between show and delete" row runs through a
 // remote proxy that bumps the comment's etag right after the CLI reads it, so
@@ -29,30 +31,22 @@ func TestCommentDeleteParams_ForwardsIfMatch(t *testing.T) {
 		args          []string
 		raceAfterShow bool
 		wantErr       bool
+		wantCode      string
 		wantStderr    string
 		wantRows      int
 		wantDeleted   int
 	}{
-		{name: "stale --if-match warns, skips and keeps the comment", args: []string{"--if-match", "999"},
-			wantStderr: "Warning: etag mismatch for C-00001 (current: 1, expected: 999), skipping", wantRows: 1, wantDeleted: 0},
+		{name: "stale --if-match is a typed conflict and keeps the comment", args: []string{"--if-match", "999"},
+			wantErr: true, wantCode: "WRKQ_CONFLICT", wantRows: 1, wantDeleted: 0},
 		{name: "edited between show and delete is refused by the server CAS", args: []string{"--if-match", "1"},
-			raceAfterShow: true, wantErr: true, wantRows: 1, wantDeleted: 0},
+			raceAfterShow: true, wantErr: true, wantCode: "WRKQ_CONFLICT", wantRows: 1, wantDeleted: 0},
 		{name: "matching --if-match soft-deletes", args: []string{"--if-match", "1"}, wantRows: 1, wantDeleted: 1},
 		{name: "matching --if-match with --purge purges", args: []string{"--if-match", "1", "--purge"}, wantRows: 0, wantDeleted: 0},
 		{name: "no --if-match deletes unconditionally", raceAfterShow: true, wantRows: 1, wantDeleted: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dbPath, taskID := migratedDBWithTask(t)
-			run := func(locator string, args ...string) (string, error) {
-				cmd := NewRootCmdFor("wrkq")
-				cmd.SetArgs(append([]string{"--db", locator, "--principal-ref", "agent:test-user"}, args...))
-				var stderr bytes.Buffer
-				cmd.SetOut(&bytes.Buffer{})
-				cmd.SetErr(&stderr)
-				err := cmd.Execute()
-				return stderr.String(), err
-			}
-			if stderr, err := run(dbPath, "comment", "add", taskID, "-m", "doomed comment"); err != nil {
+			if _, stderr, err := runCommentRmCLI(dbPath, "comment", "add", taskID, "-m", "doomed comment"); err != nil {
 				t.Fatalf("comment add: %v\n%s", err, stderr)
 			}
 
@@ -60,9 +54,12 @@ func TestCommentDeleteParams_ForwardsIfMatch(t *testing.T) {
 			if tc.raceAfterShow {
 				locator = newCommentEditRaceRemote(t, dbPath)
 			}
-			stderr, err := run(locator, append([]string{"comment", "rm", "C-00001", "--yes"}, tc.args...)...)
+			_, stderr, err := runCommentRmCLI(locator, append([]string{"comment", "rm", "C-00001", "--yes"}, tc.args...)...)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("comment rm err = %v, wantErr %v\nstderr:\n%s", err, tc.wantErr, stderr)
+			}
+			if tc.wantCode != "" {
+				assertTypedFailure(t, err, tc.wantCode)
 			}
 			if tc.wantStderr != "" && !strings.Contains(stderr, tc.wantStderr) {
 				t.Fatalf("stderr missing %q:\n%s", tc.wantStderr, stderr)
@@ -83,6 +80,75 @@ func TestCommentDeleteParams_ForwardsIfMatch(t *testing.T) {
 				t.Fatalf("comment rows=%d soft-deleted=%d, want rows=%d soft-deleted=%d", rows, deleted, tc.wantRows, tc.wantDeleted)
 			}
 		})
+	}
+}
+
+// TestCommentRm_MultiIDStaleFenceReportsPerItem: one fence over two comments
+// where only the first still matches deletes the first, refuses the second with
+// a typed conflict naming it, and exits 1 (bulk `set` semantics: failed>0).
+func TestCommentRm_MultiIDStaleFenceReportsPerItem(t *testing.T) {
+	dbPath, taskID := migratedDBWithTask(t)
+	for _, body := range []string{"kept fence", "moved fence"} {
+		if _, stderr, err := runCommentRmCLI(dbPath, "comment", "add", taskID, "-m", body); err != nil {
+			t.Fatalf("comment add: %v\n%s", err, stderr)
+		}
+	}
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	if _, err := database.Exec(`UPDATE comments SET etag = 2 WHERE id = 'C-00002'`); err != nil {
+		t.Fatalf("bump C-00002: %v", err)
+	}
+
+	stdout, stderr, err := runCommentRmCLI(dbPath, "comment", "rm", "C-00001", "C-00002", "--if-match", "1", "--yes", "--json")
+	assertTypedFailure(t, err, "WRKQ_CONFLICT")
+	if !strings.Contains(err.Error(), "C-00002") || strings.Contains(err.Error(), "C-00001") {
+		t.Fatalf("failure should name only C-00002: %v", err)
+	}
+	var rows []map[string]any
+	if uerr := json.Unmarshal([]byte(stdout), &rows); uerr != nil {
+		t.Fatalf("stdout is not the deleted-rows array: %v\n%s\nstderr:\n%s", uerr, stdout, stderr)
+	}
+	if len(rows) != 1 || rows[0]["id"] != "C-00001" || rows[0]["deleted"] != true {
+		t.Fatalf("stdout rows = %v, want only C-00001 deleted", rows)
+	}
+	var deleted1, deleted2 int
+	if err := database.QueryRow(
+		`SELECT COUNT(CASE WHEN id='C-00001' THEN deleted_at END), COUNT(CASE WHEN id='C-00002' THEN deleted_at END) FROM comments`,
+	).Scan(&deleted1, &deleted2); err != nil {
+		t.Fatalf("read comment state: %v", err)
+	}
+	if deleted1 != 1 || deleted2 != 0 {
+		t.Fatalf("soft-deleted C-00001=%d C-00002=%d, want 1/0", deleted1, deleted2)
+	}
+}
+
+func runCommentRmCLI(locator string, args ...string) (stdout, stderr string, err error) {
+	cmd := NewRootCmdFor("wrkq")
+	cmd.SetArgs(append([]string{"--db", locator, "--principal-ref", "agent:test-user"}, args...))
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	err = cmd.Execute()
+	return out.String(), errOut.String(), err
+}
+
+// assertTypedFailure checks what the wrkq binary would do with err: exit 1 and,
+// under --json, a structured envelope carrying code.
+func assertTypedFailure(t *testing.T, err error, code string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("want a %s failure, got success", code)
+	}
+	if got := ExitCodeForError(err); got != 1 {
+		t.Fatalf("exit code = %d, want 1 (err: %v)", got, err)
+	}
+	var envelope bytes.Buffer
+	clifunnel.Report(&envelope, err, clifunnel.ErrorJSON, "WRKQ")
+	if !strings.Contains(envelope.String(), `"code": "`+code+`"`) {
+		t.Fatalf("--json envelope missing code %s:\n%s", code, envelope.String())
 	}
 }
 

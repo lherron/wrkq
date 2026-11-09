@@ -36,18 +36,18 @@ source:
   - internal/wrkqapi/containers.go                    # ContainerDeleteRecursive two-phase (dryRun impact / expected CAS), non-interactive
   - internal/rpccli/confirm.go                        # shared caller-side confirmation seam (prompt text, --yes, abort, non-TTY) — rm/comment-rm/rmdir-force variants
   - internal/rpccli/rm.go                             # rm mirror: explicit mode + scoper + confirm; container targets hard-gated
-  - internal/rpccli/comment_rm.go                     # comment rm mirror: explicit mode + [y/N] prompt + if-match warn-skip + dry-run
+  - internal/rpccli/comment_rm.go                     # comment rm mirror: explicit mode + [y/N] prompt + stale if-match → per-item WRKQ_CONFLICT, exit 1 (T-12765) + dry-run
   - internal/rpccli/containers.go                     # reported/confirmed reversible archive + project-always-confirms rmdir + two-phase force delete
   - internal/workrpc/registry.go                      # wrkq.task.delete / comment.delete (param-only mode change) + container.deleteRecursive registration
   - internal/workrpc/taskdelete_mode_test.go          # server delete-mode + non-interactivity acceptance tests
   - internal/workrpc/commentdelete_mode_test.go       # server comment-delete mode/ifMatch + event-payload-parity + non-interactivity acceptance tests
-  - internal/rpccli/comment_rm_test.go                # mirror if-match forwarding (server-CAS) param guard
+  - internal/rpccli/comment_rm_test.go                # mirror if-match: stale fence + server-CAS race are typed conflicts, multi-id per-item
   - internal/rpccli/pty_rm_darwin_test.go             # PTY prompt-ownership tests (rm/comment-rm/rmdir-force)
   - internal/rpccli/container_archive_test.go         # archive round-trip/non-delete + rmdir project safety and error guidance
 required_tests:
   - internal/workrpc/taskdelete_mode_test.go          # TestTaskDelete_* (no-mode preserved, archive, purge+cleanup, invalid→VALIDATION, non-interactive)
   - internal/workrpc/commentdelete_mode_test.go       # TestCommentDelete_* (soft default/explicit, purge, invalid→VALIDATION, ifMatch→CONFLICT/match, non-interactive) + TestCommentDelete_SoftEventParity/PurgeEventParity (durable event payload shape + new-etag byte-match — the snapshot oracle can't see event drift)
-  - internal/rpccli/comment_rm_test.go                # TestCommentDeleteParams_ForwardsIfMatch (mirror forwards the etag CAS to the server after the precheck passes; omits when absent)
+  - internal/rpccli/comment_rm_test.go                # TestCommentDeleteParams_ForwardsIfMatch (stale fence / server-CAS race → WRKQ_CONFLICT exit 1; match deletes; omits when absent) + TestCommentRm_MultiIDStaleFenceReportsPerItem
   - internal/rpccli/pty_rm_darwin_test.go             # TestRmPurgePromptOwnership / TestCommentRmPromptOwnership / TestRmdirForcePromptOwnership (mirror owns each prompt's exact text/accept-token/abort/--yes on a real TTY)
   - internal/rpccli/container_archive_test.go         # non-empty archive/unarchive and typed-yes project deletion boundary
   - internal/rpccli/parity_test.go                    # production contract rm/*, production contract comment-rm/*, production contract rmdir/* (incl. --force two-phase) + comment row in the durable snapshot

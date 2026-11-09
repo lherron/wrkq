@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/bulk"
 	"github.com/lherron/wrkq/internal/id"
 	"github.com/spf13/cobra"
 )
@@ -14,8 +15,13 @@ import (
 // (architecture/records/invariants/wrkq.mutation.caller-owned-confirmation.yaml).
 // The durable mutation runs through wrkq.comment.delete with an EXPLICIT mode
 // (soft default, purge for --purge); the mirror owns the legacy [y/N] prompt +
-// abort + --yes, the --if-match warn/skip, dry-run rendering, the unknown-ref
-// warn-and-continue, and the TTY/non-TTY output shapes.
+// abort + --yes, dry-run rendering, the unknown-ref warn-and-continue, and the
+// TTY/non-TTY output shapes.
+//
+// A stale --if-match is a per-item failure, not a skip (T-12765): the item is
+// refused with a typed WRKQ_CONFLICT, the remaining ids still run, the non-TTY
+// stdout array lists only what was deleted, and the command exits 1 — bulk
+// `set --if-match` semantics.
 //
 // Per daedalus #10190, the comment-rm prompt DIFFERS from rm --purge: it is a
 // single inline "[y/N]: " line accepting EXACTLY "y"/"Y", and it prompts EVEN for
@@ -70,6 +76,7 @@ func runCommentRm(cmd *cobra.Command, args []string, f commentRmFlags) error {
 	tty := isStdoutTTY(out)
 
 	results := []map[string]interface{}{}
+	failed := &bulk.Result{TotalItems: len(args)}
 
 	for _, orig := range args {
 		// Comment refs are comment IDs / c: tokens, not paths — no project-root
@@ -96,10 +103,14 @@ func runCommentRm(cmd *cobra.Command, args []string, f commentRmFlags) error {
 			return uerr
 		}
 
-		// --if-match: legacy WARN+SKIP on mismatch (not an error).
+		// --if-match: a stale fence fails this item before any prompt or preview,
+		// with the conflict the server CAS would return.
 		if f.ifMatch > 0 && c.ETag != f.ifMatch {
-			fmt.Fprintf(errOut, "Warning: etag mismatch for %s (current: %d, expected: %d), skipping\n",
-				c.ID, c.ETag, f.ifMatch)
+			failed.Failed++
+			failed.Errors = append(failed.Errors, bulk.ItemError{Item: c.ID, Error: &Error{
+				DomainID: "WRKQ_CONFLICT",
+				Message:  fmt.Sprintf("comment etag precondition failed for %s (current: %d, expected: %d)", c.ID, c.ETag, f.ifMatch),
+			}})
 			continue
 		}
 
@@ -141,6 +152,15 @@ func runCommentRm(cmd *cobra.Command, args []string, f commentRmFlags) error {
 		}
 		params := commentDeleteParams(c.UUID, mode, actor, f.ifMatch)
 		if _, derr := tr.Call(ctx, "wrkq.comment.delete", params); derr != nil {
+			var re *Error
+			if errors.As(derr, &re) && re.DomainID == "WRKQ_CONFLICT" {
+				// Edited between show and delete: the server CAS refused this item.
+				failed.Failed++
+				failed.Errors = append(failed.Errors, bulk.ItemError{Item: c.ID, Error: &Error{
+					DomainID: re.DomainID, Message: fmt.Sprintf("%s for %s", re.Message, c.ID),
+				}})
+				continue
+			}
 			return errors.New(rpcMessage(derr))
 		}
 
@@ -170,13 +190,33 @@ func runCommentRm(cmd *cobra.Command, args []string, f commentRmFlags) error {
 	if !tty {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
-		return enc.Encode(results)
+		if err := enc.Encode(results); err != nil {
+			return err
+		}
 	}
-	return nil
+	return commentRmFailure(failed)
+}
+
+// commentRmFailure turns per-item failures into the command's error: the item's
+// own typed error when one failed, otherwise a WRKQ_CONFLICT whose hint lines
+// name each refused item. Every failure recorded here is a fence conflict.
+func commentRmFailure(r *bulk.Result) error {
+	switch len(r.Errors) {
+	case 0:
+		return nil
+	case 1:
+		return r.Errors[0].Error
+	}
+	lines := make([]string, 0, len(r.Errors)+1)
+	lines = append(lines, fmt.Sprintf("%d comment deletions failed", len(r.Errors)))
+	for _, e := range r.Errors {
+		lines = append(lines, rpcMessage(e.Error))
+	}
+	return &Error{DomainID: "WRKQ_CONFLICT", Message: strings.Join(lines, "\n")}
 }
 
 // commentDeleteParams builds the wrkq.comment.delete params the mirror sends
-// AFTER the local warn/skip prechecks have passed: the resolved comment UUID, the
+// AFTER the local prechecks (fence, prompt) have passed: the resolved comment UUID, the
 // EXPLICIT mode (caller-owned-confirmation invariant — never the absent-mode
 // default), the optional actor, and — crucially — the etag precondition forwarded
 // as the server CAS (`ifMatch`) so the COMMIT is race-guarded against a concurrent

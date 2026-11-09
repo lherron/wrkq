@@ -1188,8 +1188,10 @@ never prompts, inspects a TTY, or reads stdin. Modes:
 `WRKQ_CONFLICT`); `0`/absent skips the check. The CLI mirror (`wrkq comment rm`)
 owns ALL human interaction — the legacy `[y/N]` prompt (accepting `y`/`Y`, and
 prompting EVEN for soft-delete, distinct from `rm --purge`'s "yes" shape), abort,
-`--yes`, the `--if-match` warn-and-skip, the unknown-ref warn-and-continue,
-dry-run, and the non-TTY JSON-array rendering — and ALWAYS passes an explicit
+`--yes`, the unknown-ref warn-and-continue, dry-run, and the non-TTY JSON-array
+rendering. A stale `--if-match` (client precheck or this server CAS) fails that
+item with `WRKQ_CONFLICT`; the other ids still run, the array lists only what was
+deleted, and the command exits 1 (T-12765) — and ALWAYS passes an explicit
 `mode` (`soft` for the default, `purge` for `--purge`).
 
 #### Attachment methods

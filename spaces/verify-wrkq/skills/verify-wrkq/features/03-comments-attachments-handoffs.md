@@ -89,9 +89,10 @@ H=$(printf 'Next: cody acks.\n' | ~/.local/bin/wrkq handoff create --to cody@wv-
   `status` (`pending`/`acknowledged`), not `state`, and the note is `acknowledgement_note`. `handoff list`
   filters with `--status pending|acknowledged|all`; there is no `--state` (2026-10-20, T-11374
   `03-comments-attachments-handoffs/drive.txt`).
-- **A stale `comment rm --if-match` exits 0.** `comment rm C-<n> --if-match 99 --yes --json` prints `Warning: etag
-  mismatch ... skipping`, `[]` and exits 0, and the comment survives (`set --if-match` exits 1). Check `comment ls`,
-  not the exit code. Product task T-12765 (2026-11-09, T-12762 `03-comments-attachments-handoffs/drive.txt`).
+- **A stale `comment rm --if-match` exits 1 with `WRKQ_CONFLICT`.** `comment rm C-<n> --if-match 99 --yes --json`
+  prints `[]` on stdout, `{"error":{"code":"WRKQ_CONFLICT",...}}` on stderr and exits 1; the comment survives. With
+  several ids the matching ones still delete and the error names each refused id. Before T-12765 (fixed 2026-11-09)
+  it warned, skipped and exited 0.
 - `comment add` keeps its own `--json`, so the every-verb `--json` (feature 2) doesn't reach it. On a TTY,
   `script -q /dev/null wrkq comment add T-2 -m x --json` still prints `Comment created: C-<n>` (2026-10-20, T-11374).
 
