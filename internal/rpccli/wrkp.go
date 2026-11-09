@@ -217,37 +217,62 @@ func wrkpCursorAscending(raw string) bool {
 // newWrkpCursorCmd prints a forward cursor at the timeline's current head. A
 // reader that lists current state captures this FIRST, lists, then reads
 // `wrkp log --after CURSOR` from it: a consistent cut, since anything that
-// changed during the listing is re-delivered rather than lost.
+// changed during the listing is re-delivered rather than lost. With several
+// projects it prints one <project>=<cursor> line each, in argument order, the
+// --after values of a multi-project follow.
 func newWrkpCursorCmd() *cobra.Command {
 	return &cobra.Command{
-		Use: "cursor [project]", Short: "Print a forward cursor at the timeline head", Args: cobra.MaximumNArgs(1),
+		Use: "cursor [project]...", Short: "Print a forward cursor at the timeline head", Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tr, sc, closeFn, err := openMirror(cmd)
 			if err != nil {
 				return err
 			}
 			defer closeFn()
-			project := sc.selector("", true)
-			if len(args) == 1 {
-				project = args[0]
+			projects := args
+			if len(projects) == 0 {
+				projects = []string{sc.selector("", true)}
 			}
-			raw, err := tr.Call(cmd.Context(), "wrkq.container.timelineView", map[string]any{
-				"container": project, "scope": "subtree", "entriesOnly": true, "tail": true, "limit": 1,
-			})
-			if err != nil {
-				return wrkpRPCError(err)
+			multi := len(projects) > 1
+			// Every head is read before any is printed, so a refused project
+			// leaves no partial set of cursors behind.
+			views := make([]wrkpLogView, len(projects))
+			for i, project := range projects {
+				raw, err := tr.Call(cmd.Context(), "wrkq.container.timelineView", map[string]any{
+					"container": project, "scope": "subtree", "entriesOnly": true, "tail": true, "limit": 1,
+				})
+				if err != nil {
+					err = wrkpRPCError(err)
+					if multi {
+						err = (&wrkpStream{arg: project, tagged: true}).named(err)
+					}
+					return err
+				}
+				if err := json.Unmarshal(raw, &views[i]); err != nil {
+					return err
+				}
+				if views[i].NextCursor == "" {
+					return fmt.Errorf("server returned no head cursor for %s", project)
+				}
 			}
-			var view wrkpLogView
-			if err := json.Unmarshal(raw, &view); err != nil {
-				return err
-			}
-			if view.NextCursor == "" {
-				return fmt.Errorf("server returned no head cursor for %s", project)
+			if !multi {
+				view := views[0]
+				if wrkpJSON(cmd) {
+					return encodeJSONIndent(cmd, map[string]string{"project": view.Container.Path, "cursor": view.NextCursor})
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), view.NextCursor)
+				return nil
 			}
 			if wrkpJSON(cmd) {
-				return encodeJSONIndent(cmd, map[string]string{"project": view.Container.Path, "cursor": view.NextCursor})
+				items := make([]map[string]string, len(views))
+				for i, view := range views {
+					items[i] = map[string]string{"project": view.Container.Path, "cursor": view.NextCursor}
+				}
+				return encodeJSONIndent(cmd, items)
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), view.NextCursor)
+			for i, view := range views {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s=%s\n", projects[i], view.NextCursor)
+			}
 			return nil
 		},
 	}

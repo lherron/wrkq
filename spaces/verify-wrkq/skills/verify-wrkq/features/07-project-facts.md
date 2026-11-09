@@ -26,6 +26,11 @@ MAINTAIN.md. Code: `cmd/wrkp/`, `internal/rpccli/wrkp*.go` (`wrkp.go`, `wrkp_log
   invisible to a 40 s follow; `--after <its terminal cursor>` with the same `--type` then returns it. `--all-types`
   is accepted. `--since 1s` with nothing new prints `wrkp: no entries in <p> since 1s; newest is ...` on stderr.
   Driven 2026-11-09, T-12762.
+- **Multi-project follow.** `wrkp log --follow a b --ndjson [--after a=C]...` follows several projects on ONE
+  `wrkq.commit.wait`; each entry gains `"project"` (container path), the terminal record carries `"cursors":{a,b}`
+  instead of `cursor`, and `wrkp cursor a b` prints `a=C`/`b=C` lines usable as `--after`. Only with `--follow
+  --ndjson`; `--task/--before/--limit/--since` and a bare `--after` are exit 2. Prove the single wait from the
+  daemon's request log: one caller stream of `wrkq.commit.wait`. T-12864.
 - **Types.** `wrkp types <project>` lists every stored fact type with its count.
 - **Show.** `wrkp show <uuid> --json` returns the full row, including `idempotencyKey`, `occurredAt`,
   `principalRef` and `scopeRef`.

@@ -10,8 +10,11 @@ wrkp git commit
 wrkp git push <remote> <url>   # pre-push ref lines on stdin
 wrkp just [-- just-args...]    # via the `just` shim; see below
 wrkp cursor [project]          # forward cursor at the timeline head
+wrkp cursor <project> <project>...   # one <project>=<cursor> line each
 wrkp log [project] [--after CURSOR] [--since 4h|TS] [--before TS] [--type a,b,session.*]
          [--all-types] [--task T-x] [--limit N] [--follow] [--json|--ndjson] [--porcelain]
+wrkp log --follow <project> <project>... --ndjson [--type a,b] [--all-types]
+         [--after <project>=CURSOR]... [--timeout D] [--stall-after D]
 wrkp show <uuid>
 wrkp types [project]
 wrkp info
@@ -94,6 +97,35 @@ with `--porcelain` always writes the next forward cursor. Capturing the cursor
 before listing gives a consistent cut: a change made during the listing is
 delivered again rather than lost. `--limit N` bounds one read; continue from
 the printed cursor.
+
+## Following several projects in one process
+
+```bash
+wrkp cursor foundry wrkq                        # foundry=<cursor> / wrkq=<cursor>
+wrkp log --follow foundry wrkq --ndjson \
+  --after foundry=<cursor> --after wrkq=<cursor> --stall-after 30m
+```
+
+More than one project is accepted only with `--follow` and `--ndjson`; with
+several projects `--task`, `--before`, `--limit` and `--since` are usage errors
+(exit 2). Every project is resolved before the first entry is written: one the
+server refuses fails the command (exit 1) with the server's typed error and
+the project named.
+
+Each entry line is the line a single-project follow prints plus one key,
+`"project"`, holding that project's container path. `--after` is repeated as
+`<project>=<cursor>`, `<project>` being the argument as given; a bare cursor is
+a usage error, and a project with no `--after` starts at its head. `wrkp
+cursor` with several projects prints exactly those values, in argument order.
+When `--timeout` or `--stall-after` ends the follow, the `wrkp.log.terminal`
+record carries `"cursors": {"<project>": "<cursor>", ...}` in place of
+`"cursor"`, so a restart resumes every project where it stopped.
+
+The process holds ONE `wrkq.commit.wait` for all its projects: a wake (or the
+forced-read interval) reads every project and drains each until its cursor
+stops moving, then parks again. It is a client loop over the per-project
+timeline; the server's timeline and cursors stay per project. Single-project
+`wrkp log` and `wrkp cursor` output is unchanged.
 
 ## Task entries
 

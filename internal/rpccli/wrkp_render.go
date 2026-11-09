@@ -194,3 +194,20 @@ func styledProjectEvent(event wrkpProjectEvent, project string) style.StyledEven
 	}
 	return styled
 }
+
+// wrkpTaggedEntry is a multi-project follow's entry line: the entry a
+// single-project follow prints, plus the project it came from.
+type wrkpTaggedEntry struct {
+	Project string `json:"project"`
+	timelineEntry
+}
+
+func renderWrkpTaggedEntries(cmd *cobra.Command, project string, entries []timelineEntry) error {
+	enc := json.NewEncoder(cmd.OutOrStdout())
+	for _, entry := range entries {
+		if err := enc.Encode(wrkpTaggedEntry{Project: project, timelineEntry: entry}); err != nil {
+			return err
+		}
+	}
+	return nil
+}

@@ -38,11 +38,12 @@ type wrkpContainerTaskCounts struct {
 }
 
 func newWrkpLogCmd() *cobra.Command {
-	var after, since, before, task, typeList, timeoutStr, stallAfterStr string
+	var since, before, task, typeList, timeoutStr, stallAfterStr string
+	var afters []string
 	var limit int
 	var follow, ndjson, porcelain, pretty, allTypes bool
 	cmd := &cobra.Command{
-		Use: "log [project]", Short: "Read the merged project timeline", Args: cobra.MaximumNArgs(1),
+		Use: "log [project]...", Short: "Read the merged project timeline", Args: cobra.ArbitraryArgs,
 		Long: `Read the merged project timeline, newest first, or follow it with --follow.
 
 A follow ends when --timeout (total duration) or --stall-after (time with no new
@@ -51,11 +52,26 @@ entry) expires. It then writes one terminal record and exits 0: a
 line otherwise, both naming the cursor to resume from with --after. This is
 the termination contract of wrkq monitor watch without --until.
 
+Several projects: wrkp log --follow <project> <project>... --ndjson follows
+them all in one process on one commit wait. Each entry line gains a "project"
+key (the container path), --after is repeated as <project>=<cursor> (a project
+without one starts at its head; wrkp cursor <project>... prints these), and the
+terminal record carries "cursors": {"<project>": "<cursor>"} in place of
+"cursor". --task, --before, --limit and --since are single-project only.
+
 Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			timeout, stallAfter, err := wrkpFollowClocks(cmd, follow, timeoutStr, stallAfterStr)
 			if err != nil {
 				return err
+			}
+			if len(args) > 1 {
+				return runWrkpMultiFollow(cmd, args, afters, typeList, allTypes, follow, ndjson, pretty, timeout, stallAfter)
+			}
+			// One project keeps --after's single-value meaning: the last one given.
+			after := ""
+			if len(afters) > 0 {
+				after = afters[len(afters)-1]
 			}
 			var beforeTime time.Time
 			if before != "" {
@@ -75,23 +91,12 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 				project = args[0]
 			}
 			mode := resolveWrkpMode(cmd, pretty, ndjson)
-			var styled *style.TimelineWriter
-			cursor := after
 			// A FORWARD read: --after names an ascending cursor (from `wrkp
 			// cursor` or a previous forward page). It reads what changed since
 			// that position up to now, then stops -- a bounded --follow. The
 			// descending cursor a plain `wrkp log --porcelain` prints pages
 			// back into history instead.
 			forward := !follow && wrkpCursorAscending(after)
-			heldEntries := []timelineEntry{}
-			containerSet := ""
-			// previousCursor and followIdleNoticed exist only for the
-			// empty-window notice below: one detects that a tail has caught up,
-			// the other keeps the notice to a single printing per session.
-			previousCursor := ""
-			followIdleNoticed := false
-			containerPath := ""
-			delivered := 0
 			deliveredLimit := limit
 			if deliveredLimit <= 0 {
 				deliveredLimit = wrkpDefaultLimit
@@ -103,187 +108,18 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 			if task != "" {
 				query.task = sc.selector(task, false)
 			}
-			followStarted := time.Now()
-			lastEntry := followStarted
-			// Take the ephemeral wake token before the first authoritative read.
-			// The timeline cursor alone remains the replay position.
-			token := ""
-			maxWait := 25 * time.Second
-			// Local pipe calls cannot cancel a parked request, and separate
-			// local writers do not share the process commit signal. Keep
-			// these waits short to preserve local cancellation and clocks.
-			if cfg.RemoteEndpoint == "" {
-				maxWait = monitorPollInterval
-			}
+			stream := &wrkpStream{arg: project, query: query, cursor: after}
 			if follow {
-				token, err = workrpcclient.WaitForCommit(cmd.Context(), tr, "", wrkpFollowDelay(beforeTime, min(maxWait, clockSlack(followStarted, lastEntry, timeout, stallAfter))))
-				if err != nil {
-					if cmd.Context().Err() != nil {
-						return nil
-					}
-					return wrkpRPCError(err)
-				}
+				return (&wrkpFollowRun{
+					cmd: cmd, tr: tr, remote: cfg.RemoteEndpoint != "", mode: mode, since: since,
+					beforeTime: beforeTime, timeout: timeout, stallAfter: stallAfter,
+					streams: []*wrkpStream{stream},
+				}).run()
 			}
-			var fingerprintAt time.Time
-			for {
-				if cmd.Context().Err() != nil {
-					return nil
-				}
-				readStarted := time.Now()
-				sentCursor := cursor
-				params := query.pageParams(cursor, delivered)
-				raw, err := tr.Call(cmd.Context(), "wrkq.container.timelineView", params)
-				if err != nil {
-					if cmd.Context().Err() != nil {
-						return nil
-					}
-					return wrkpRPCError(err)
-				}
-				var view wrkpLogView
-				if err := json.Unmarshal(raw, &view); err != nil {
-					return err
-				}
-				if mode == "human" && styled == nil {
-					styled = style.NewTimelineWriter(cmd.OutOrStdout(), view.Container.Path)
-				}
-				containerPath = view.Container.Path
-				// A bounded --json read is ONE array however many pages it
-				// took; it is written when the read stops. A bounded human read
-				// is held too: it is fetched newest-first so --limit keeps the
-				// most recent entries, but printed oldest-first, in the order
-				// --follow prints the same window.
-				if !follow && (mode == "json" || (mode == "human" && !forward)) {
-					heldEntries = append(heldEntries, view.Entries...)
-				} else if err := renderWrkpEntries(cmd, view.Entries, mode, styled); err != nil {
-					return err
-				}
-				delivered += len(view.Entries)
-				if len(view.Entries) > 0 {
-					lastEntry = time.Now()
-				}
-				// The fingerprint is advisory and reads the whole container
-				// tree, so a tail refreshes it on a slow clock, not per poll:
-				// per-poll, a dozen idle followers drove wrkqd to ~5 cores.
-				if follow && (containerSet == "" || time.Since(fingerprintAt) >= wrkpFingerprintInterval) {
-					fingerprintAt = time.Now()
-					currentSet, err := wrkpSubtreeFingerprint(cmd.Context(), tr, view.Container.UUID)
-					if err != nil {
-						if cmd.Context().Err() != nil {
-							return nil
-						}
-						return err
-					}
-					if containerSet != "" && currentSet != containerSet {
-						fmt.Fprintln(cmd.ErrOrStderr(), "wrkp: project container set changed; restart with --since to replay moved history")
-					}
-					containerSet = currentSet
-				}
-				cursor = view.NextCursor
-				// A tail with an empty window prints nothing and waits, which on
-				// a terminal is indistinguishable from a hang -- that is exactly
-				// how `--since 3h --follow` was read as a stall. Say it once, and
-				// only when the read is demonstrably CAUGHT UP: a tail cursor
-				// moves whenever the scan advances, so two identical cursors mean
-				// the backlog is drained rather than that a sparse page of
-				// excluded rows is still being walked.
-				if follow && mode == "human" && delivered == 0 && !followIdleNoticed &&
-					cursor != "" && cursor == previousCursor {
-					fmt.Fprintln(cmd.ErrOrStderr(),
-						wrkpEmptyWindowNotice(cmd.Context(), tr, project, containerPath, since, true))
-					followIdleNoticed = true
-				}
-				previousCursor = cursor
-				// Once the window closes, drain every held page before stopping.
-				// The bounded server tail drops its cursor only after exhaustion.
-				if follow && !beforeTime.IsZero() && !readStarted.Before(beforeTime) {
-					if cursor == "" {
-						return nil
-					}
-					continue
-				}
-				if forward {
-					if cursor == "" {
-						return renderWrkpEntries(cmd, heldEntries, mode, styled)
-					}
-					// A tail cursor always comes back, so the read is caught up
-					// when a page leaves it where it was; a page of only
-					// excluded rows still moves it and the read continues.
-					if cursor != sentCursor && delivered < deliveredLimit {
-						continue
-					}
-					if porcelain && cursor != "" {
-						fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", cursor)
-					}
-					return renderWrkpEntries(cmd, heldEntries, mode, styled)
-				}
-				if !follow {
-					// A raw-scan page may consume only excluded rows. Keep advancing
-					// sparse filtered reads until the delivered limit is full or the
-					// fixed fence is drained; --porcelain reports that final position.
-					if cursor != "" && delivered < deliveredLimit {
-						continue
-					}
-					if porcelain && cursor != "" {
-						fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", cursor)
-					}
-					if mode == "human" && delivered == 0 {
-						fmt.Fprintln(cmd.ErrOrStderr(),
-							wrkpEmptyWindowNotice(cmd.Context(), tr, project, containerPath, since, false))
-					}
-					if mode == "human" {
-						slices.Reverse(heldEntries)
-					}
-					return renderWrkpEntries(cmd, heldEntries, mode, styled)
-				}
-				if timeout > 0 && time.Since(followStarted) >= timeout {
-					return writeWrkpTerminal(cmd, mode, monitorResultTimeout, cursor)
-				}
-				if stallAfter > 0 && time.Since(lastEntry) >= stallAfter {
-					return writeWrkpTerminal(cmd, mode, monitorResultStall, cursor)
-				}
-				// Drain all advancing pages (including filtered empty pages)
-				// before parking; a commit token never replaces a view cursor.
-				if cursor != "" && cursor != sentCursor {
-					continue
-				}
-				// Against a remote wrkqd the commit token is authoritative: an
-				// unchanged token (timeout, capacity refusal) means nothing was
-				// committed in wrkqd, so park again instead of re-reading the
-				// timeline. Writes outside wrkqd (wrkqadm, migrations, restores)
-				// never move the token, so a read is still forced every
-				// wrkpFollowForcedReadInterval (ADR 0004 unsupported list).
-				// Locally, other processes' writes never move the token, so
-				// every wait return still reads.
-				for {
-					prev := token
-					slack := wrkpFollowDelay(beforeTime, min(maxWait, clockSlack(followStarted, lastEntry, timeout, stallAfter)))
-					if forcedIn := wrkpFollowForcedReadInterval - time.Since(readStarted); forcedIn < slack {
-						slack = forcedIn
-					}
-					token, err = workrpcclient.WaitForCommit(cmd.Context(), tr, token, slack)
-					if err != nil {
-						if cmd.Context().Err() != nil {
-							return nil
-						}
-						return wrkpRPCError(err)
-					}
-					if cfg.RemoteEndpoint == "" || token == "" || token != prev || slack <= 0 {
-						break
-					}
-					if timeout > 0 && time.Since(followStarted) >= timeout {
-						return writeWrkpTerminal(cmd, mode, monitorResultTimeout, cursor)
-					}
-					if stallAfter > 0 && time.Since(lastEntry) >= stallAfter {
-						return writeWrkpTerminal(cmd, mode, monitorResultStall, cursor)
-					}
-					if cmd.Context().Err() != nil {
-						return nil
-					}
-				}
-			}
+			return readWrkpBounded(cmd, tr, stream, mode, forward, porcelain, since)
 		},
 	}
-	cmd.Flags().StringVar(&after, "after", "", "Opaque cursor: a previous page's, or a forward cursor from `wrkp cursor`")
+	cmd.Flags().StringArrayVar(&afters, "after", nil, "Opaque cursor: a previous page's, or a forward cursor from `wrkp cursor`; with several projects, repeated <project>=<cursor>")
 	cmd.Flags().StringVar(&since, "since", "", "RFC3339 time or duration")
 	cmd.Flags().StringVar(&before, "before", "", "Exclusive RFC3339 server-time upper bound")
 	cmd.Flags().StringVar(&typeList, "type", "", "Comma-separated exact or trailing-glob types")
@@ -297,6 +133,373 @@ Exit codes: 0=read done, or a follow ended on its clock; 1=error; 2=usage error.
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Write the next cursor to stderr")
 	cmd.Flags().BoolVar(&pretty, "pretty", false, "Force the styled timeline even when not a TTY")
 	return cmd
+}
+
+// wrkpStream is one project's timeline read: its fixed query plus the position
+// and advisory state a read keeps for it. A single-project read has one; a
+// multi-project follow has one per project, all on one commit wait.
+type wrkpStream struct {
+	arg    string // the project as given: the key of --after and terminal cursors
+	query  wrkpLogQuery
+	tagged bool // multi-project: each entry line names its project
+	cursor string
+	// sentCursor is the cursor the last page was read from; the drain is
+	// caught up when a page leaves the cursor where it was.
+	sentCursor string
+	path       string
+	delivered  int
+	styled     *style.TimelineWriter
+	// containerSet and fingerprintAt are the advisory subtree fingerprint.
+	containerSet  string
+	fingerprintAt time.Time
+	// previousCursor and idleNoticed exist only for the empty-window notice:
+	// one detects that a tail has caught up, the other keeps the notice to a
+	// single printing per session.
+	previousCursor string
+	idleNoticed    bool
+}
+
+// fetch reads the stream's next page from its current cursor.
+func (s *wrkpStream) fetch(ctx context.Context, tr Transport) (wrkpLogView, error) {
+	var view wrkpLogView
+	raw, err := tr.Call(ctx, "wrkq.container.timelineView", s.query.pageParams(s.cursor, s.delivered))
+	if err != nil {
+		return view, s.named(wrkpRPCError(err))
+	}
+	if err := json.Unmarshal(raw, &view); err != nil {
+		return view, err
+	}
+	return view, nil
+}
+
+// named keeps an error's type; in a multi-project follow it also names the
+// project, so one refused argument is identifiable among several.
+func (s *wrkpStream) named(err error) error {
+	if !s.tagged {
+		return err
+	}
+	var rpcErr *Error
+	if errors.As(err, &rpcErr) {
+		annotated := *rpcErr
+		annotated.Message = s.arg + ": " + annotated.Message
+		return &annotated
+	}
+	return fmt.Errorf("%s: %w", s.arg, err)
+}
+
+func (s *wrkpStream) render(cmd *cobra.Command, entries []timelineEntry, mode string) error {
+	if s.tagged {
+		return renderWrkpTaggedEntries(cmd, s.path, entries)
+	}
+	return renderWrkpEntries(cmd, entries, mode, s.styled)
+}
+
+// readWrkpBounded is a read that stops: newest-first history (paged back by a
+// descending cursor), or a forward read from an ascending --after up to now.
+func readWrkpBounded(cmd *cobra.Command, tr Transport, s *wrkpStream, mode string, forward, porcelain bool, since string) error {
+	heldEntries := []timelineEntry{}
+	for {
+		if cmd.Context().Err() != nil {
+			return nil
+		}
+		s.sentCursor = s.cursor
+		view, err := s.fetch(cmd.Context(), tr)
+		if err != nil {
+			if cmd.Context().Err() != nil {
+				return nil
+			}
+			return err
+		}
+		if mode == "human" && s.styled == nil {
+			s.styled = style.NewTimelineWriter(cmd.OutOrStdout(), view.Container.Path)
+		}
+		s.path = view.Container.Path
+		// A bounded --json read is ONE array however many pages it took; it
+		// is written when the read stops. A bounded human read is held too:
+		// it is fetched newest-first so --limit keeps the most recent
+		// entries, but printed oldest-first, in the order --follow prints the
+		// same window.
+		if mode == "json" || (mode == "human" && !forward) {
+			heldEntries = append(heldEntries, view.Entries...)
+		} else if err := s.render(cmd, view.Entries, mode); err != nil {
+			return err
+		}
+		s.delivered += len(view.Entries)
+		s.cursor = view.NextCursor
+		if forward {
+			if s.cursor == "" {
+				return renderWrkpEntries(cmd, heldEntries, mode, s.styled)
+			}
+			// A tail cursor always comes back, so the read is caught up
+			// when a page leaves it where it was; a page of only
+			// excluded rows still moves it and the read continues.
+			if s.cursor != s.sentCursor && s.delivered < s.query.deliveredLimit {
+				continue
+			}
+			if porcelain && s.cursor != "" {
+				fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", s.cursor)
+			}
+			return renderWrkpEntries(cmd, heldEntries, mode, s.styled)
+		}
+		// A raw-scan page may consume only excluded rows. Keep advancing
+		// sparse filtered reads until the delivered limit is full or the
+		// fixed fence is drained; --porcelain reports that final position.
+		if s.cursor != "" && s.delivered < s.query.deliveredLimit {
+			continue
+		}
+		if porcelain && s.cursor != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "next_cursor=%s\n", s.cursor)
+		}
+		if mode == "human" && s.delivered == 0 {
+			fmt.Fprintln(cmd.ErrOrStderr(),
+				wrkpEmptyWindowNotice(cmd.Context(), tr, s.query.project, s.path, since, false))
+		}
+		if mode == "human" {
+			slices.Reverse(heldEntries)
+		}
+		return renderWrkpEntries(cmd, heldEntries, mode, s.styled)
+	}
+}
+
+// wrkpFollowRun is one follow process over one or more streams. However many
+// projects it follows, it holds ONE commit wait: a wake reads every project
+// and drains each until its cursor stops moving, then parks again.
+type wrkpFollowRun struct {
+	cmd                 *cobra.Command
+	tr                  Transport
+	remote              bool
+	mode, since         string
+	beforeTime          time.Time
+	timeout, stallAfter time.Duration
+	streams             []*wrkpStream
+	multi               bool
+}
+
+func (r *wrkpFollowRun) run() error {
+	cmd, tr := r.cmd, r.tr
+	ctx := cmd.Context()
+	followStarted := time.Now()
+	lastEntry := followStarted
+	maxWait := 25 * time.Second
+	// Local pipe calls cannot cancel a parked request, and separate
+	// local writers do not share the process commit signal. Keep
+	// these waits short to preserve local cancellation and clocks.
+	if !r.remote {
+		maxWait = monitorPollInterval
+	}
+	// Take the ephemeral wake token before the first authoritative read.
+	// The timeline cursors alone remain the replay positions.
+	token, err := workrpcclient.WaitForCommit(ctx, tr, "", wrkpFollowDelay(r.beforeTime, min(maxWait, clockSlack(followStarted, lastEntry, r.timeout, r.stallAfter))))
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return wrkpRPCError(err)
+	}
+	pending := r.streams
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		readStarted := time.Now()
+		// Read every pending stream before writing any of them, so a project
+		// the server refuses fails the command before another's entry is out.
+		views := make([]wrkpLogView, len(pending))
+		for i, s := range pending {
+			s.sentCursor = s.cursor
+			if views[i], err = s.fetch(ctx, tr); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return err
+			}
+		}
+		for i, s := range pending {
+			view := views[i]
+			if r.mode == "human" && s.styled == nil {
+				s.styled = style.NewTimelineWriter(cmd.OutOrStdout(), view.Container.Path)
+			}
+			s.path = view.Container.Path
+			if err := s.render(cmd, view.Entries, r.mode); err != nil {
+				return err
+			}
+			s.delivered += len(view.Entries)
+			if len(view.Entries) > 0 {
+				lastEntry = time.Now()
+			}
+			// The fingerprint is advisory and reads the whole container
+			// tree, so a tail refreshes it on a slow clock, not per poll:
+			// per-poll, a dozen idle followers drove wrkqd to ~5 cores.
+			if s.containerSet == "" || time.Since(s.fingerprintAt) >= wrkpFingerprintInterval {
+				s.fingerprintAt = time.Now()
+				currentSet, err := wrkpSubtreeFingerprint(ctx, tr, view.Container.UUID)
+				if err != nil {
+					if ctx.Err() != nil {
+						return nil
+					}
+					return s.named(err)
+				}
+				if s.containerSet != "" && currentSet != s.containerSet {
+					if s.tagged {
+						fmt.Fprintf(cmd.ErrOrStderr(), "wrkp: project %s container set changed; restart it alone with --since to replay moved history\n", s.path)
+					} else {
+						fmt.Fprintln(cmd.ErrOrStderr(), "wrkp: project container set changed; restart with --since to replay moved history")
+					}
+				}
+				s.containerSet = currentSet
+			}
+			s.cursor = view.NextCursor
+			// A tail with an empty window prints nothing and waits, which on
+			// a terminal is indistinguishable from a hang -- that is exactly
+			// how `--since 3h --follow` was read as a stall. Say it once, and
+			// only when the read is demonstrably CAUGHT UP: a tail cursor
+			// moves whenever the scan advances, so two identical cursors mean
+			// the backlog is drained rather than that a sparse page of
+			// excluded rows is still being walked.
+			if r.mode == "human" && s.delivered == 0 && !s.idleNoticed &&
+				s.cursor != "" && s.cursor == s.previousCursor {
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					wrkpEmptyWindowNotice(ctx, tr, s.query.project, s.path, r.since, true))
+				s.idleNoticed = true
+			}
+			s.previousCursor = s.cursor
+		}
+		// Once the window closes, drain every held page before stopping.
+		// The bounded server tail drops its cursor only after exhaustion.
+		if !r.beforeTime.IsZero() && !readStarted.Before(r.beforeTime) {
+			if !slices.ContainsFunc(pending, func(s *wrkpStream) bool { return s.cursor != "" }) {
+				return nil
+			}
+			continue
+		}
+		if r.timeout > 0 && time.Since(followStarted) >= r.timeout {
+			return r.terminal(monitorResultTimeout)
+		}
+		if r.stallAfter > 0 && time.Since(lastEntry) >= r.stallAfter {
+			return r.terminal(monitorResultStall)
+		}
+		// Drain all advancing pages (including filtered empty pages)
+		// before parking; a commit token never replaces a view cursor.
+		advancing := []*wrkpStream{}
+		for _, s := range pending {
+			if s.cursor != "" && s.cursor != s.sentCursor {
+				advancing = append(advancing, s)
+			}
+		}
+		if len(advancing) > 0 {
+			pending = advancing
+			continue
+		}
+		// Against a remote wrkqd the commit token is authoritative: an
+		// unchanged token (timeout, capacity refusal) means nothing was
+		// committed in wrkqd, so park again instead of re-reading the
+		// timeline. Writes outside wrkqd (wrkqadm, migrations, restores)
+		// never move the token, so a read is still forced every
+		// wrkpFollowForcedReadInterval (ADR 0004 unsupported list).
+		// Locally, other processes' writes never move the token, so
+		// every wait return still reads.
+		for {
+			prev := token
+			slack := wrkpFollowDelay(r.beforeTime, min(maxWait, clockSlack(followStarted, lastEntry, r.timeout, r.stallAfter)))
+			if forcedIn := wrkpFollowForcedReadInterval - time.Since(readStarted); forcedIn < slack {
+				slack = forcedIn
+			}
+			token, err = workrpcclient.WaitForCommit(ctx, tr, token, slack)
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				return wrkpRPCError(err)
+			}
+			if !r.remote || token == "" || token != prev || slack <= 0 {
+				break
+			}
+			if r.timeout > 0 && time.Since(followStarted) >= r.timeout {
+				return r.terminal(monitorResultTimeout)
+			}
+			if r.stallAfter > 0 && time.Since(lastEntry) >= r.stallAfter {
+				return r.terminal(monitorResultStall)
+			}
+			if ctx.Err() != nil {
+				return nil
+			}
+		}
+		// A wake reads every project, whichever one committed.
+		pending = r.streams
+	}
+}
+
+// terminal writes the record that ends a follow on its clock: the one cursor
+// for a single project, or every project's cursor in a multi-project follow.
+func (r *wrkpFollowRun) terminal(result monitorTerminalResult) error {
+	if !r.multi {
+		return writeWrkpTerminal(r.cmd, r.mode, result, r.streams[0].cursor)
+	}
+	cursors := make(map[string]string, len(r.streams))
+	for _, s := range r.streams {
+		cursors[s.arg] = s.cursor
+	}
+	line := wrkpTerminalLine{monitorTerminalLine: buildMonitorTerminalLine(result, nil), Cursors: cursors}
+	line.Type = "wrkp.log.terminal"
+	return json.NewEncoder(r.cmd.OutOrStdout()).Encode(line)
+}
+
+// runWrkpMultiFollow is `wrkp log --follow a b ... --ndjson`: client-side
+// fan-in over the per-project timeline (the server's subtree timeline is per
+// project by invariant), one stream per project, one commit wait for all.
+func runWrkpMultiFollow(cmd *cobra.Command, projects, afters []string, typeList string, allTypes, follow, ndjson, pretty bool, timeout, stallAfter time.Duration) error {
+	usage := func(format string, args ...any) error {
+		return &clifunnel.UsageError{Err: fmt.Errorf(format, args...), Cmd: cmd}
+	}
+	explicitNDJSON := ndjson
+	if outF := cmd.Flag("output"); outF != nil && outF.Changed && outF.Value.String() == "ndjson" {
+		explicitNDJSON = true
+	}
+	if !follow || !explicitNDJSON || pretty || resolveWrkpMode(cmd, pretty, ndjson) != "ndjson" {
+		return usage("more than one project is accepted only with --follow and --ndjson")
+	}
+	for _, name := range []string{"task", "before", "limit", "since"} {
+		if cmd.Flags().Changed(name) {
+			return usage("--%s reads one project; it cannot be used with several", name)
+		}
+	}
+	streams := make([]*wrkpStream, 0, len(projects))
+	byArg := map[string]*wrkpStream{}
+	for _, project := range projects {
+		if byArg[project] != nil {
+			return usage("project %s is named twice", project)
+		}
+		s := &wrkpStream{arg: project, tagged: true, query: wrkpLogQuery{
+			project: project, typeList: typeList, allTypes: allTypes, follow: true, deliveredLimit: wrkpDefaultLimit,
+		}}
+		byArg[project] = s
+		streams = append(streams, s)
+	}
+	seen := map[string]bool{}
+	for _, raw := range afters {
+		project, cursor, ok := strings.Cut(raw, "=")
+		if !ok || project == "" || cursor == "" {
+			return usage("--after %q: with several projects each --after is <project>=<cursor>", raw)
+		}
+		s := byArg[project]
+		if s == nil {
+			return usage("--after names %s, which is not one of the followed projects", project)
+		}
+		if seen[project] {
+			return usage("--after is given twice for %s", project)
+		}
+		seen[project] = true
+		s.cursor = cursor
+	}
+	tr, _, cfg, closeFn, err := openMirrorConfig(cmd)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	return (&wrkpFollowRun{
+		cmd: cmd, tr: tr, remote: cfg.RemoteEndpoint != "", mode: "ndjson",
+		timeout: timeout, stallAfter: stallAfter, streams: streams, multi: true,
+	}).run()
 }
 
 // wrkpLogQuery is the fixed part of one `wrkp log` read; pageParams turns it
@@ -370,6 +573,9 @@ func wrkpFollowClocks(cmd *cobra.Command, follow bool, timeoutStr, stallAfterStr
 type wrkpTerminalLine struct {
 	monitorTerminalLine
 	Cursor string `json:"cursor,omitempty"`
+	// Cursors replaces Cursor in a multi-project follow, keyed by the
+	// project as given, so each value resumes as --after <project>=<cursor>.
+	Cursors map[string]string `json:"cursors,omitempty"`
 }
 
 // writeWrkpTerminal ends a follow that ran out its clock: one terminal record on
