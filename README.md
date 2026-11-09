@@ -20,7 +20,7 @@ guide.
 | `wrkc` | Collaboration: rooms, addressed envelopes, reply obligations, inbox |
 | `wrkp` | Project events: post foreign facts (git, CI, `just` runs) and read the merged project timeline |
 | `wrkf` | Workflow engine: templates, instances, evidence, obligations, effects and transitions layered on wrkq tasks |
-| `wrkqd` | Daemon: token-authenticated HTTP + JSON-RPC API over the database |
+| `wrkqd` | Daemon: token-authenticated JSON-RPC over HTTP (`/v1/rpc`, plus `/v1/health`) over the database |
 | `wrkqadm` | Administration: init, migrations, snapshots, state export/import, patches, doctor. Not for agents |
 
 The repository also ships `@wrkq/client` (`packages/client`), a TypeScript

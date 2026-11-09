@@ -12,12 +12,14 @@ Guide for agents working on **wrkq** — a filesystem-flavored CLI for projects,
 
 ## Binaries
 
-Four binaries (built by `just build`):
+Six binaries (built by `just build`):
 
 - **`wrkq`** — agent + human collab surface (task/container/comment CRUD, content editing, history).
-- **`wrkqadm`** — admin surface (DB lifecycle, actor management, bundle apply, health).
-- **`wrkqd`** — local daemon (TCP/unix socket, token auth) for shared-DB access.
+- **`wrkc`** — rooms, addressed envelopes, reply obligations, inbox.
+- **`wrkp`** — project events (foreign facts and the merged project timeline).
 - **`wrkf`** — workflow CLI (workflow engine surface).
+- **`wrkqd`** — daemon (TCP/unix socket, token auth) serving `/v1/rpc` and `/v1/health` for shared-DB access.
+- **`wrkqadm`** — admin surface (DB lifecycle, actor management, bundle apply, health).
 
 The wrkq/wrkqadm split exists so agents get a focused, safe API while admins retain DB lifecycle control.
 

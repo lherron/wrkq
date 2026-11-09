@@ -86,7 +86,7 @@ func TestFindEntryPoints_State(t *testing.T) {
 }
 
 // TestExplainArea_Domain asserts that ExplainArea(root, "internal/domain") returns
-// a non-empty Role, at least one dependent package (e.g. internal/wrkqd imports domain),
+// a non-empty Role, at least one dependent package (e.g. internal/wrkqapi imports domain),
 // and key exported symbols present (ParseState, State).
 func TestExplainArea_Domain(t *testing.T) {
 	root := repoRoot(t)
@@ -101,19 +101,19 @@ func TestExplainArea_Domain(t *testing.T) {
 
 	// Must have dependents (packages that import internal/domain).
 	if len(area.Dependents) == 0 {
-		t.Error("ExplainArea returned no Dependents for internal/domain; expected at least internal/wrkqd")
+		t.Error("ExplainArea returned no Dependents for internal/domain; expected at least internal/wrkqapi")
 	}
 
-	// internal/wrkqd is a well-known dependent.
-	foundCLI := false
+	// internal/wrkqapi is a well-known dependent.
+	foundAPI := false
 	for _, dep := range area.Dependents {
-		if strings.Contains(dep, "internal/wrkqd") {
-			foundCLI = true
+		if strings.HasSuffix(dep, "internal/wrkqapi") {
+			foundAPI = true
 			break
 		}
 	}
-	if !foundCLI {
-		t.Errorf("ExplainArea Dependents does not contain internal/wrkqd; got: %v", area.Dependents)
+	if !foundAPI {
+		t.Errorf("ExplainArea Dependents does not contain internal/wrkqapi; got: %v", area.Dependents)
 	}
 
 	// Key exported symbols must be present.

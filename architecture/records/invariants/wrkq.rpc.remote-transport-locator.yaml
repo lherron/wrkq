@@ -13,10 +13,11 @@ predicate: >
   `db.Open`.
 
   A remote endpoint is a transport to the SAME workrpc method catalog and DTO/error
-  contract exposed by `wrkq rpc --stdio`; it is not the legacy wrkqd REST surface,
-  not a sync peer, and not a second semantic API. Remote clients must complete
-  transport authentication plus `rpc.initialize` before business calls and verify
-  protocol version, protocol schema hash, and required method/capability surface.
+  contract exposed by `wrkq rpc --stdio`; it is not a sync peer and not a second
+  semantic API; wrkqd serves exactly two HTTP routes, `/v1/rpc` and `/v1/health`.
+  Remote clients must complete transport authentication plus `rpc.initialize`
+  before business calls and verify protocol version, protocol schema hash, and
+  required method/capability surface.
   Migration readiness is server-owned: a production workrpc entrypoint must refuse
   exposure while any migration embedded in its running binary is pending. A
   successful authenticated `rpc.initialize` may rely on that server-side readiness

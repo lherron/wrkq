@@ -159,7 +159,7 @@ provenance.
 The physical `actors` table has **not** been dropped or compacted. It remains an
 intentional compatibility surface for:
 
-- `wrkqadm actors` and `/v1/actors/*` legacy admin/display-cache operations;
+- `wrkqadm actors` legacy admin/display-cache operations;
 - `A-*` / actor UUID resource selection in compatibility history reads;
 - actor UUID/slug/role display caches on older tasks, comments, relations, and
   `event_log` projections; and
@@ -698,24 +698,11 @@ Current route surface:
 
 | Route | Purpose |
 | --- | --- |
-| `/v1/health` | Health check. |
-| `/v1/containers/tree` | Container/task tree. |
-| `/v1/tasks/list` | List tasks. |
-| `/v1/tasks/get` | Get task. |
-| `/v1/tasks/create` | Create task. |
-| `/v1/tasks/update` | Update task. |
-| `/v1/tasks/archive` | Archive/delete task. |
-| `/v1/tasks/restore` | Restore task. |
-| `/v1/comments/list` | List comments. |
-| `/v1/comments/create` | Create comment. |
-| `/v1/relations/list` | List relations. |
-| `/v1/relations/create` | Create relation. |
-| `/v1/relations/delete` | Delete relation. |
-| `/v1/actors/list` | List legacy actor display-cache rows. |
-| `/v1/actors/create` | Explicit legacy/admin actor-cache creation; not required for writes. |
-| `/v1/actors/update` | Update legacy actor display-cache rows. |
+| `/v1/health` | Health check (GET). Reports the authenticated nodeId when per-node tokens are configured. |
+| `/v1/rpc` | The workrpc JSON-RPC 2.0 endpoint (POST): the same method catalog and protocol schema hash as `wrkq rpc --stdio`. |
 
-There are no handoff HTTP routes in the current daemon.
+These are the only routes. Every read and write goes through `/v1/rpc`; any
+other path answers 404. There are no REST resource routes.
 
 ## 10. Persistence and Concurrency
 

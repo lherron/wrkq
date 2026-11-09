@@ -246,7 +246,7 @@ wrkq agent-context --scope agent:cody:project:wrkq
 
 ## Daemon deployment (`wrkqd`)
 
-`wrkqd` serves token-auth HTTP (REST `/v1/*` + JSON-RPC `/v1/rpc`) over a
+`wrkqd` serves token-auth HTTP (JSON-RPC `/v1/rpc` plus `/v1/health`) over a
 configured DB, on TCP or a Unix socket.
 
 ```bash
@@ -352,27 +352,21 @@ there and compare `commit` to max3's.
 
 ### HTTP route surface
 
-`wrkqd` exposes a deliberately narrower REST surface than the full JSON-RPC
-method catalog — no handoff HTTP routes exist, for example:
+`wrkqd` serves exactly two routes; any other path answers 404:
 
 ```text
-/v1/health
-/v1/containers/tree
-/v1/tasks/{list,get,create,update,archive,restore}
-/v1/comments/{list,create}
-/v1/relations/{list,create,delete}
+GET  /v1/health   health check; reports the authenticated nodeId under per-node tokens
+POST /v1/rpc      JSON-RPC 2.0, the full workrpc method catalog
 ```
 
-The full JSON-RPC method catalog (`wrkq.task.*`, `wrkq.comment.*`,
+The whole method catalog (`wrkq.task.*`, `wrkq.comment.*`,
 `wrkq.attachment.*`, `wrkq.relation.*`, `wrkq.container.*`, `wrkq.project.*`,
 `wrkq.promise.*`, `wrkq.handoff.*`, `wrkq.room.*`, `wrkq.envelope.*`,
 `wrkq.projectEvent.*`, `wrkq.webhook.*`, `wrkq.ext.*`, `wrkq.commit.wait`,
 `wrkq.search.listView`, `wrkq.index.*`, `wrkq.history.*`, `wrkq.monitor.*`,
-`wrkq.workflow.*`, and
-the `wrkf.*` workflow engine) is reachable only via `POST /v1/rpc`, not the
-narrower REST routes — this is why handoffs, rooms, search, and monitoring
-require an RPC-capable client (production `wrkq` CLI, `@wrkq/client`, or the
-MCP server) rather than raw REST calls.
+`wrkq.workflow.*`, and the `wrkf.*` workflow engine) is reachable only via
+`POST /v1/rpc`, so every client is RPC-capable: the production `wrkq` CLI,
+`@wrkq/client`, or the MCP server.
 
 ## Attachment storage
 
