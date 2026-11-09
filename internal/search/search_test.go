@@ -312,3 +312,45 @@ func setupSearchIndex(t *testing.T) *indexdb.DB {
 	t.Cleanup(func() { _ = idx.Close() })
 	return idx
 }
+
+// coldEmbedder indexes like HashEmbedder but never answers a query until the
+// caller gives up, the shape of a llama-server whose model pages went cold.
+type coldEmbedder struct{ embed.HashEmbedder }
+
+func (coldEmbedder) EmbedQuery(ctx context.Context, _ string) ([]float32, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A slow query embedding costs ranking quality, never the read: Search falls
+// back to lexical results instead of waiting on the embedder (EN-48379).
+func TestSearchFallsBackToLexicalWhenQueryEmbeddingStalls(t *testing.T) {
+	canonical, actorUUID, containerUUID := setupSearchDB(t)
+	s := store.New(canonical)
+	task, err := s.Tasks.Create(actorUUID, store.CreateParams{
+		Slug:        "cold-embedder-task",
+		Title:       "Cold embedder fallback",
+		Description: "Lexical match still answers.",
+		ProjectUUID: containerUUID,
+		State:       "open",
+		Priority:    2,
+		Kind:        "task",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	idx := setupSearchIndex(t)
+	emb := coldEmbedder{embed.HashEmbedder{Dims: 16}}
+	if err := indexer.New(canonical, idx, emb).Rebuild(context.Background()); err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+
+	// The caller's context never expires; only the query budget can end the wait.
+	resp, err := NewService(canonical, idx, emb).Search(context.Background(), Options{Query: "fallback", Limit: 10})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(resp.Results) != 1 || resp.Results[0].TaskUUID != task.UUID {
+		t.Fatalf("expected the lexical match %s, got %#v", task.UUID, resp.Results)
+	}
+}

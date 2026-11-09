@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -173,6 +174,10 @@ func withRequestLog(next http.Handler, listener string) http.Handler {
 				level = "error"
 			}
 			field.Code, field.Message = liftError(rec.body.Bytes())
+		case note.err != nil && errors.Is(r.Context().Err(), context.Canceled):
+			// The caller hung up first (T-12764); its abandoned wait is not a
+			// server failure, so it stays out of the -32603 census.
+			field.Message = "caller cancelled"
 		case note.err != nil:
 			level = "warn"
 			field.Code, field.Message = note.err.Code, truncate(note.err.Message)

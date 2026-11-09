@@ -232,8 +232,15 @@ func (s *Service) plainLexicalCandidates(query string, limit int) ([]rank.Candid
 	return out, nil
 }
 
+// denseQueryBudget bounds the query embedding. A cold embedder (model pages
+// evicted after hours idle) took 5.6 s on mini and pushed one search past the
+// 8 s read deadline (EN-48379); past the budget the search ranks lexically.
+const denseQueryBudget = 2 * time.Second
+
 func (s *Service) denseCandidates(ctx context.Context, query string, limit int) ([]rank.Candidate, error) {
-	vector, err := s.Embedder.EmbedQuery(ctx, query)
+	ectx, cancel := context.WithTimeout(ctx, denseQueryBudget)
+	defer cancel()
+	vector, err := s.Embedder.EmbedQuery(ectx, query)
 	if err != nil {
 		return nil, err
 	}

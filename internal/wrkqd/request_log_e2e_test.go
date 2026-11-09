@@ -179,6 +179,34 @@ func TestRequestLogE2E(t *testing.T) {
 	}
 	assertField(t, carrying[0].Data["suppressed"], float64(burst-1), "suppressed")
 
+	// 4. A wait the caller abandons is not a server failure (T-12764): it logs
+	// at info as a caller cancellation, never warn -32603.
+	raw, err := tr.Call(context.Background(), "wrkq.commit.wait", wrkqapi.CommitWaitParams{})
+	if err != nil {
+		t.Fatalf("commit.wait snapshot: %v", err)
+	}
+	var snap wrkqapi.WrkqCommitWait
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatal(err)
+	}
+	waitMs := 5000
+	cctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	_, err = tr.Call(cctx, "wrkq.commit.wait", wrkqapi.CommitWaitParams{Since: snap.Token, TimeoutMs: &waitMs})
+	cancel()
+	if err == nil {
+		t.Fatal("abandoned commit.wait returned without error")
+	}
+	waits := waitForLines(t, stdoutPath, func(l e2eLine) bool { return l.Data["op"] == "wrkq.commit.wait" }, 2)
+	if len(waits) != 2 {
+		t.Fatalf("want 2 commit.wait lines, got %d: %+v", len(waits), waits)
+	}
+	abandoned := waits[1]
+	assertField(t, abandoned.Level, "info", "level")
+	assertField(t, abandoned.Data["message"], "caller cancelled", "message")
+	if code, has := abandoned.Data["code"]; has {
+		t.Fatalf("abandoned wait carries code %v: %+v", code, abandoned)
+	}
+
 	// Request lines are the stdout half only; stderr keeps diagnostics.
 	if errLog, _ := os.ReadFile(stderrPath); strings.Contains(string(errLog), `"http.request"`) {
 		t.Fatalf("request lines leaked into stderr:\n%s", errLog)
