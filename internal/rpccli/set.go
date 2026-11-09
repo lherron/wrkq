@@ -3,7 +3,6 @@ package rpccli
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -298,7 +297,7 @@ func runSetProjectRoot(cmd *cobra.Command, args []string, rawRoot string, ifMatc
 	raw, err := tr.Call(cmd.Context(), "wrkq.project.setRoot", params)
 	if err != nil {
 		if re, ok := err.(*Error); ok {
-			return errors.New(re.Message)
+			return rpcRefusal(re)
 		}
 		return err
 	}
@@ -507,7 +506,7 @@ func runSet(cmd *cobra.Command, args []string, opts setRunOpts) error {
 				if re.DomainID == "WRKQ_CLAIM_SUPERSEDED" {
 					return formatClaimRPCError(re)
 				}
-				return errors.New(re.Message)
+				return rpcRefusal(re)
 			}
 			return err
 		}

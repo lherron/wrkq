@@ -227,7 +227,7 @@ func runCampaignContentMutation(
 	}
 	raw, err := tr.Call(cmd.Context(), method, params)
 	if err != nil {
-		return errors.New(rpcMessage(err))
+		return rpcRefusal(err)
 	}
 	if method == "wrkq.container.campaignConvert" {
 		var result campaignTransitionResult
@@ -279,7 +279,7 @@ func runCampaignTransitionMutation(
 		if method == "wrkq.container.campaignClose" {
 			return formatCampaignCloseError(err)
 		}
-		return errors.New(rpcMessage(err))
+		return rpcRefusal(err)
 	}
 	var result campaignTransitionResult
 	if err := json.Unmarshal(raw, &result); err != nil {
@@ -319,7 +319,7 @@ func newCampaignPortfolioCmd() *cobra.Command {
 			}
 			raw, err := tr.Call(cmd.Context(), "wrkq.container.campaignPortfolio", params)
 			if err != nil {
-				return errors.New(rpcMessage(err))
+				return rpcRefusal(err)
 			}
 			if jsonOutput(cmd) {
 				return writeTimelineJSON(cmd.OutOrStdout(), raw)
@@ -365,14 +365,14 @@ func renderCampaignTransition(cmd *cobra.Command, result campaignTransitionResul
 func formatCampaignCloseError(err error) error {
 	var rpcErr *Error
 	if !errors.As(err, &rpcErr) || rpcErr.DomainID != "WRKQ_WRONG_STATE" {
-		return errors.New(rpcMessage(err))
+		return rpcRefusal(err)
 	}
 	var data struct {
 		Stragglers     []campaignMemberDiagnostic `json:"stragglers"`
 		MissingOutcome []campaignMemberDiagnostic `json:"missingOutcomes"`
 	}
 	if json.Unmarshal(rpcErr.Data, &data) != nil || len(data.Stragglers) == 0 {
-		return errors.New(rpcMessage(err))
+		return rpcRefusal(err)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "campaign close blocked by %d open member(s):", len(data.Stragglers))
@@ -386,5 +386,5 @@ func formatCampaignCloseError(err error) error {
 	for _, member := range data.MissingOutcome {
 		fmt.Fprintf(&b, "\n  outcome missing (non-blocking): %s", member.Path)
 	}
-	return errors.New(b.String())
+	return &refusal{cause: rpcErr, message: b.String()}
 }

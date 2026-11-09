@@ -139,7 +139,7 @@ func runContainerArchive(cmd *cobra.Command, args []string, ifMatch int64, resto
 		}
 		raw, callErr := tr.Call(cmd.Context(), method, params)
 		if callErr != nil {
-			return errors.New(rpcMessage(callErr))
+			return rpcRefusal(callErr)
 		}
 
 		result := map[string]interface{}{"path": selector}
@@ -175,7 +175,7 @@ func runContainerArchive(cmd *cobra.Command, args []string, ifMatch int64, resto
 func loadContainerArchivePreflight(ctx context.Context, tr Transport, selector string) (containerArchivePreflight, error) {
 	raw, err := tr.Call(ctx, "wrkq.container.show", map[string]string{"path": selector})
 	if err != nil {
-		return containerArchivePreflight{}, errors.New(rpcMessage(err))
+		return containerArchivePreflight{}, rpcRefusal(err)
 	}
 	var container struct {
 		UUID string `json:"uuid"`
@@ -186,7 +186,7 @@ func loadContainerArchivePreflight(ctx context.Context, tr Transport, selector s
 
 	raw, err = tr.Call(ctx, "wrkq.container.taskCounts", map[string]any{"includeArchived": true})
 	if err != nil {
-		return containerArchivePreflight{}, errors.New(rpcMessage(err))
+		return containerArchivePreflight{}, rpcRefusal(err)
 	}
 	var counts struct {
 		Items []struct {
@@ -461,7 +461,7 @@ func rmdirResolve(ctx context.Context, tr Transport, path string) (id, resolvedP
 		if isNotFound(serr) {
 			return "", "", "", clifunnel.NotFound("container", path)
 		}
-		return "", "", "", errors.New(rpcMessage(serr))
+		return "", "", "", rpcRefusal(serr)
 	}
 	var c struct {
 		ID   string `json:"id"`
@@ -477,7 +477,7 @@ func rmdirResolve(ctx context.Context, tr Transport, path string) (id, resolvedP
 func rmdirPreflight(ctx context.Context, tr Transport, path string) (rmdirImpact, error) {
 	raw, err := tr.Call(ctx, "wrkq.container.deleteRecursive", map[string]any{"path": path, "dryRun": true})
 	if err != nil {
-		return rmdirImpact{}, errors.New(rpcMessage(err))
+		return rmdirImpact{}, rpcRefusal(err)
 	}
 	var impact rmdirImpact
 	if err := json.Unmarshal(raw, &impact); err != nil {
@@ -537,7 +537,7 @@ func rmdirForcePath(ctx context.Context, cmd *cobra.Command, tr Transport, actor
 		commitParams["actor"] = actor
 	}
 	if _, cerr := tr.Call(ctx, "wrkq.container.deleteRecursive", commitParams); cerr != nil {
-		return "", errors.New(rpcMessage(cerr))
+		return "", rpcRefusal(cerr)
 	}
 	return impact.Container.ID, nil
 }

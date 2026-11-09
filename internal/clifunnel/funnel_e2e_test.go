@@ -336,3 +336,75 @@ func buildBinaries(t *testing.T, names ...string) map[string]string {
 	}
 	return out
 }
+
+// TestCLITypedRefusalsE2E pins T-12766: a server refusal keeps its typed code
+// (and its data) through the funnel instead of flattening to WRKQ_ERROR with the
+// code folded into the message. Exit codes and text first lines are unchanged;
+// text mode adds the "code:" line.
+func TestCLITypedRefusalsE2E(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds wrkq and wrkqadm")
+	}
+	bins := buildBinaries(t, "wrkq", "wrkqadm")
+	scratch := t.TempDir()
+	baseEnv := []string{
+		"PATH=" + filepath.Dir(bins["wrkq"]) + ":/usr/bin:/bin",
+		"HOME=" + scratch,
+		"TMPDIR=" + scratch,
+		"WRKQ_DB=" + filepath.Join(scratch, "wrkq.db"),
+		"WRKQ_PRINCIPAL_REF=agent:clifunnel-e2e",
+	}
+	mustRun(t, bins, baseEnv, scratch, "wrkqadm", "init")
+	mustRun(t, bins, baseEnv, scratch, "wrkq", "touch", "inbox/task", "-t", "task") // T-00001
+	mustRun(t, bins, baseEnv, scratch, "wrkq", "mkdir", "inbox/camp")
+	mustRun(t, bins, baseEnv, scratch, "wrkq", "touch", "inbox/camp/open-member", "-t", "m") // T-00002
+	mustRun(t, bins, baseEnv, scratch, "wrkq", "campaign", "convert", "inbox/camp")
+
+	cases := []cliCase{
+		// claim.go's default branch: a local store has no node identity, so the
+		// release refusal is typed WRKQ_NODE_IDENTITY_REQUIRED.
+		{name: "release refusal keeps its code", bin: "wrkq",
+			args: []string{"release", "T-00001", "--scope", "agent:clifunnel-e2e:project:inbox:task:T-00001", "--claim-token", "ct-x", "--claim-generation", "1", "--json"},
+			exit: 1, stderr: []string{`"code": "WRKQ_NODE_IDENTITY_REQUIRED"`, `"message": "node identity is required for task claims"`},
+			notStderr: []string{"WRKQ_ERROR", `"message": "WRKQ_`}},
+		{name: "campaign close keeps WRONG_STATE and its stragglers", bin: "wrkq",
+			args: []string{"campaign", "close", "inbox/camp", "--state", "completed", "--json"},
+			exit: 1, stderr: []string{`"code": "WRKQ_WRONG_STATE"`, `"message": "campaign close blocked by 1 open member(s):"`,
+				`"hint": "inbox/camp/open-member (open, resident)`, `"data": {`, `"stragglers": [`, `"path": "inbox/camp/open-member"`},
+			notStderr: []string{"WRKQ_ERROR"}},
+		{name: "set --meta reserved key keeps its code", bin: "wrkq",
+			args: []string{"set", "T-00001", "--meta", `{"acp":1}`, "--json"},
+			exit: 1, stderr: []string{`"code": "WRKQ_META_KEY_RESERVED"`, `"message": "meta_key_reserved: meta.acp is not wrkq-owned`},
+			notStderr: []string{"WRKQ_ERROR"}},
+		{name: "set --if-match stale keeps WRKQ_CONFLICT", bin: "wrkq",
+			args: []string{"set", "T-00001", "--title", "stale", "--if-match", "99", "--json"},
+			exit: 1, stderr: []string{`"code": "WRKQ_CONFLICT"`, `"message": "task etag precondition failed"`},
+			notStderr: []string{"WRKQ_ERROR"}},
+		{name: "text mode keeps the first line and adds the code line", bin: "wrkq",
+			args: []string{"set", "T-00001", "--title", "stale", "--if-match", "99"},
+			exit: 1, stderr: []string{"Error: task etag precondition failed\ncode: WRKQ_CONFLICT\n"}, stderrLines: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, stderr, code := runCase(t, bins, baseEnv, scratch, tc)
+			if code != tc.exit {
+				t.Errorf("exit = %d, want %d\nstdout: %s\nstderr: %s", code, tc.exit, stdout, stderr)
+			}
+			for _, want := range tc.stderr {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr missing %q\nstderr: %s", want, stderr)
+				}
+			}
+			for _, bad := range tc.notStderr {
+				if strings.Contains(stderr, bad) {
+					t.Errorf("stderr contains %q\nstderr: %s", bad, stderr)
+				}
+			}
+			if tc.stderrLines > 0 {
+				if n := len(strings.Split(strings.TrimSpace(stderr), "\n")); n != tc.stderrLines {
+					t.Errorf("stderr has %d lines, want %d\nstderr: %s", n, tc.stderrLines, stderr)
+				}
+			}
+		})
+	}
+}

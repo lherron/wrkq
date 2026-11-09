@@ -2,7 +2,6 @@ package rpccli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/lherron/wrkq/internal/clifunnel"
@@ -186,12 +185,12 @@ func runRestore(cmd *cobra.Command, arg string, f restoreFlags) error {
 				return nil
 			}
 			if !isNotFound(cerr) {
-				return errors.New(rpcMessage(cerr))
+				return rpcRefusal(cerr)
 			}
 			// Neither task nor container: legacy emits "not found: <arg>".
 			return clifunnel.NotFound("", arg)
 		}
-		return errors.New(rpcMessage(rerr))
+		return rpcRefusal(rerr)
 	}
 
 	// Use the RETURNED DTO for output (id/uuid + the canonical applied state); no

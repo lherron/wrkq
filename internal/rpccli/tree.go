@@ -3,7 +3,6 @@ package rpccli
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -72,7 +71,7 @@ func newTreeCmd() *cobra.Command {
 			raw, err := tr.Call(cmd.Context(), "wrkq.task.treeView", params)
 			if err != nil {
 				if re, ok := err.(*Error); ok {
-					return errors.New(re.Message)
+					return rpcRefusal(re)
 				}
 				return err
 			}

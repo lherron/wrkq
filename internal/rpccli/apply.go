@@ -56,7 +56,7 @@ func runApply(cmd *cobra.Command, args []string, format string, withMetadata, dr
 			// Legacy wraps the resolver error as "failed to resolve task: <err>".
 			// The RPC NOT_FOUND message ("task not found: <ref>") byte-matches the
 			// legacy selectors.ResolveTask text, so the wrapped string is identical.
-			return fmt.Errorf("failed to resolve task: %s", re.Message)
+			return rewordRefusal(re, "failed to resolve task: %s", re.Message)
 		}
 		return fmt.Errorf("failed to resolve task: %w", err)
 	}
@@ -249,7 +249,7 @@ func execApply(cmd *cobra.Command, tr Transport, actor, taskUUID string, updates
 	}
 	if _, err := tr.Call(cmd.Context(), "wrkq.task.update", params); err != nil {
 		if re, ok := err.(*Error); ok {
-			return fmt.Errorf("failed to update task: %s", re.Message)
+			return rewordRefusal(re, "failed to update task: %s", re.Message)
 		}
 		return fmt.Errorf("failed to update task: %w", err)
 	}

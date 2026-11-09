@@ -97,7 +97,7 @@ func runRenameContainer(cmd *cobra.Command, ref, newSlug string, f renameContain
 		if isNotFound(serr) {
 			return clifunnel.NotFound("container", containerSelector)
 		}
-		return errors.New(rpcMessage(serr))
+		return rpcRefusal(serr)
 	}
 	var c struct {
 		UUID  string `json:"uuid"`

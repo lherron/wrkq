@@ -2,7 +2,6 @@ package rpccli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -96,7 +95,7 @@ func newCommentLsCmd() *cobra.Command {
 						return renderCommentLs(cmd, mode, stable, items)
 					}
 					if containerRPCError, ok := containerErr.(*Error); ok {
-						return errors.New(containerRPCError.Message)
+						return rpcRefusal(containerRPCError)
 					}
 					return containerErr
 				}
@@ -115,7 +114,7 @@ func newCommentLsCmd() *cobra.Command {
 					}
 					// Legacy surfaces the raw error (e.g. malformed cursor) without
 					// a domain-code prefix.
-					return errors.New(re.Message)
+					return rpcRefusal(re)
 				}
 				return err
 			}
@@ -403,7 +402,7 @@ func newCommentCatCmd() *cobra.Command {
 						case "WRKQ_VALIDATION":
 							return fmt.Errorf("invalid comment reference: %s (expected friendly ID like C-00001 or UUID)", orig)
 						}
-						return errors.New(re.Message)
+						return rpcRefusal(re)
 					}
 					return err
 				}
@@ -564,7 +563,7 @@ func runCommentAdd(cmd *cobra.Command, args []string, message, kind, meta string
 	}
 	if err != nil {
 		if re, ok := err.(*Error); ok {
-			return errors.New(re.Message)
+			return rpcRefusal(re)
 		}
 		return err
 	}

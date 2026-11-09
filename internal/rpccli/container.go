@@ -3,7 +3,6 @@ package rpccli
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -209,7 +208,7 @@ func runContainerSet(cmd *cobra.Command, args []string, opts containerSetOptions
 	}
 	raw, err := tr.Call(cmd.Context(), "wrkq.container.webhookSet", params)
 	if err != nil {
-		return errors.New(rpcMessage(err))
+		return rpcRefusal(err)
 	}
 	return renderContainerSetResult(cmd, raw, false)
 }
@@ -229,7 +228,7 @@ func runContainerSetRPC(cmd *cobra.Command, params map[string]any, all bool) err
 	}
 	raw, err := tr.Call(cmd.Context(), "wrkq.container.webhookSet", params)
 	if err != nil {
-		return errors.New(rpcMessage(err))
+		return rpcRefusal(err)
 	}
 	return renderContainerSetResult(cmd, raw, all)
 }

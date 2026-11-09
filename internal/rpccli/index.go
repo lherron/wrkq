@@ -162,7 +162,7 @@ func indexCall(cmd *cobra.Command, tr Transport, method string, params map[strin
 	raw, err := tr.Call(cmd.Context(), method, params)
 	if err != nil {
 		if re, ok := err.(*Error); ok {
-			return nil, errors.New(re.Message)
+			return nil, rpcRefusal(re)
 		}
 		return nil, err
 	}

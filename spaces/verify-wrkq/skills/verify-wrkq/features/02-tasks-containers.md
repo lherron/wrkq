@@ -139,10 +139,10 @@ export WRKQ_PRINCIPAL_REF=agent:<you>
   the stdout JSON. It also writes the progress line `\rProcessing 1/1...\r\033[K` to stderr whenever stdout is a
   character device, which includes `>/dev/null` (a file gets none). Product task T-12318 (2026-11-02, T-12309
   `02-tasks-containers/drive.txt`; still at 401c525, 2026-11-09).
-- **Some `--json` refusals lose their typed code.** `wrkq set --meta '{"acp":1}' --json` prints
-  `{"code":"WRKQ_ERROR","message":"meta_key_reserved: ..."}` though the server sends `WRKQ_META_KEY_RESERVED`; so do
-  `release` and `campaign close` (features 4, 5). `ext`, `mkdir` and `promise` keep the code. Branch on the message or
-  use `wrkq rpc --stdio`. Product task T-12766 (2026-11-09, T-12762).
+- **`--json` refusals carry the server's typed code.** `wrkq set --meta '{"acp":1}' --json` is
+  `{"code":"WRKQ_META_KEY_RESERVED","message":"meta_key_reserved: ..."}` and a stale `set --if-match` is
+  `WRKQ_CONFLICT`; the server's error data rides in `error.data`. Branch on `error.code`, not the message. A
+  `WRKQ_ERROR` from a server refusal is a regression (T-12766, 2026-11-09).
 - Closing a task prints a hint about reconciling worktrees under `~/praesidium/under-construction/`. On a scratch
   it means nothing.
 - `wrkq tree` without a TTY prints JSON lines, and an empty project prints nothing at all.

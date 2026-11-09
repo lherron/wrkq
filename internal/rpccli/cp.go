@@ -3,7 +3,6 @@ package rpccli
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -379,7 +378,7 @@ func cpShowPlan(cmd *cobra.Command, tr Transport, sourceTasks []cpSrcTask, conta
 // resolver/conflict message legacy emits (legacy cp returns the raw error text).
 func cpStripErr(err error) error {
 	if re, ok := err.(*Error); ok {
-		return errors.New(re.Message)
+		return rpcRefusal(re)
 	}
 	return err
 }

@@ -2,7 +2,6 @@ package rpccli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -135,7 +134,7 @@ func newFindCmd() *cobra.Command {
 				if re, ok := err.(*Error); ok {
 					// Legacy surfaces store/cursor/validation/not-found errors raw,
 					// without a domain-code prefix.
-					return errors.New(re.Message)
+					return rpcRefusal(re)
 				}
 				return err
 			}

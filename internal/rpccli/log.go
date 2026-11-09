@@ -2,7 +2,6 @@ package rpccli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -88,7 +87,7 @@ func newLogCmd() *cobra.Command {
 					// Legacy surfaces resolve/query/cursor errors raw (the server
 					// already includes the "failed to ...:" wrapping), without a
 					// domain-code prefix.
-					return errors.New(re.Message)
+					return rpcRefusal(re)
 				}
 				return err
 			}

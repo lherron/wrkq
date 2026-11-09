@@ -3,7 +3,6 @@ package rpccli
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -73,7 +72,7 @@ func runWebhookList(cmd *cobra.Command) error {
 
 	raw, cerr := tr.Call(cmd.Context(), "wrkq.webhook.listView", map[string]any{})
 	if cerr != nil {
-		return errors.New(rpcMessage(cerr))
+		return rpcRefusal(cerr)
 	}
 	var rows []struct {
 		URL string `json:"url"`
@@ -118,7 +117,7 @@ func runWebhookMutate(cmd *cobra.Command, method, url, verb string) error {
 	if cerr != nil {
 		// RPC *Error.Error() prepends a domain code; strip it for legacy wording
 		// (e.g. "invalid webhook url: <url>").
-		return errors.New(rpcMessage(cerr))
+		return rpcRefusal(cerr)
 	}
 
 	// The server returns the legacy MUTATION RESULT in MAP-ALPHABETICAL key order

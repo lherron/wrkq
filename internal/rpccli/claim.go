@@ -189,13 +189,13 @@ func formatClaimRPCError(err error) error {
 	_ = json.Unmarshal(rpcErr.Data, &data)
 	switch rpcErr.DomainID {
 	case "WRKQ_ALREADY_CLAIMED":
-		return fmt.Errorf("already_claimed: holder=%s node=%s scope=%s generation=%d", data.ClaimedBy, data.ClaimedNode, data.ClaimedScope, data.ClaimGeneration)
+		return rewordRefusal(rpcErr, "already_claimed: holder=%s node=%s scope=%s generation=%d", data.ClaimedBy, data.ClaimedNode, data.ClaimedScope, data.ClaimGeneration)
 	case "WRKQ_CLAIM_SUPERSEDED":
-		return fmt.Errorf("claim_superseded: holder=%s node=%s scope=%s generation=%d", data.ClaimedBy, data.ClaimedNode, data.ClaimedScope, data.ClaimGeneration)
+		return rewordRefusal(rpcErr, "claim_superseded: holder=%s node=%s scope=%s generation=%d", data.ClaimedBy, data.ClaimedNode, data.ClaimedScope, data.ClaimGeneration)
 	case "WRKQ_WRONG_STATE":
-		return fmt.Errorf("wrong_state: %s", data.State)
+		return rewordRefusal(rpcErr, "wrong_state: %s", data.State)
 	default:
-		return errors.New(rpcErr.Error())
+		return rpcRefusal(rpcErr)
 	}
 }
 

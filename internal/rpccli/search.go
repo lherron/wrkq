@@ -3,7 +3,6 @@ package rpccli
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -89,7 +88,7 @@ func newSearchCmd() *cobra.Command {
 				if re, ok := err.(*Error); ok {
 					// Legacy surfaces search/index errors raw (the server message
 					// already carries the legacy text), without a domain-code prefix.
-					return errors.New(re.Message)
+					return rpcRefusal(re)
 				}
 				return err
 			}

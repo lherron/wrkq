@@ -657,7 +657,7 @@ func cursorForLastEvents(ctx context.Context, tr Transport, n int64) (int64, err
 // pass through unchanged.
 func monitorStripError(err error) error {
 	if re, ok := err.(*Error); ok {
-		return errors.New(re.Message)
+		return rpcRefusal(re)
 	}
 	return err
 }

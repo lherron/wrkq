@@ -3,7 +3,6 @@ package rpccli
 // handoff_get.go — `wrkq handoff get`: one handoff by ID or UUID.
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -46,7 +45,7 @@ func runHandoffGet(cmd *cobra.Command, arg string, asJSON, human bool) error {
 			message := fmt.Sprintf("handoff %s was not found; pass a handoff ID like H-00001 or a handoff UUID", idOrUUID)
 			return writeHandoffError(stderr, mode, 4, "handoff_not_found", idOrUUID, message, nil, handoffGetExample)
 		}
-		return writeHandoffError(stderr, mode, 1, "runtime_error", idOrUUID, errors.New(rpcMessage(rerr)).Error(), nil, "")
+		return writeHandoffError(stderr, mode, 1, "runtime_error", idOrUUID, rpcMessage(rerr), nil, "")
 	}
 	handoff, herr := handoffFromRPC(raw)
 	if herr != nil {

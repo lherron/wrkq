@@ -136,7 +136,7 @@ task.outcome events to the latest text and marks tasks whose outcome was amended
 			}
 			raw, err := tr.Call(cmd.Context(), "wrkq.container.timelineView", params)
 			if err != nil {
-				return fmt.Errorf("%s", rpcMessage(err))
+				return rpcRefusal(err)
 			}
 			if !isStdoutTTY(cmd.OutOrStdout()) {
 				return writeTimelineJSON(cmd.OutOrStdout(), raw)

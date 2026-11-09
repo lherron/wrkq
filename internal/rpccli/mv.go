@@ -61,7 +61,7 @@ func runMv(cmd *cobra.Command, args []string, flags mvFlags) error {
 	if len(sources) > 1 {
 		if _, err := tr.Call(cmd.Context(), "wrkq.container.show", map[string]string{"path": dst}); err != nil {
 			if re, ok := err.(*Error); ok {
-				return fmt.Errorf("destination must be an existing container for multiple sources: %s", re.Message)
+				return rewordRefusal(re, "destination must be an existing container for multiple sources: %s", re.Message)
 			}
 			return fmt.Errorf("destination must be an existing container for multiple sources: %w", err)
 		}
@@ -154,7 +154,7 @@ func runMvTask(cmd *cobra.Command, tr Transport, src, dst, actor string, flags m
 	}
 	if _, err := tr.Call(cmd.Context(), "wrkq.task.move", params); err != nil {
 		if re, ok := err.(*Error); ok {
-			return fmt.Errorf("%s", re.Message)
+			return rpcRefusal(re)
 		}
 		return err
 	}
@@ -201,7 +201,7 @@ func runMvContainer(cmd *cobra.Command, tr Transport, src, dst, actor string, fl
 	}
 	if _, err := tr.Call(cmd.Context(), "wrkq.container.move", params); err != nil {
 		if re, ok := err.(*Error); ok {
-			return fmt.Errorf("%s", re.Message)
+			return rpcRefusal(re)
 		}
 		return err
 	}

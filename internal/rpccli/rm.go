@@ -306,7 +306,7 @@ func resolveRmTarget(ctx context.Context, tr Transport, ref string) (rmTarget, b
 		return rmTarget{Type: "task", UUID: t.UUID, ID: t.ID, Slug: t.Slug, Title: t.Title, State: t.State, Prio: t.Priority}, true, nil
 	}
 	if !isNotFound(err) {
-		return rmTarget{}, false, errors.New(rpcMessage(err))
+		return rmTarget{}, false, rpcRefusal(err)
 	}
 
 	cshow, cerr := tr.Call(ctx, "wrkq.container.show", map[string]string{"path": ref})
@@ -324,7 +324,7 @@ func resolveRmTarget(ctx context.Context, tr Transport, ref string) (rmTarget, b
 		return rmTarget{Type: "container", UUID: c.UUID, ID: c.ID, Slug: c.Slug, Title: c.Title, Kind: c.Kind}, true, nil
 	}
 	if !isNotFound(cerr) {
-		return rmTarget{}, false, errors.New(rpcMessage(cerr))
+		return rmTarget{}, false, rpcRefusal(cerr)
 	}
 	return resolveRmPromise(ctx, tr, ref)
 }
@@ -384,7 +384,7 @@ func removeTarget(ctx context.Context, tr Transport, actor string, tgt rmTarget,
 			if purge && strings.Contains(rpcMessage(err), "container is not empty") {
 				return nil, nil
 			}
-			return nil, errors.New(rpcMessage(err))
+			return nil, rpcRefusal(err)
 		}
 		return res, nil
 	}
@@ -405,7 +405,7 @@ func removeTarget(ctx context.Context, tr Transport, actor string, tgt rmTarget,
 		params["actor"] = actor
 	}
 	if _, err := tr.Call(ctx, "wrkq.task.delete", params); err != nil {
-		return nil, errors.New(rpcMessage(err))
+		return nil, rpcRefusal(err)
 	}
 	return res, nil
 }
@@ -424,7 +424,7 @@ func taskAttachmentStats(ctx context.Context, tr Transport, taskUUID string) (in
 		}
 		raw, err := tr.Call(ctx, "wrkq.attachment.list", params)
 		if err != nil {
-			return 0, 0, errors.New(rpcMessage(err))
+			return 0, 0, rpcRefusal(err)
 		}
 		var page struct {
 			Items []struct {

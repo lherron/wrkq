@@ -64,9 +64,9 @@ Run `eval "$(wv env <name>)"`, then create a container in the scratch project to
 - **A completed close needs every member terminal.** With open members, `close --state completed` is refused
   `campaign close blocked by N open member(s)`, with a hint naming each one and whether it is resident or
   enrolled. Complete, cancel, move or unenroll them first. `--state cancelled` abandons the campaign and leaves
-  open members as they are (2026-10-05, T-10349 `05-campaigns/drive.txt`). The CLI prints the refusal as
-  `code: WRKQ_ERROR` with the members in `hint`; the server sends `WRKQ_WRONG_STATE` with `data.stragglers`
-  (task ids), which only `wrkq rpc --stdio` shows. Product task T-12766 (2026-11-09, T-12762).
+  open members as they are (2026-10-05, T-10349 `05-campaigns/drive.txt`). Under `--json` the refusal is
+  `code: WRKQ_WRONG_STATE` with the members in `hint` and the server's `data.stragglers` (and
+  `missingOutcomes`) in `error.data` (T-12766, 2026-11-09).
 - `convert` with no `--state` makes an active campaign. A draft can only be activated or cancelled. A terminal
   campaign refuses every transition (`terminal campaigns cannot transition`), and enrolling into one is refused
   (`campaign enrollment target must be a draft or active campaign: P-… is completed and accepts no new

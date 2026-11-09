@@ -21,7 +21,7 @@ promises, `envelope_lifecycle.go` for retry promises). Background: AGENTS.md "Fe
   principal. A superseded holder is refused (`claim_superseded: ...`), and so is a token that doesn't match the
   current claim, with the same message. Release prints the prior claim, records `task.claim_released`, and leaves
   the task state as it is. A holder re-claiming its own task is refused `already_claimed`. `--force` is the operator path.
-  Releasing a task nobody holds is refused `task is not claimed` (CLI `--json` code `WRKQ_ERROR`, T-12766).
+  Releasing a task nobody holds is refused `task is not claimed` (`--json` code `WRKQ_VALIDATION`; T-12766).
 - **Updating a claimed task.** A `set` on a claimed task needs the holder's credentials, or it is refused
   `claim_superseded: holder=...`: `WRKQ_CLAIM_TOKEN=<token> WRKQ_CLAIM_GENERATION=<n> AGENT_SCOPE_REF=<claim scope>
   wrkq set <task> --state completed --as agent:<holder>` succeeds. A raw `wrkq.task.update` with an `idempotencyKey`

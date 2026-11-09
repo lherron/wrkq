@@ -2,7 +2,6 @@ package rpccli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -262,7 +261,7 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 		if err != nil {
 			// Legacy surfaces the raw store error (no domain-code prefix).
 			if re, ok := err.(*Error); ok {
-				return errors.New(re.Message)
+				return rpcRefusal(re)
 			}
 			return err
 		}

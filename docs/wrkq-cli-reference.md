@@ -76,7 +76,7 @@ upsert; `--create` (equivalent to `--if-match 0`) refuses an existing row. Put's
 `conflict`; invalid namespace, kind, id, or body refuses `ext_invalid`; exceeding
 256 extensions on a subject refuses `ext_quota`. Bodies must be JSON objects of
 at most 65,536 bytes. Invocation errors exit 2; `--json` errors use the shared
-`{"error":{"code":…, "message":…}}` envelope.
+`{"error":{"code":…, "message":…, "hint":…, "data":…}}` envelope.
 
 Once a moved metadata key has its extension row, adding or changing that key in
 `wrkq set --meta` refuses `meta_key_migrated` and names the replacement `wrkq ext
@@ -441,6 +441,14 @@ config doctor
 
 Command-specific structured errors may refine these; prefer machine output
 plus the command's own `--help` for automation.
+
+Under `--json`/`--ndjson` an error is written to stderr as
+`{"error":{"code","message","hint","data"}}`. A server refusal keeps the
+server's typed code (`WRKQ_CONFLICT`, `WRKQ_WRONG_STATE`,
+`WRKQ_META_KEY_RESERVED`, ...), and `data` carries the server's error data,
+such as campaign close's `stragglers`. `WRKQ_ERROR` is reserved for errors
+that carry no code. Text mode prints the same code on a trailing `code:` line.
+The handoff family keeps its own snake-case envelope.
 
 ### Named-subtask identity and reads
 

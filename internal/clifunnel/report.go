@@ -42,6 +42,9 @@ type StructuredError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Hint    string `json:"hint,omitempty"`
+	// Data is the server's error data beside a typed code (campaign close's
+	// stragglers, a claim's holder), minus the code it already carries.
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 // ErrorModeFor reads the caller's requested output shape from argv: --json,
@@ -91,6 +94,7 @@ func Structure(err error, family string) (s StructuredError, coded bool) {
 		s.Code = family + "_USAGE"
 	case errors.As(err, &withCode) && withCode.Code() != "":
 		s.Code, coded = withCode.Code(), true
+		s.Data = errorData(err)
 	case errors.As(err, &notFound):
 		s.Code = family + "_NOT_FOUND"
 	default:
@@ -107,6 +111,28 @@ func Structure(err error, family string) (s StructuredError, coded bool) {
 	}
 	s.Hint = strings.TrimSpace(strings.Join(hints, "\n"))
 	return s, coded
+}
+
+// errorData returns err's server data object without its "code" key, which
+// the envelope already carries as error.code; nil when nothing else remains.
+func errorData(err error) json.RawMessage {
+	var withData interface{ ErrorData() json.RawMessage }
+	if !errors.As(err, &withData) {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(withData.ErrorData(), &fields) != nil {
+		return nil
+	}
+	delete(fields, "code")
+	if len(fields) == 0 {
+		return nil
+	}
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 // Report writes err to w once, in mode. Text mode keeps the message and its

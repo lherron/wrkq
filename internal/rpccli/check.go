@@ -81,7 +81,7 @@ func newCheckBlockedCmd() *cobra.Command {
 					// Legacy wraps the resolve failure as
 					// "failed to resolve task: <err>"; the server surfaced the raw
 					// resolve message, so re-wrap it identically here.
-					return fmt.Errorf("failed to resolve task: %s", re.Message)
+					return rewordRefusal(re, "failed to resolve task: %s", re.Message)
 				}
 				return err
 			}
@@ -182,7 +182,7 @@ func newCheckInboxCmd() *cobra.Command {
 			raw, err := tr.Call(cmd.Context(), "wrkq.task.inboxView", params)
 			if err != nil {
 				if re, ok := err.(*Error); ok {
-					return errors.New(re.Message)
+					return rpcRefusal(re)
 				}
 				return err
 			}

@@ -96,7 +96,7 @@ func runCommentRm(cmd *cobra.Command, args []string, f commentRmFlags) error {
 				fmt.Fprintf(errOut, "Warning: comment not found: %s\n", orig)
 				continue
 			}
-			return errors.New(rpcMessage(serr))
+			return rpcRefusal(serr)
 		}
 		var c commentShowDTO
 		if uerr := json.Unmarshal(raw, &c); uerr != nil {
@@ -161,7 +161,7 @@ func runCommentRm(cmd *cobra.Command, args []string, f commentRmFlags) error {
 				}})
 				continue
 			}
-			return errors.New(rpcMessage(derr))
+			return rpcRefusal(derr)
 		}
 
 		if f.purge {

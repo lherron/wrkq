@@ -118,6 +118,15 @@ func (e *Error) Code() string {
 	return e.DomainID
 }
 
+// ErrorData exposes the server's error data (stragglers, holders, keys) to CLI
+// error renderers, which carry it as the --json envelope's error.data.
+func (e *Error) ErrorData() json.RawMessage {
+	if e == nil {
+		return nil
+	}
+	return e.Data
+}
+
 func errorFromRPC(re *workrpc.RPCError) *Error {
 	out := &Error{RPCCode: re.Code, Message: re.Message, Data: re.Data}
 	if len(re.Data) > 0 {

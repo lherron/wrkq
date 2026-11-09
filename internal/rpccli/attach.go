@@ -68,7 +68,7 @@ func newAttachLsCmd() *cobra.Command {
 			raw, err := tr.Call(cmd.Context(), "wrkq.attachment.listView", params)
 			if err != nil {
 				if re, ok := err.(*Error); ok {
-					return fmt.Errorf("%s", re.Message)
+					return rpcRefusal(re)
 				}
 				return err
 			}
@@ -202,7 +202,7 @@ func newAttachPutCmd() *cobra.Command {
 			if err != nil {
 				if re, ok := err.(*Error); ok {
 					// Legacy surfaces the raw resolve / validation text (no domain code).
-					return errors.New(re.Message)
+					return rpcRefusal(re)
 				}
 				return err
 			}
@@ -318,9 +318,9 @@ func runAttachGet(cmd *cobra.Command, ref, outputFile string) error {
 					// Legacy emits "attachment not found: <ref>" for a missing row and
 					// "failed to copy attachment: ..." for missing file bytes. The server
 					// distinguishes via the not-found kind in the message.
-					return errors.New(re.Message)
+					return rpcRefusal(re)
 				}
-				return errors.New(re.Message)
+				return rpcRefusal(re)
 			}
 			return cerr
 		}
@@ -456,7 +456,7 @@ func runAttachPutBytes(cmd *cobra.Command, tr Transport, sc *scoper, actor, task
 		raw, cerr := tr.Call(cmd.Context(), "wrkq.attachment.addBytes", params)
 		if cerr != nil {
 			if re, ok := cerr.(*Error); ok {
-				return errors.New(re.Message)
+				return rpcRefusal(re)
 			}
 			return cerr
 		}
@@ -676,7 +676,7 @@ func attachTaskID(cmd *cobra.Command, tr Transport, taskUUID string) (string, er
 	raw, err := tr.Call(cmd.Context(), "wrkq.task.show", map[string]any{"task": taskUUID})
 	if err != nil {
 		if re, ok := err.(*Error); ok {
-			return "", errors.New(re.Message)
+			return "", rpcRefusal(re)
 		}
 		return "", err
 	}

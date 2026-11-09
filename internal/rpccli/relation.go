@@ -151,7 +151,7 @@ func runRelationMutate(cmd *cobra.Command, args []string, method, flagKey, verb 
 	}
 	if _, err := tr.Call(cmd.Context(), method, params); err != nil {
 		if re, ok := err.(*Error); ok {
-			return fmt.Errorf("%s", re.Message)
+			return rpcRefusal(re)
 		}
 		return err
 	}
