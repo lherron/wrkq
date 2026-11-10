@@ -13,7 +13,10 @@ import (
 // returns the handle form wrkq stores. wrkq parses the grammar and nothing more:
 // what a scope MEANS at runtime is HRC's business.
 func normalizeRoomScopeRef(raw string) (string, error) {
-	raw = stripRuntimeLane(strings.TrimSpace(raw))
+	raw, err := stripRuntimeLane(strings.TrimSpace(raw))
+	if err != nil {
+		return "", err
+	}
 	if raw == "" {
 		return "", nil
 	}
@@ -39,7 +42,10 @@ func normalizeRoomScopeRef(raw string) (string, error) {
 }
 
 func normalizeEnvelopePageMember(raw string) (string, string, error) {
-	raw = stripRuntimeLane(strings.TrimSpace(raw))
+	raw, err := stripRuntimeLane(strings.TrimSpace(raw))
+	if err != nil {
+		return "", "", err
+	}
 	if strings.HasPrefix(raw, "agent:") {
 		if err := attribution.ValidatePrincipalRef(raw); err == nil {
 			return raw, raw, nil
@@ -69,18 +75,15 @@ func normalizeEnvelopePageMember(raw string) (string, string, error) {
 // a SCOPE, so the lane is discarded here rather than modelled — the boundary
 // rule cuts exactly here.
 //
-// A role suffix (".../reviewer") is part of the scope grammar and is kept: only
-// a suffix carrying its own "key:value" shape is a runtime lane, because a role
-// name cannot contain a colon.
-func stripRuntimeLane(raw string) string {
-	slash := strings.Index(raw, "/")
-	if slash < 0 {
-		return raw
+// A value naming a lane goes through the grammar's session-ref parser, so its
+// scope part must be a canonical scope ref ("cody@wrkq/lane:main" is refused).
+// A role suffix (".../reviewer") is part of the scope grammar and is kept.
+func stripRuntimeLane(raw string) (string, error) {
+	seat, err := scope.SeatScope(raw)
+	if err != nil {
+		return "", NewValidationError("invalid sessionRef: "+err.Error(), map[string]any{"field": "scopeRef", "scopeRef": raw})
 	}
-	if strings.Contains(raw[slash+1:], ":") {
-		return raw[:slash]
-	}
-	return raw
+	return seat, nil
 }
 
 // NormalizeCallerScopeRef validates a request scope using the collaboration

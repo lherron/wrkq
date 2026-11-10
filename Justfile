@@ -614,6 +614,13 @@ test:
   go test -tags "{{go_tags}}" ./...
   @echo "✓ Golang tests complete"
 
+# Copy the shared scope grammar fixture from the sibling agent-spaces checkout
+# (contract: agent-spaces architecture/contracts/scope-env-conformance.md). The
+# scope conformance test fails while the copy differs from the sibling file.
+sync-scope-fixture:
+  cp ../agent-spaces/contracts/agent-scope/conformance/scope-cases.json internal/scope/testdata/scope-cases.json
+  @echo "✓ internal/scope/testdata/scope-cases.json synced from ../agent-spaces"
+
 # Run all tests with verbose logs
 test-verbose:
   go test -v -tags "{{go_tags}}" ./...

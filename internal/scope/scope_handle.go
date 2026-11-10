@@ -5,129 +5,89 @@ import (
 	"strings"
 )
 
-// ValidateScopeHandle validates a scope handle string against the canonical
-// shorthand grammar:
+// directiveSeparator opens a provisioning directive block ("+key=value"). It is
+// outside the token charset; only ResolveQualifiedInput accepts (and strips) it.
+const directiveSeparator = "+"
+
+// scopeFields is a scope decomposed into its tokens, before validation or ref
+// assembly. Empty means absent; the has* flags record a separator that was
+// present with an empty token, which validation then refuses.
+type scopeFields struct {
+	agentID, projectID, taskID, roleName string
+	hasProject, hasTask, hasRole         bool
+}
+
+// splitHandle splits a scope handle into its tokens without validating them:
 //
-//	<agentId> ["@" <projectId> [":" <taskId>] ["/" <roleName>]]
+//	<agentId> [":" <taskId>]                              (no "@": project from context)
+//	<agentId> "@" <projectId> [":" <taskId>] ["/" <roleName>]
+//
+// Without "@" a "/" is not parsed and lands in a token, which validation refuses.
+func splitHandle(handle string) scopeFields {
+	atIdx := strings.Index(handle, "@")
+	if atIdx == -1 {
+		agentID, taskID, hasTask := strings.Cut(handle, ":")
+		return scopeFields{agentID: agentID, taskID: taskID, hasTask: hasTask}
+	}
+
+	f := scopeFields{agentID: handle[:atIdx], hasProject: true}
+	projectPart := handle[atIdx+1:]
+	if before, role, ok := strings.Cut(projectPart, "/"); ok {
+		projectPart, f.roleName, f.hasRole = before, role, true
+	}
+	f.projectID, f.taskID, f.hasTask = strings.Cut(projectPart, ":")
+	return f
+}
+
+// ValidateScopeHandle validates a scope handle string against the canonical
+// shorthand grammar (see splitHandle). It validates the tokens only: the
+// project-deferred "<agentId>:<taskId>" form passes here and is refused by
+// ParseScopeHandle, because a task with no project is not a scope ref.
 func ValidateScopeHandle(handle string) ValidationResult {
 	if len(handle) == 0 {
-		return ValidationResult{OK: false, Error: "ScopeHandle must not be empty"}
+		return invalid(CodeEmpty, "ScopeHandle must not be empty")
+	}
+	if strings.Contains(handle, directiveSeparator) {
+		return invalid(CodeDirectiveNotAllowed,
+			`provisioning directives ("+key=value") are not part of a ScopeHandle`)
 	}
 
-	// Split off role: only valid after "@", using the first "/" in the project
-	// portion.
-	main := handle
-	var roleName string
-	hasRole := false
-
-	atIdx := strings.Index(handle, "@")
-	if atIdx != -1 {
-		afterAt := handle[atIdx+1:]
-		slashIdx := strings.Index(afterAt, "/")
-		if slashIdx != -1 {
-			roleName = afterAt[slashIdx+1:]
-			hasRole = true
-			main = handle[:atIdx+1+slashIdx]
+	f := splitHandle(handle)
+	if r, ok := tokenResult(f.agentID, "agentId"); !ok {
+		return r
+	}
+	if f.hasProject {
+		if r, ok := tokenResult(f.projectID, "projectId"); !ok {
+			return r
 		}
 	}
-
-	// Now parse main: agentId ["@" projectId [":" taskId]]
-	var agentID, projectID, taskID string
-	hasProject := false
-	hasTask := false
-
-	if atIdx == -1 {
-		agentID = main
-	} else {
-		agentID = main[:atIdx]
-		projectPart := main[atIdx+1:]
-		hasProject = true
-
-		colonIdx := strings.Index(projectPart, ":")
-		if colonIdx == -1 {
-			projectID = projectPart
-		} else {
-			projectID = projectPart[:colonIdx]
-			taskID = projectPart[colonIdx+1:]
-			hasTask = true
+	if f.hasTask {
+		if r, ok := tokenResult(f.taskID, "taskId"); !ok {
+			return r
 		}
 	}
-
-	if e := validateToken(agentID, "agentId"); e != "" {
-		return ValidationResult{OK: false, Error: e}
-	}
-	if hasProject {
-		if e := validateToken(projectID, "projectId"); e != "" {
-			return ValidationResult{OK: false, Error: e}
+	if f.hasRole {
+		if r, ok := tokenResult(f.roleName, "roleName"); !ok {
+			return r
 		}
 	}
-	if hasTask {
-		if e := validateToken(taskID, "taskId"); e != "" {
-			return ValidationResult{OK: false, Error: e}
-		}
-	}
-	if hasRole {
-		if e := validateToken(roleName, "roleName"); e != "" {
-			return ValidationResult{OK: false, Error: e}
-		}
-	}
-
 	return ValidationResult{OK: true}
 }
 
-// ParseScopeHandle parses a scope handle string into a ParsedScopeRef.
-// Returns an error if the handle is invalid.
+// ParseScopeHandle parses a scope handle string into a ParsedScopeRef. It does
+// not default: "alice@demo" is agent:alice:project:demo, and "alice:t1" (task,
+// project from context) is refused. ResolveQualifiedInput does the defaulting.
 func ParseScopeHandle(handle string) (ParsedScopeRef, error) {
 	v := ValidateScopeHandle(handle)
 	if !v.OK {
-		return ParsedScopeRef{}, fmt.Errorf("invalid ScopeHandle %q: %s", handle, v.Error)
+		return ParsedScopeRef{}, &GrammarError{Code: v.Code, Message: fmt.Sprintf("invalid ScopeHandle %q: %s", handle, v.Error)}
 	}
+	return ParseScopeRef(fieldsRef(splitHandle(handle)))
+}
 
-	// Split off role
-	main := handle
-	var roleName string
-	hasRole := false
-
-	atIdx := strings.Index(handle, "@")
-	if atIdx != -1 {
-		afterAt := handle[atIdx+1:]
-		slashIdx := strings.Index(afterAt, "/")
-		if slashIdx != -1 {
-			roleName = afterAt[slashIdx+1:]
-			hasRole = true
-			main = handle[:atIdx+1+slashIdx]
-		}
-	}
-
-	// Parse main: agentId ["@" projectId [":" taskId]]
-	var agentID, projectID, taskID string
-
-	if atIdx == -1 {
-		agentID = main
-	} else {
-		agentID = main[:atIdx]
-		projectPart := main[atIdx+1:]
-		colonIdx := strings.Index(projectPart, ":")
-		if colonIdx == -1 {
-			projectID = projectPart
-		} else {
-			projectID = projectPart[:colonIdx]
-			taskID = projectPart[colonIdx+1:]
-		}
-	}
-
-	scopeRef := "agent:" + agentID
-	if projectID != "" {
-		scopeRef += ":project:" + projectID
-	}
-	if taskID != "" {
-		scopeRef += ":task:" + taskID
-	}
-	if hasRole {
-		scopeRef += ":role:" + roleName
-	}
-
-	return ParseScopeRef(scopeRef)
+// f2ref assembles the scope ref string for a split handle.
+func fieldsRef(f scopeFields) string {
+	return FormatScopeRef(ParsedScopeRef{AgentID: f.agentID, ProjectID: f.projectID, TaskID: f.taskID, RoleName: f.roleName})
 }
 
 // FormatScopeHandle formats a ParsedScopeRef into its shorthand handle form.

@@ -1,13 +1,34 @@
-// Package scope provides a Go port of the canonical agent-scope grammar
-// (originally in TypeScript at ~/praesidium/agent-spaces/packages/agent-scope)
-// plus an env-aware Resolve helper used by wrkq commands.
+// Package scope is wrkq's Go implementation of the canonical agent-scope
+// grammar (agent-spaces contracts/agent-scope), checked against the shared
+// conformance fixture (contracts/agent-scope/conformance/scope-cases.json,
+// copied to testdata/ by `just sync-scope-fixture`), plus Resolve, wrkq's own
+// env-aware caller-scope policy built on top of the strict parsers.
+//
+// Declared fixture operations (the list in conformance_test.go):
+//
+//	scopeRef.parse       ParseScopeRef
+//	scopeRef.format      FormatScopeRef
+//	scopeHandle.parse    ParseScopeHandle
+//	scopeHandle.format   FormatScopeHandle
+//	laneRef.normalize    NormalizeLaneRef
+//	sessionHandle.parse  ParseSessionHandle
+//	sessionRef.parse     ParseSessionRef
+//	input.resolve        ResolveQualifiedInput
+//
+// Not declared: sessionRef.format (wrkq formats no session ref) and
+// identity.project (wrkq has no lenient parser).
 //
 // Reference grammar:
 //
 //	scopeRef long form:   agent:<agentId>[:project:<projectId>[:task:<taskId>][:role:<roleName>]]
-//	scopeHandle short:    <agentId>[@<projectId>[:<taskId>][/<roleName>]]
+//	scopeHandle short:    <agentId>[:<taskId>] | <agentId>@<projectId>[:<taskId>][/<roleName>]
+//	sessionHandle:        <scopeHandle>[~<laneId>]
+//	sessionRef:           <scopeRef>/lane:<laneId>
+//	laneRef:              main | lane:<laneId>
 //
-// Token identifiers must match [A-Za-z0-9._-]+ and be 1..64 characters.
+// Token identifiers must match [A-Za-z0-9._-]+ and be 1..64 characters, counted
+// in UTF-16 units as the TypeScript grammar counts them. Every refusal is a
+// *GrammarError carrying one of the fixture's refusal codes (CodeOf).
 package scope
 
 import "regexp"

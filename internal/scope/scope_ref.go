@@ -3,16 +3,32 @@ package scope
 import (
 	"fmt"
 	"strings"
+	"unicode/utf16"
 )
 
-// ValidationResult is the validation outcome for a scopeRef or scopeHandle.
+// ValidationResult is the validation outcome for a scopeRef, scopeHandle or
+// laneRef. On failure Code is the fixture refusal code.
 type ValidationResult struct {
 	OK    bool
 	Error string
+	Code  ErrorCode
 }
 
+func invalid(code ErrorCode, msg string) ValidationResult {
+	return ValidationResult{OK: false, Error: msg, Code: code}
+}
+
+// tokenResult lifts validateToken into a ValidationResult (token_invalid).
+func tokenResult(value, label string) (ValidationResult, bool) {
+	if e := validateToken(value, label); e != "" {
+		return invalid(CodeTokenInvalid, e), false
+	}
+	return ValidationResult{OK: true}, true
+}
+
+// validateToken counts length in UTF-16 units, as the TypeScript grammar does.
 func validateToken(value, label string) string {
-	n := len(value)
+	n := len(utf16.Encode([]rune(value)))
 	if n < TokenMinLength || n > TokenMaxLength {
 		return fmt.Sprintf("%s must be %d..%d characters, got %d", label, TokenMinLength, TokenMaxLength, n)
 	}
@@ -29,12 +45,16 @@ func ValidateScopeRef(scopeRef string) ValidationResult {
 
 	// Must start with "agent:<agentId>"
 	if len(parts) < 2 || parts[0] != "agent" {
-		return ValidationResult{OK: false, Error: `ScopeRef must start with "agent:<agentId>"`}
+		code := CodeShapeInvalid
+		if scopeRef == "" {
+			code = CodeEmpty
+		}
+		return invalid(code, `ScopeRef must start with "agent:<agentId>"`)
 	}
 
 	agentID := parts[1]
-	if e := validateToken(agentID, "agentId"); e != "" {
-		return ValidationResult{OK: false, Error: e}
+	if r, ok := tokenResult(agentID, "agentId"); !ok {
+		return r
 	}
 
 	// agent:<agentId> — valid
@@ -44,12 +64,12 @@ func ValidateScopeRef(scopeRef string) ValidationResult {
 
 	// Must continue with "project:<projectId>"
 	if len(parts) < 4 || parts[2] != "project" {
-		return ValidationResult{OK: false, Error: `After "agent:<agentId>", expected "project:<projectId>"`}
+		return invalid(CodeShapeInvalid, `After "agent:<agentId>", expected "project:<projectId>"`)
 	}
 
 	projectID := parts[3]
-	if e := validateToken(projectID, "projectId"); e != "" {
-		return ValidationResult{OK: false, Error: e}
+	if r, ok := tokenResult(projectID, "projectId"); !ok {
+		return r
 	}
 
 	// agent:<agentId>:project:<projectId> — valid
@@ -61,22 +81,22 @@ func ValidateScopeRef(scopeRef string) ValidationResult {
 	nextKey := parts[4]
 	if nextKey == "role" {
 		if len(parts) != 6 {
-			return ValidationResult{OK: false, Error: `Expected exactly "role:<roleName>" after project segment`}
+			return invalid(CodeShapeInvalid, `Expected exactly "role:<roleName>" after project segment`)
 		}
 		roleName := parts[5]
-		if e := validateToken(roleName, "roleName"); e != "" {
-			return ValidationResult{OK: false, Error: e}
+		if r, ok := tokenResult(roleName, "roleName"); !ok {
+			return r
 		}
 		return ValidationResult{OK: true}
 	}
 
 	if nextKey == "task" {
 		if len(parts) < 6 {
-			return ValidationResult{OK: false, Error: `Expected "task:<taskId>" after project segment`}
+			return invalid(CodeShapeInvalid, `Expected "task:<taskId>" after project segment`)
 		}
 		taskID := parts[5]
-		if e := validateToken(taskID, "taskId"); e != "" {
-			return ValidationResult{OK: false, Error: e}
+		if r, ok := tokenResult(taskID, "taskId"); !ok {
+			return r
 		}
 
 		// agent:<agentId>:project:<projectId>:task:<taskId> — valid
@@ -85,16 +105,16 @@ func ValidateScopeRef(scopeRef string) ValidationResult {
 		}
 
 		if len(parts) != 8 || parts[6] != "role" {
-			return ValidationResult{OK: false, Error: `After "task:<taskId>", expected "role:<roleName>"`}
+			return invalid(CodeShapeInvalid, `After "task:<taskId>", expected "role:<roleName>"`)
 		}
 		roleName := parts[7]
-		if e := validateToken(roleName, "roleName"); e != "" {
-			return ValidationResult{OK: false, Error: e}
+		if r, ok := tokenResult(roleName, "roleName"); !ok {
+			return r
 		}
 		return ValidationResult{OK: true}
 	}
 
-	return ValidationResult{OK: false, Error: fmt.Sprintf(`Unexpected segment %q after project; expected "role" or "task"`, nextKey)}
+	return invalid(CodeShapeInvalid, fmt.Sprintf(`Unexpected segment %q after project; expected "role" or "task"`, nextKey))
 }
 
 // ParseScopeRef parses a canonical scopeRef into a ParsedScopeRef.
@@ -102,7 +122,7 @@ func ValidateScopeRef(scopeRef string) ValidationResult {
 func ParseScopeRef(scopeRef string) (ParsedScopeRef, error) {
 	v := ValidateScopeRef(scopeRef)
 	if !v.OK {
-		return ParsedScopeRef{}, fmt.Errorf("invalid ScopeRef %q: %s", scopeRef, v.Error)
+		return ParsedScopeRef{}, &GrammarError{Code: v.Code, Message: fmt.Sprintf("invalid ScopeRef %q: %s", scopeRef, v.Error)}
 	}
 
 	parts := strings.Split(scopeRef, ":")

@@ -231,7 +231,13 @@ func (c *Client) mutationScopeRef() (string, error) {
 	if c.scopeRef == "" {
 		return "", nil
 	}
-	seatRef, _, _ := strings.Cut(c.scopeRef, "/lane:")
+	seatRef, err := scope.SeatScope(c.scopeRef)
+	if err != nil {
+		if c.scopeExplicit {
+			return "", fmt.Errorf("invalid caller scope: %w", err)
+		}
+		return "", nil
+	}
 	resolved, _, err := scope.Resolve(seatRef)
 	if err != nil {
 		if c.scopeExplicit {

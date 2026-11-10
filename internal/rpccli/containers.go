@@ -631,7 +631,10 @@ func mutationScopeRef(cmd *cobra.Command, actor string) string {
 	if raw == "" || actor == "" {
 		return ""
 	}
-	raw, _, _ = strings.Cut(raw, "/lane:")
+	raw, err := scope.SeatScope(raw)
+	if err != nil {
+		return ""
+	}
 	resolved, _, err := scope.Resolve(raw)
 	if err != nil || "agent:"+resolved.AgentID != actor {
 		return ""

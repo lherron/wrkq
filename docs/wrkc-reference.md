@@ -254,6 +254,8 @@ The room API accepts shorthand handles (`cody@wrkq:T-12267`) and canonical
 ScopeRefs (`agent:cody:project:wrkq:task:T-12267`), normalizing them to
 shorthand for storage and replies. A runtime lane suffix on a canonical
 ScopeRef is tolerated and stripped; it does not create another counterparty.
+A lane suffix on a shorthand handle (`cody@wrkq/lane:main`) is not a session
+ref and is refused.
 
 Humans are ordinary principals with no scope: `agent:lance` is a valid
 addressee, member, and caller. A scope-less principal is never kicked or
