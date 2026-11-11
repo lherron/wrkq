@@ -53,6 +53,9 @@ func (a *API) TaskCreate(ctx context.Context, p TaskCreateParams) (*WrkqTask, er
 	var subtaskOwnerUUID *string
 	var err error
 	if p.SubtaskOwner != "" {
+		if p.Kind == "workstream" {
+			return nil, NewValidationError("workstream cannot be a named subtask", map[string]any{"field": "kind"})
+		}
 		if p.Path != "" || p.Project != "" || p.ParentTask != "" || p.Campaign != "" {
 			return nil, NewValidationError("subtaskOwner refuses path, project, parentTask and campaign", nil)
 		}

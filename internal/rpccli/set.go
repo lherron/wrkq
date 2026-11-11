@@ -262,7 +262,7 @@ func runSetProjectRoot(cmd *cobra.Command, args []string, rawRoot string, ifMatc
 	if project == "" || project == "-" {
 		return fmt.Errorf("--root requires a project slug, ID, or UUID")
 	}
-	if parsed := selectors.Parse(project); parsed.Type == selectors.TypeTask || strings.HasPrefix(parsed.Token, "T-") {
+	if parsed := selectors.Parse(project); parsed.Type == selectors.TypeTask || (strings.HasPrefix(parsed.Token, "T-") || strings.HasPrefix(parsed.Token, "W-")) {
 		return fmt.Errorf("--root can only be set on a top-level project; task ID %q is not a project", project)
 	}
 

@@ -494,7 +494,7 @@ func resolveTaskUUIDQuery(q queryer, selector string) (string, error) {
 	} else if ok {
 		token = expanded
 	}
-	if strings.HasPrefix(token, "T-") {
+	if strings.HasPrefix(token, "T-") || strings.HasPrefix(token, "W-") {
 		var uuid string
 		err := q.QueryRow("SELECT uuid FROM tasks WHERE id = ?", token).Scan(&uuid)
 		if err == nil {

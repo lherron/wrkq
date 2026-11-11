@@ -107,6 +107,18 @@ func (a *API) taskUpdateTx(ctx context.Context, p TaskUpdateParams, attr attribu
 		return nil, ferr
 	}
 
+	var currentKind string
+	if err := tx.QueryRow("SELECT kind FROM tasks WHERE uuid = ?", uuid).Scan(&currentKind); err != nil {
+		return nil, NewInternalError(err)
+	}
+	if p.Patch.Kind != nil && *p.Patch.Kind != currentKind && (currentKind == "workstream" || *p.Patch.Kind == "workstream") {
+		return nil, newError("WRKQ_WORKSTREAM_KIND_FIXED", "workstream kind is fixed at create; re-create the row", false, nil, nil)
+	}
+	if currentKind == "workstream" && p.Patch.Kind == nil {
+		// A parent edit still writes the edge, but cannot convert a workstream.
+		delete(fields, "kind")
+	}
+
 	if err := validateCoversPatchOn(tx, uuid, fields, p.Patch.Covers); err != nil {
 		return nil, err
 	}

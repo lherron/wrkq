@@ -114,6 +114,16 @@ func maxExistingID(exec sqlExecutor, spec SequenceSpec) (int, error) {
 		return maxID, nil
 	}
 
+	// task_seq is shared by ordinary tasks and workstreams. Keep composites
+	// and legacy nonnumeric identities out of the high-water calculation.
+	if spec.SeqTable == "task_seq" && spec.EntityTable == "tasks" && spec.Prefix == "T-" {
+		var maxID int
+		err := exec.QueryRow(`SELECT COALESCE(MAX(CAST(substr(id, 3) AS INTEGER)), 0)
+			FROM tasks WHERE (id LIKE 'T-%' OR id LIKE 'W-%')
+			AND substr(id, 3) <> '' AND substr(id, 3) NOT GLOB '*[^0-9]*'`).Scan(&maxID)
+		return maxID, err
+	}
+
 	// Only canonical ids (<prefix><digits>) count: CAST reads the leading
 	// digits of a legacy id like T-2417717B as 2417717, which would jump the
 	// sequence by millions (T-07498).

@@ -17,12 +17,12 @@ func newExtCmd() *cobra.Command {
 }
 
 func extSubject(cmd *cobra.Command, ref string) (map[string]string, error) {
-	for prefix, kind := range map[string]string{"T-": "task", "P-": "container", "R-": "room"} {
+	for prefix, kind := range map[string]string{"T-": "task", "W-": "task", "P-": "container", "R-": "room"} {
 		if strings.HasPrefix(ref, prefix) && len(ref) > len(prefix) {
 			return map[string]string{kind: ref}, nil
 		}
 	}
-	return nil, &clifunnel.UsageError{Err: fmt.Errorf("subject must be a public T-…, P-…, or R-… id"), Cmd: cmd}
+	return nil, &clifunnel.UsageError{Err: fmt.Errorf("subject must be a public T-…, W-…, P-…, or R-… id"), Cmd: cmd}
 }
 
 func newExtRecordCmd(verb string) *cobra.Command {

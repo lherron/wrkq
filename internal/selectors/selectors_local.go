@@ -211,7 +211,7 @@ type rowQueryer interface {
 }
 
 // ExpandBareTaskID resolves a bare 1-4 digit suffix to the numerically highest
-// ordinary task ID. Leading zeros preserve suffix width; five digits is literal.
+// task or workstream ID. Leading zeros preserve suffix width; five digits is literal.
 // A missing suffix returns the padded literal for the existing not-found error.
 func ExpandBareTaskID(q rowQueryer, token string) (string, bool, error) {
 	literal, ok := id.ExpandTaskID(token)
@@ -219,15 +219,17 @@ func ExpandBareTaskID(q rowQueryer, token string) (string, bool, error) {
 		return token, false, nil
 	}
 	token = strings.TrimSpace(token)
+	pattern := "%" + token
 	if len(token) == 5 {
-		return literal, true, nil
+		pattern = token
 	}
 	var found string
 	// Match only numeric owner IDs: a named subtask may also end in digits.
 	// Numeric ordering remains correct when the sequence outgrows five digits.
 	err := q.QueryRow(`SELECT id FROM tasks
-		WHERE id LIKE ? AND substr(id, 3) NOT GLOB '*[^0-9]*'
-		ORDER BY CAST(substr(id, 3) AS INTEGER) DESC LIMIT 1`, "T-%"+token).Scan(&found)
+		WHERE (id LIKE 'T-%' OR id LIKE 'W-%')
+		AND substr(id, 3) LIKE ? AND substr(id, 3) NOT GLOB '*[^0-9]*'
+		ORDER BY CAST(substr(id, 3) AS INTEGER) DESC LIMIT 1`, pattern).Scan(&found)
 	if err == sql.ErrNoRows {
 		return literal, true, nil
 	}

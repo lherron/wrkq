@@ -82,10 +82,17 @@ func TestExtCLIIndependentFenceAndFiltering(t *testing.T) {
 
 func TestWorkstreamCLICoversRoundTrip(t *testing.T) {
 	dbPath, taskID := migratedDBWithTask(t)
-	runCommentCLI(t, dbPath, "set", taskID, "--kind", "workstream", "--covers", `{"tasks":["`+taskID+`"]}`)
-	out := runCommentCLI(t, dbPath, "cat", taskID, "--output", "raw")
+	created := runCommentCLI(t, dbPath, "touch", "/rpccli-test-proj/stream", "--kind", "workstream", "--covers", `{"tasks":["`+taskID+`"]}`, "--json")
+	var streams []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(created), &streams); err != nil || len(streams) != 1 {
+		t.Fatalf("create stream: %s %v", created, err)
+	}
+	streamID := streams[0].ID
+	out := runCommentCLI(t, dbPath, "cat", streamID, "--output", "raw")
 	if !strings.Contains(out, `covers: {"tasks":["`+taskID+`"]}`) {
 		t.Fatalf("cat missing coverage: %s", out)
 	}
-	runCommentCLI(t, dbPath, "set", taskID, "--covers", "null", "--kind", "task")
+	runCommentCLI(t, dbPath, "set", streamID, "--covers", "null")
 }

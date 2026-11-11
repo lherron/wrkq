@@ -76,14 +76,14 @@ func (a *API) resolveLogResource(ctx context.Context, target string) (string, st
 	}
 	if id.IsFriendlyID(target) || id.IsTask(target) {
 		prefix := target[:1]
-		switch prefix {
-		case "T":
+		switch {
+		case id.IsTask(target):
 			var uuid string
 			if err := a.db.QueryRowContext(ctx, "SELECT uuid FROM tasks WHERE id = ?", target).Scan(&uuid); err != nil {
 				return "", "", NewValidationError(fmt.Sprintf("task not found: %s", target), nil)
 			}
 			return uuid, "task", nil
-		case "P":
+		case strings.HasPrefix(target, "P-"):
 			var uuid string
 			if err := a.db.QueryRowContext(ctx, "SELECT uuid FROM containers WHERE id = ?", target).Scan(&uuid); err != nil {
 				return "", "", NewValidationError(fmt.Sprintf("container not found: %s", target), nil)

@@ -24,7 +24,7 @@ func (a *API) ProjectSetRoot(ctx context.Context, p ProjectSetRootParams) (*Wrkq
 		return nil, NewValidationError("project is required", map[string]any{"field": "project"})
 	}
 	parsed := selectors.Parse(project)
-	if parsed.Type == selectors.TypeTask || strings.HasPrefix(parsed.Token, "T-") {
+	if parsed.Type == selectors.TypeTask || (strings.HasPrefix(parsed.Token, "T-") || strings.HasPrefix(parsed.Token, "W-")) {
 		return nil, NewValidationError("--root can only be set on a top-level project; task IDs are not projects", map[string]any{"field": "project"})
 	}
 

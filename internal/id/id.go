@@ -10,6 +10,7 @@ import (
 var (
 	actorIDPattern      = regexp.MustCompile(`^A-\d{5}$`)
 	containerIDPattern  = regexp.MustCompile(`^P-\d{5}$`)
+	workstreamIDPattern = regexp.MustCompile(`^` + WorkstreamPattern + `$`)
 	taskIDPattern       = regexp.MustCompile(`^` + OrdinaryTaskPattern + `$`)
 	commentIDPattern    = regexp.MustCompile(`^C-\d{5}$`)
 	handoffIDPattern    = regexp.MustCompile(`^H-\d{5}$`)
@@ -25,9 +26,12 @@ var (
 // exception markers remain ordinary-only and retain their own digit-width rules.
 const OrdinaryTaskPattern = `T-\d{5}`
 
-// TaskPattern is the shared task grammar, including named subtasks. Length is
-// enforced by ParseTask rather than by truncating a prose match.
-const TaskPattern = OrdinaryTaskPattern + `(?:\.[a-z](?:[a-z0-9-]*[a-z0-9])?)?`
+// WorkstreamPattern is the sequence-bearing workstream ID grammar.
+const WorkstreamPattern = `W-\d{5}`
+
+// TaskPattern is the shared row grammar, including workstreams and named
+// subtasks. ParseTask enforces length rather than truncating a prose match.
+const TaskPattern = `(?:` + OrdinaryTaskPattern + `(?:\.[a-z](?:[a-z0-9-]*[a-z0-9])?)?|` + WorkstreamPattern + `)`
 
 var (
 	completeTaskPattern = regexp.MustCompile(`^` + TaskPattern + `$`)
@@ -144,7 +148,7 @@ func Parse(id string) (Type, int, error) {
 	case containerIDPattern.MatchString(id):
 		seq, _ := strconv.Atoi(id[2:])
 		return TypeContainer, seq, nil
-	case taskIDPattern.MatchString(id):
+	case taskIDPattern.MatchString(id) || workstreamIDPattern.MatchString(id):
 		seq, _ := strconv.Atoi(id[2:])
 		return TypeTask, seq, nil
 	case commentIDPattern.MatchString(id):

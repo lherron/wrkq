@@ -61,8 +61,12 @@ func (a *API) extTarget(ctx context.Context, s ExtSubject) (store.ExtTarget, err
 		}
 		count++
 		target.Type, target.ID = entry.typ, entry.id
-		if !strings.HasPrefix(entry.id, entry.prefix) {
-			return target, extInvalid("subject requires a public T-, P-, or R- id")
+		validPrefix := strings.HasPrefix(entry.id, entry.prefix)
+		if entry.typ == "task" && strings.HasPrefix(entry.id, "W-") {
+			validPrefix = true
+		}
+		if !validPrefix {
+			return target, extInvalid("subject requires a public T-, W-, P-, or R- id")
 		}
 	}
 	if count != 1 {

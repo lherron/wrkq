@@ -75,7 +75,7 @@ func TestWorkstreamCoversContract(t *testing.T) {
 		}
 	}
 	_, err = a.TaskUpdate(ctx, TaskUpdateParams{Task: task.ID, Patch: TaskPatch{Kind: strp("task")}})
-	if err == nil || claimErrorCode(t, err) != "WRKQ_COVERS_REQUIRES_WORKSTREAM" {
+	if err == nil || claimErrorCode(t, err) != "WRKQ_WORKSTREAM_KIND_FIXED" {
 		t.Fatalf("kind change: %v", err)
 	}
 	ctx = nodeauth.WithNode(ctx, "test-node")
@@ -106,8 +106,8 @@ func TestWorkstreamCoversContract(t *testing.T) {
 	if err == nil || claimErrorCode(t, err) != CodeConflict {
 		t.Fatalf("stale fence: %v", err)
 	}
-	cleared, err := a.TaskUpdate(ctx, TaskUpdateParams{Task: task.ID, Patch: TaskPatch{Kind: strp("task"), Covers: json.RawMessage(`null`)}})
-	if err != nil || cleared.Covers != nil || cleared.Kind != "task" {
+	cleared, err := a.TaskUpdate(ctx, TaskUpdateParams{Task: task.ID, Patch: TaskPatch{Covers: json.RawMessage(`null`)}})
+	if err != nil || cleared.Covers != nil || cleared.Kind != "workstream" {
 		t.Fatalf("clear: %+v %v", cleared, err)
 	}
 }
