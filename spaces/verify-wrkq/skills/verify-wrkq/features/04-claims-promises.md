@@ -13,9 +13,12 @@ promises, `envelope_lifecycle.go` for retry promises). Background: AGENTS.md "Fe
   `{claimedBy, claimedScope, claimedNode, claimGeneration, claimToken}`. The daemon derives `claimedNode` from
   the bearer credential. Claiming moves an open task to `in_progress`. A completed task is refused
   `wrong_state: completed`. A `blocked` task is claimable and moves to `in_progress` (driven 2026-10-20, T-11374).
-  Any other state is refused (source read, `claims.go`). A workstream task is refused
-  `WRKQ_WORKSTREAM_NOT_CLAIMABLE` (000072; driven 2026-11-09, T-12762).
+  Any other state is refused (source read, `claims.go`). A workstream (`W-<n>` since 1f59e43) is refused
+  `WRKQ_WORKSTREAM_NOT_CLAIMABLE` (000072; driven 2026-11-16, T-13642).
 - **Contention.** A second claimant is refused with `already_claimed: holder=... node=... scope=... generation=N`.
+  Under `--json` the code is `WRKQ_ALREADY_CLAIMED` (and `WRKQ_CLAIM_SUPERSEDED` for a superseded holder), and
+  `error.data` names the current holder: `claimedBy`, `claimedNode`, `claimedScope`, `claimGeneration`, `claimedAt`,
+  `task` (d1e7b9c; driven 2026-11-16, T-13642).
   `--take-over` supersedes and bumps the generation.
 - **Release.** `wrkq release <task> --scope ... --claim-token ... --claim-generation N`, run as the holder's
   principal. A superseded holder is refused (`claim_superseded: ...`), and so is a token that doesn't match the
@@ -78,7 +81,10 @@ WRKQD_TOKEN_FILE=$WV_STATE/token-wv2 ~/.local/bin/wrkq release T-00002 --as agen
   modifier, so the scope becomes `...:wv-<name>ask:T-2` and every claim is refused
   `--scope must be a task-scoped sessionRef`. Brace it: `${WP}:task` (2026-10-20, T-11374 `04-claims-promises/drive.txt`).
 - `--scope` accepts the lane-suffixed `$HRC_SESSION_REF` form (`...:task:T-00001/lane:main`) and records
-  the claim against the task scopeRef with the lane dropped. A non-task ref is still refused.
+  the claim against the task scopeRef with the lane dropped. A non-task ref is still refused, and since a4481f1
+  (T-12975) so is a malformed lane: an empty lane (`.../lane:`), an extra segment (`.../lane:main/x`) and a handle
+  with a lane (`clod@wv-<name>:T-n/lane:main`) all get `--scope must be a task-scoped sessionRef` (2026-11-16,
+  T-13642).
 - Release must run as the holder's principal: `WRKQ_VALIDATION: claim principal must match claim scope agent`.
   Set `--as` to match the scope's agent. The drive pins `--as agent:clod` on the superseded release and the promise
   lines, because without it the principal (and the promise owner) comes from whatever seat runs the drive
@@ -99,6 +105,6 @@ it drops it from `ready`, and resolving it leaves `state: resolved` with three `
 workstream is unclaimable, a claimed task completes only with the holder's credentials, and an on-behalf promise is
 owned by the other agent.
 
-Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/04-claims-promises/drive.txt`
-(the T-12309 replay, then release edge cases, claimed completion, update replay, on-behalf and `claimValidate`
+Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/04-claims-promises/drive.txt`
+(the T-12762 replay, then lane-suffixed and malformed `--scope`, typed holder data and the W- workstream refusal
 after the NOTE drift line). T-11374's five zsh driver-error claims (see Gotchas) are not replayed.

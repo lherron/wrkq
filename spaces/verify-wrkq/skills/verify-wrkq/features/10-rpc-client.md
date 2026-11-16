@@ -23,7 +23,11 @@ stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rid
   `wrkq.commit.wait` (feature 1) and `wrkq.ext.put|show|listView|delete` (feature 2); new codes include
   `WRKQ_EXT_INVALID`, `WRKQ_EXT_QUOTA`, `WRKQ_META_KEY_RESERVED`, `WRKQ_COVERS_REQUIRES_WORKSTREAM` and
   `WRKQ_WORKSTREAM_NOT_CLAIMABLE` (all but `WRKQ_EXT_QUOTA`, 256 records per subject by source read, driven
-  2026-11-09, T-12762). A string
+  2026-11-09, T-12762). These codes, and `WRKQ_WORKSTREAM_KIND_FIXED` (1f59e43, which isn't in `ErrorCodeCatalog`,
+  so the hash didn't move), have no `domainRPCCode` entry and ride on JSON-RPC `-32603`: a raw
+  `wrkq.task.update {patch:{kind:"task"}}` on a `W-` row answers `{"code":-32603,"data":{"code":
+  "WRKQ_WORKSTREAM_KIND_FIXED"}}`. Branch on `error.data.code`; product task T-13645 (2026-11-16, T-13642). A raw
+  `wrkq.task.create {kind:"workstream"}` returns a `W-` id, and `wrkq.task.show {task:"W-n"}` reads it. A string
   `timeoutMs` is a bare `-32602 invalid params` with no `data.field`.
 - **Bootstrap views.** Three read-only, bounded, cross-owner pages with no CLI verb, for consumers that rebuild
   state (96051e4, 5fbf10c): `wrkq.promise.listView {states?, limit?, cursor?}` (default `["open"]`),
@@ -51,7 +55,7 @@ stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rid
   `rpc.initialize` before it resolves. An `rpc://` locator goes through `WRKQ_DB`, so the client never parses
   CLI output and never calls wrkqd HTTP itself. Errors are `WorkRpcError` with `domainCode` and `retryable`.
   `client.wrkq.commit.wait()` acquires (`changed:true`) and `commit.wait({since, timeoutMs:1000})` times out
-  `changed:false` with the same token (published `0.1.0-dev.20261108093348`, driven 2026-11-09, T-12762).
+  `changed:false` with the same token (published `0.1.0-dev.20261111054154`, driven 2026-11-16, T-13642).
 - **Publishing.** A main-checkout `just install` on a producer node with a clean tracked tree (source read: `justfile`) publishes a timestamped `@wrkq/client` to the node's
   Verdaccio (`npm view @wrkq/client dist-tags`). Consumers pin it. A new client refuses an old server on a
   protocol-hash mismatch.
@@ -123,7 +127,7 @@ creates a task attributed to your principal, replays the same id on the same
 The published client's three view methods and `commit.wait` answer. Live: `rpc.initialize` names the canonical
 revision and the same hash.
 
-Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/10-rpc-client/drive.txt`, published
-`@wrkq/client@0.1.0-dev.20261108093348` with `spaces/verify-wrkq/fixtures/client-drive.ts` and T-12309's
-`fixtures/client-views.ts` (copied, `command` by install path). Live: `live/reads.txt` (canonical serves e9c5054,
-hash `sha256:7ef5b72a...`, 190 methods).
+Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/10-rpc-client/drive.txt`, published
+`@wrkq/client@0.1.0-dev.20261111054154` with `spaces/verify-wrkq/fixtures/client-drive.ts` and the prior passes'
+`fixtures/client-views.ts` (copied, `command` by install path), then the W- create/show and kind-fixed frames after the
+NOTE drift line. Live: `live/reads.txt` (canonical serves 1f59e43, hash `sha256:7ef5b72a...`, 190 methods).

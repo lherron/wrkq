@@ -25,7 +25,7 @@ usage:
   wv down N [--dry-run]       stop N's daemon and remove its state
   wv list                     scratches with pid, port and liveness
   wv evidence N DIR           copy log, health, doctor, tree and a db snapshot into DIR
-  wv rec FILE 'SHELL CMD'     run CMD with bash, appending '## <UTC>', '$ CMD', output and exit to FILE
+  wv rec FILE 'SHELL CMD'     run CMD with bash, appending '## <UTC ms>', '$ CMD', output and exit to FILE
 EOF
   exit 2
 }
@@ -171,12 +171,15 @@ cmd_evidence() {
 # Append one command to a drive.txt as `## <UTC time>`, `$ <command>`, its
 # combined output and `exit: <code>`, and echo the same to stdout. The command
 # runs in the caller's environment, so eval `wv env N` first for scratch drives.
+# The time is when the command finished, in milliseconds (2026-11-16, T-13642):
+# whole seconds let a replay swap drives that shared a second (MAINTAIN step 4).
 cmd_rec() {
   [[ $# -eq 2 ]] || usage
-  local file="$1" cmd="$2" out code
+  local file="$1" cmd="$2" out code ts
   mkdir -p "$(dirname "$file")"
   set +e; out="$(bash -o pipefail -c "$cmd" 2>&1)"; code=$?; set -e
-  { printf '## %s\n$ %s\n%s\nexit: %s\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$cmd" "$out" "$code"; } | tee -a "$file"
+  ts="$(perl -MPOSIX=strftime -MTime::HiRes=time -e '$t=time; printf "%s.%03dZ", strftime("%Y-%m-%dT%H:%M:%S", gmtime($t)), ($t-int($t))*1000')"
+  { printf '## %s\n$ %s\n%s\nexit: %s\n\n' "$ts" "$cmd" "$out" "$code"; } | tee -a "$file"
   return 0
 }
 

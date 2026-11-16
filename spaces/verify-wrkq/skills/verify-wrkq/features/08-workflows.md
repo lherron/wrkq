@@ -31,8 +31,11 @@ supervisor role sit on top. Code: `cmd/wrkf/`, `internal/wrkfcli/`, `internal/wo
   and `workflow.transitioned` events.
 - **Cross-task page.** The RPC-only `wrkq.workflow.instancesView {statuses?, tasks?, limit?, cursor?}` (5fbf10c, no
   CLI verb) pages instances across tasks in `(created_at, id)` order, `open`/`active`/`waiting` by default, so a
-  `closed` instance needs `statuses: ["closed"]`. `tasks` takes any task selector, bare numbers included. Feature 10
-  has its shape and refusals. Driven 2026-11-02, T-12309.
+  `closed` instance needs `statuses: ["closed"]`. `tasks` takes any task selector, bare numbers included, and a
+  bare number resolves to the newest id with that suffix at read time (a replay that creates T-00019 first turns
+  `tasks:["9"]` into T-00019). Workflows attach to a workstream by its `W-` id, and `next`, `inspect` and
+  `instancesView {tasks:["W-n"]}` read it back (driven 2026-11-16, T-13642). Feature 10 has its shape and refusals.
+  Driven 2026-11-02, T-12309.
 - **Watch.** `wrkf watch <task> --until closed [--timeout T] [--follow] [--json]` parks on `wrkq.commit.wait`
   (7f26a88, 131c843): a watch ended about 1 s after `finish`, not at its 60 s timeout or its `--poll-interval 1h`.
   `--poll-interval` is still validated (`0s` is `must be greater than zero`, exit 2) but no longer paces anything.
@@ -123,10 +126,10 @@ names the missing evidence. The transition is refused until that evidence exists
 two transitioned events. A `wrkf watch --follow` on the instance ends `met` within about 1 s of the last
 transition.
 
-Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/08-workflows/drive.txt`,
-the T-12309 replay (both fixtures on T-00009/T-00010, the `instancesView` frames, the invalid-template drives with
-T-12309's fixtures copied to `fixtures/`), then watch, meta closure, the out-of-band transition and the T-10356/T-10357
-restamps after the NOTE drift line. Live read: `wrkf workflow list --json` in `live/reads.txt`.
+Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/08-workflows/drive.txt`,
+the T-12762 replay (both fixtures, the `instancesView` frames, the invalid-template drives with the fixtures copied to
+`fixtures/`, watch, meta closure, the out-of-band transition and the T-10356/T-10357 restamps), then the W- workflow
+and a T-10356 re-drive after the NOTE drift line. T-10356 and T-10357 still reproduce at 1f59e43. Live read: `wrkf workflow list --json` in `live/reads.txt`.
 
 T-12376 candidate metadata-closure drive, 2026-11-04Z:
 `var/wrkq-artifacts/T-12376/rehearsal-drive.txt` attaches the existing

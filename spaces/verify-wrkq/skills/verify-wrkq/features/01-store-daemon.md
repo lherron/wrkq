@@ -21,6 +21,9 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
   tokens, each bearer credential maps to a `nodeId`, which task claims require (feature 4). It needs a wrkf hook
   catalog (`WRKF_HOOK_CATALOG`) and refuses to start without one. It also refuses a non-loopback listen without
   a token, unless it gets `-unsafe-no-token`.
+- **Routes.** wrkqd serves only `/v1/health` and `/v1/rpc` (9350dcd, T-12856). The old REST paths
+  (`/v1/tasks/*`, `/v1/containers/tree`, `/v1/comments/*`, `/v1/relations/*`) answer 404 `route: unmatched`, with
+  or without a token (driven 2026-11-16, T-13642).
 - **Health.** `wrkq server health --addr H:P` reads `/v1/health` with the caller's token. A node-token daemon
   answers 401 to an unauthenticated health read. With a wrong token, `server health` still exits 0 and prints
   `{"auth":"unauthorized","status":"ok"}` plus a stderr notice that the daemon rejected the caller's token, so
@@ -36,7 +39,8 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
   from `PRAESIDIUM_CALLER`, then `ASP_HANDLE` (a seat logs `clod@wrkq:T-12762`), then `unknown`; `@wrkq/client`'s
   `componentName` sets it too. An invalid value logs `unknown` and is still served. A `/v1/rpc` line names
   its JSON-RPC method as `op`. A frame that fails inside HTTP 200 logs `warn` with the JSON-RPC `code` and
-  `message`, and a non-2xx logs `warn` (`error` at 5xx) with the body's message (`unauthorized` for a 401).
+  `message`, except one whose caller hung up: that logs `info` with `message: "caller cancelled"` and no `code`
+  (dc2c881, T-12764; driven 2026-11-16, T-13642). A non-2xx logs `warn` (`error` at 5xx) with the body's message (`unauthorized` for a 401).
   Successful polls (`rpc.initialize`, `wrkq.envelope.pendingView`, monitor, timeline, history and `wrkf.watch.*`
   views) log at most once per `-poll-sample-window` (default 1m) per client, caller, remote and op, and the next
   admitted line carries `suppressed: N`. `wrkq.commit.wait` is not sampled: every parked wait logs one line, at its
@@ -61,7 +65,8 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
   principal, with the source of each. `wrkqadm db snapshot --out F [--json]` takes an online-backup copy.
   `wrkqadm state export --out F` writes the canonical task-ledger JSON snapshot (containers, tasks, comments,
   promises, links; not rooms, handoffs, workflows, events or `ext` rows; a workstream's `covers` exports as null,
-  product task T-12717, reproduced 2026-11-09 T-12762), and `state verify F` checks the file is
+  product task T-12717, reproduced 2026-11-09 T-12762; a workstream row exports under its `W-` id and the export
+  still verifies canonical, 2026-11-16 T-13642), and `state verify F` checks the file is
   byte-identical to the canonical encoding of its content: a `state export --no-canonical` file or a `jq -S`
   reformat fails `✗ snapshot is not canonical: difference at byte N`, exit 4 (8bc0075; before it, every
   parseable file passed). `wrkqadm patch create --from S0 --to S1 --out P`, `patch summarize --patch P` and
@@ -151,11 +156,15 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 - **`X-Wrkq-Scope-Ref` (b72248e).** A scope header without a project (`agent:probe`) is refused `WRKQ_VALIDATION`
   "caller scope must include a project"; a valid one is stamped on the write (`created_by_scope_ref:
   probe@wv-<name>`, handle form). Only `wrkq rpc --stdio`, `wrkq ext`, wrkc and `@wrkq/client`/`pkg/client` send it,
-  so a plain `wrkq touch` from a seat leaves `created_by_scope_ref` null (2026-11-09, T-12762).
-- **A sub-second wait logs a false `-32603`.** `monitor wait --timeout 500ms` (or `1s`, when the slack lands under
-  1 s) ends correctly, but wrkqd logs the cancelled `wrkq.commit.wait` as `warn` `-32603 "internal error"`.
-  401c525 keeps the tight client deadline below 1 s by design; waits of 1.2 s and up log nothing. Product task
-  T-12764 (2026-11-09, T-12762 `09-monitor-webhooks/drive.txt`). Don't count these as daemon faults.
+  so a plain `wrkq touch` from a seat leaves `created_by_scope_ref` null (2026-11-09, T-12762). Since a4481f1
+  (T-12975) the header goes through the session-ref parser: a canonical `agent:<id>:project:<p>/lane:<l>` is admitted
+  and stamped without the lane, while a handle with a lane (`probe@wv-<name>/lane:main`) and an empty lane
+  (`.../lane:`) are refused `WRKQ_VALIDATION "invalid sessionRef: ..."` (2026-11-16, T-13642 drift).
+- **A `-32603` in the request log is not always a daemon fault.** The cancelled-wait false `-32603` is gone since
+  dc2c881 (T-12764; 0 of 4 cancelled waits logged one, 2026-11-16, T-13642). But typed refusals whose code has no
+  `domainRPCCode` entry (`WRKQ_META_KEY_RESERVED`, `WRKQ_EXT_INVALID`, `WRKQ_COVERS_REQUIRES_WORKSTREAM`,
+  `WRKQ_WORKSTREAM_NOT_CLAIMABLE`, `WRKQ_WORKSTREAM_KIND_FIXED`) still go out, and log, as `warn` `-32603` with
+  their own message: 21 of the scratch's 24 `-32603` lines (product task T-13645). Read `message`, not `code`.
 - In an agent seat an unattributed write doesn't reach the "principalRef is required" refusal: the CLI resolves
   the principal from `ASP_AGENT_ID`/`AGENT_ACTOR` even with `WRKQ_PRINCIPAL_REF`, `HRC_SESSION_REF` and
   `AGENT_SCOPE_REF` unset (T-10349).
@@ -171,7 +180,7 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 
 On a fresh `wv up`, health is ok with the token and 401 without it, a tokenless client gets the token refusal,
 a dead locator gets the "retrying is safe" refusal, `whoami` names the scratch locator, doctor reports every row
-ok, `migrate --status` lists every migration as applied (000073_task_meta_closure last at 401c525), and `migrate` refuses
+ok, `migrate --status` lists every migration as applied (000074_workstream_ids last at 1f59e43), and `migrate` refuses
 the serving store. `WRKQ_PROFILE=1` prints the breakdown, the snapshot, `state verify` and `patch validate`
 reads succeed on the scratch file, `state verify` refuses a `--no-canonical` export (exit 4), and `patch rebase`
 emits no `remove` ops. The daemon log has an `http.listen` line and one `http.request` line per request
@@ -180,7 +189,7 @@ message, and sampled polls with a `suppressed` count. `commit.wait` answers a fr
 current token `changed:false` after the 1 s clamp, and wakes within about 1 s of a write. On the canonical daemon, read only: health is ok and `rpc.initialize`
 names a revision.
 
-Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/01-store-daemon/drive.txt`,
-`evidence/t-12762/`, live reads in `live/reads.txt` (canonical serves e9c5054, same protocol hash). Every feature's
-drive.txt starts with a replay of T-12309's drives (each entry after a `NOTE replay T-12309 ...` line, diffed in
-`replay/compare.txt`, triaged in `replay/triage.md`), then its drift drives after a `NOTE drift T-12762` line.
+Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/01-store-daemon/drive.txt`,
+`evidence/t-13642/`, live reads in `live/reads.txt` (canonical serves 1f59e43, same protocol hash). Every feature's
+drive.txt starts with a replay of T-12762's drives (each entry after a `NOTE replay T-12762 ...` line, diffed in
+`replay/compare.txt`, triaged in `replay/triage.md`), then its drift drives after a `NOTE drift T-13642` line.

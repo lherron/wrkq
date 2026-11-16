@@ -56,9 +56,12 @@ against the last pass's. Matching ids make the outputs comparable, and every dif
 T-11873 pass did this with `parse.py`, `gen.py` and `compare.py` in its `artifact_dir/replay/`; T-12309 reused them
 and added `triage.md`, one row per difference. Three traps (2026-11-02, T-12309):
 
-- `drive.txt` times are whole seconds, and the replay breaks a same-second tie by feature-file order. Drives from
-  two features that shared a second can swap, so a snapshot or a count taken then can differ (T-12309: `s1` held 3
-  tasks, not 5). Check the timestamps before you call such a diff a change.
+- `drive.txt` times before 2026-11-16 are whole seconds, and the replay breaks a same-second tie by feature-file
+  order. Drives from two features that shared a second can swap, so a snapshot or a count taken then can differ
+  (T-12309: `s1` held 3 tasks, not 5). Check the timestamps before you call such a diff a change. A fast replay
+  makes this worse: T-12762's ran ~5 drives/s, and T-13642 traced 12 diffs to ties (a bare `tasks:["9"]` even
+  resolved to a different task). Since T-13642 `wv rec` stamps milliseconds (`## 2026-11-16T09:28:34.922Z`), so a
+  replay of a T-13642-or-later pass orders exactly; `parse.py` must accept the optional fraction (T-13642's does).
 - Export everything the replay needs **before** you read it. `export A=... SINKPORT=$(cat $A/...)` reads `$A`
   before it is set, so feature 9's sink port came out empty and the replay had to be rerun on a fresh scratch.
 - A replay runs in your harness shell, and its `just` must be the wrkp shim (feature 7 Gotchas). Check
@@ -73,6 +76,13 @@ Two more (2026-11-09, T-12762):
   owner CLIs in command position to `~/.local/bin/<cli>` (and to `$HOME/.local/bin/<cli>` inside double quotes),
   drop `PATH="$HOME/.local/bin:$PATH"` prepends, and have `compare.py` strip those prefixes before diffing.
   T-12762's `replay/gen.py` and `compare.py` do this.
+
+One more (2026-11-16, T-13642):
+
+- Copy the prior pass's helpers into your artifact_dir before the replay. Its drives source `$A/replay/lv.sh` and
+  copy `$A/fixtures/*` (`client-views.ts`, `bad-state.json`, `bad-token.json`), and `$A` is now *your* dir, so the
+  first T-13642 run lost 8 entries to exit 127 (`replay/aborted-run1/`). `grep -o '\$A/[^ "]*' replay.sh | sort -u`
+  lists them.
 
 Run Doctor first, and again after any surprise. Drive each feature's "Driving it" section on the scratch, **plus
 every drift or new behavior that step 2 flagged**, with `wv rec` into `NN-<feature>/drive.txt`. Do the canonical

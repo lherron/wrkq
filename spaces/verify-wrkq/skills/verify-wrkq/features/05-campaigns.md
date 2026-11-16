@@ -25,8 +25,10 @@ create-as-campaign `internal/rpccli/containers.go` and `internal/store/container
   elsewhere, and `wrkq cat` then shows `campaign: {id, path, membership: resident|enrolled}`.
   `wrkq find --campaign P-<n> --state all` lists all members. `touch --campaign P-<n>` enrolls at create. Only
   **direct** children are resident: a task in `camp/sub/` isn't listed by `find --campaign`, doesn't block a close
-  and doesn't hold off the close nudge. A resident workstream is an ordinary member and blocks a completed close.
-  Driven 2026-11-09, T-12762.
+  and doesn't hold off the close nudge. A resident workstream is an ordinary member and blocks a completed close:
+  `campaign close --json` is `WRKQ_WRONG_STATE` with `error.data.stragglers` listing `{id, membership, path, state,
+  uuid}` for each blocker, `T-` and `W-` alike. A workstream enrolls at create (`touch --kind workstream --campaign`)
+  and keeps its kind. Driven 2026-11-16, T-13642.
 - **Portfolio.** `wrkq campaign portfolio --json` is the aggregate of every campaign. A closed campaign drops out of
   the default aggregate; `portfolio --state completed` brings it back.
 - **Rooms.** `wrkc say T-<member>` coalesces to the campaign room (feature 6).
@@ -54,7 +56,8 @@ Run `eval "$(wv env <name>)"`, then create a container in the scratch project to
 ## Gotchas
 
 - Hard deletion refuses surviving external enrollments with `WRKQ_VALIDATION`, naming task IDs and paths
-  in the message and `data.members`. Both empty deletion and recursive purge refuse without mutation.
+  in the message and `data.members` (the CLI's `--json` shows `error.data.members` since d1e7b9c; driven with an
+  enrolled `W-` member 2026-11-16, T-13642). Both empty deletion and recursive purge refuse without mutation.
   Unenroll first; a recursive purge selecting both the campaign and its enrolled tasks succeeds
   (2026-10-26, T-11953 `05-campaigns/drive.txt`).
 
@@ -92,6 +95,6 @@ path and shows `membership: enrolled`. `find --campaign` returns both the reside
 `container.campaign_close_nudged`, recorded when the last direct member goes terminal. `mkdir --campaign` makes an
 active (or `=draft` a draft) campaign in one write, and a member under a subdirectory is not a member.
 
-Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/05-campaigns/drive.txt`
-(the T-12309 replay, then create-as-campaign, close refusal shape, residency, workstream member, enroll at create,
-subtask refusals, portfolio filter and the enrolled-member delete refusal after the NOTE drift line).
+Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/05-campaigns/drive.txt`
+(the T-12762 replay, then the close refusal with a W- straggler, an enrolled workstream and the `data.members` delete
+refusal after the NOTE drift line).

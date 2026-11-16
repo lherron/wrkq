@@ -8,14 +8,15 @@ downward) or global, on the internal root. Code: `internal/rpccli/monitor.go`, `
 
 ## Sub-features
 
-- **monitor wait.** `wrkq monitor wait <TASK|EN...> --until state=<s>|all-terminal|terminal --timeout D
+- **monitor wait.** `wrkq monitor wait <TASK|W-|EN...> --until state=<s>|all-terminal|terminal --timeout D
   [--stall-after D]` prints one `wrkq.monitor.terminal` line. Exit codes: 0 when the condition is met, 1 when
   the timeout or stall leaves it unmet, 2 for a selector error, 3 for a stream error. Since 7f26a88 `wait` and
   `watch` take a commit token before their first read and park on `wrkq.commit.wait` (feature 1) between reads,
   for the shortest of 25 s, the time left to `--timeout` and to `--stall-after`, instead of polling: a `wait`
   started 2 s before the `set` returned 2.1 s after start. Stall (2.0 s) and timeout exits are unchanged. A wait
-  whose remaining slack is under 1 s logs a false `-32603` in wrkqd's request log (feature 1 Gotchas, T-12764).
-  Driven 2026-11-09, T-12762.
+  that ends on its timeout logs its cancelled `wrkq.commit.wait` as `info` "caller cancelled" (dc2c881; T-12764's
+  false `-32603` is gone: 0 lines over 500 ms, 1 s, 1.2 s and 2 s waits). A workstream waits by its `W-` id.
+  Driven 2026-11-16, T-13642.
 - **monitor watch.** `wrkq monitor watch [TASK...] [--state-only] [--until ...] [--raw] [--since <event id>]
   [--timeout D]` streams events. `--raw` gives event-log rows (`id`, `event_type`, `resource_id`, `principal_ref`,
   `scope_ref`, `payload` as a JSON string, so use `fromjson`). Without `--since` it **replays the whole log from
@@ -89,7 +90,8 @@ timeout` with exit 1 for a state that never arrives. `watch --raw` streams event
 and then updating a task in it POSTs exactly two `task` events (`created`, `updated`) to `/hook/<task id>`, with
 increasing `event_seq` (a comment adds a third, `comment_added`).
 
-Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/09-monitor-webhooks/drive.txt`
-and `evidence/t-12762/sink.jsonl` (with `user_agent`): the T-12309 replay (with its `tailView` frames), then the
-sub-second `-32603` measurement, wake latency, stall, ext and replay webhook drives after the NOTE drift lines. Live read
+Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/09-monitor-webhooks/drive.txt`
+and `evidence/t-13642/sink.jsonl` (with `user_agent`): the T-12762 replay (its `tailView` frames, the `-32603`
+measurement, wake latency, stall, ext and replay webhook drives), then the cancelled-wait re-measure and the W-
+workstream wait and webhook path (`/hook/W-<n>`, `ticket_id: "W-<n>"`) after the NOTE drift line. Live read
 of the global sinks (three: ACP loopback and tailnet, taskboard): `live/reads.txt`.

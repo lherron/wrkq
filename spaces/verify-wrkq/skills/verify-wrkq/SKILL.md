@@ -38,7 +38,9 @@ You can drive on a scratch daemon or read the live one:
   **canonical** `~/praesidium/var/wrkq-artifacts/<id>`, and `wrkq touch` creates that directory (`touch.go`;
   empty `T-00001.*` dirs from earlier scratch drives already sit in the canonical root). Never write
   evidence there. It goes under the pass task's own `artifact_dir`.
-- **Live (read-only).** The canonical daemon runs on mini (`WRKQ_DB=rpc://mini` from `~/praesidium/.env.local`).
+- **Live (read-only).** The canonical daemon runs on mini (`WRKQ_DB=rpc://mini` from `~/praesidium/.env.local`; a
+  prae seat's process env already carries `WRKQ_DB=rpc://100.117.215.92:7171`, mini's tailnet address, which wins,
+  2026-11-16, T-13642).
   On any node, read only: `wrkq whoami`, `wrkq server health --addr mini:7171`, an `rpc.initialize` frame through
   `wrkq rpc --stdio` (pass `protocolVersion`, feature 10, and read `.result.server.revision`; without it the frame
   is refused, though `error.data.serverRevision` still names the build), `wrkq projects`, `wrkp types <project>`,
@@ -90,7 +92,7 @@ serve the agent guides.
   `wrkq log`, `wrkp log`, `wrkf task timeline`, `wrkc log`, the webhook sink's file, the daemon log.
 - **Keep an artifact that survives.** Put it under your task's `artifact_dir`
   (`~/praesidium/var/wrkq-artifacts/<task>/`), in this layout:
-  - `NN-<feature>/drive.txt` for each feature, written by `wv rec`. Each entry is a `## <UTC time>` line, then
+  - `NN-<feature>/drive.txt` for each feature, written by `wv rec`. Each entry is a `## <UTC time>` line (milliseconds since 2026-11-16), then
     `$ <command>`, then its output, then `exit: <code>`. The file reruns as written after
     `eval "$(wv env <name>)"`. Commands run under `bash -o pipefail`, so a failed command can't hide behind a
     pipe into `jq`. The flip side: a stream cut short by `| head` records `exit: 141` (SIGPIPE). Bound streams
@@ -138,7 +140,7 @@ object. A refusal prints `{error, message, next}` and exits 1.
 | `up` | `wv up [--name N]` | Inits a fresh store, starts the installed `wrkqd` on a free loopback port with node tokens (`wv`, `wv2`) and a stub hook catalog, creates project `wv-N` (N lowercased), and prints name, state_root, db, locator, port, pid, project and hook_catalog. Refuses `already_up` |
 | `env` | `eval "$(wv env N)"` | Exports `WRKQ_DB`, `WRKQD_TOKEN_FILE` (node `wv`), `WRKQ_PROJECT_ROOT=wv-N`, `WRKF_HOOK_CATALOG`, `WRKQ_ATTACH_DIR` and `WV_STATE`. Process env beats the dotenv `rpc://mini` |
 | `run` | `wv run N -- CMD ...` | Runs one command with N's environment |
-| `rec` | `wv rec FILE 'CMD'` | Runs CMD under `bash -o pipefail` in the caller's environment, and appends `## <UTC>`, `$ CMD`, the output and `exit: <code>` to FILE (and stdout) |
+| `rec` | `wv rec FILE 'CMD'` | Runs CMD under `bash -o pipefail` in the caller's environment, and appends `## <UTC ms>`, `$ CMD`, the output and `exit: <code>` to FILE (and stdout) |
 | `evidence` | `wv evidence N DIR` | Copies the daemon log and hook catalog, and writes health, `wrkqadm doctor --json`, `wrkq tree /wv-N --state all` and a `.backup` of the store into DIR |
 | `down` | `wv down N [--dry-run]` | Stops N's `wrkqd` and removes its state |
 | `list` | `wv list` | Every scratch, with pid, port, `alive` and `started_at` |

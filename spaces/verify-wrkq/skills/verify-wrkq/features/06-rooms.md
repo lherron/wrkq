@@ -5,14 +5,16 @@ addressee, with an obligation (`reply_required` by default, `fyi`, or `note`). A
 standing obligations from that counterparty in the room. `defer` pauses an obligation, and `withdraw` takes
 back unpresented mail. HRC delivers envelopes to live seats by tailing the ledger. That delivery side lives in
 hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.go`, `wrkc_room.go`,
-`wrkc_envelope.go`, `wrkc_identity.go`), `internal/wrkqapi/` (`envelope_reads.go`, `envelope_dispositions.go`)
+`wrkc_envelope.go`, `wrkc_identity.go`), `internal/wrkqapi/` (`envelope_reads.go`, `envelope_dispositions.go`,
+`room_scope_refs.go`, `rooms_say.go`, `rooms_verbs.go`)
 and `internal/store/` (rooms, envelopes, `envelope_lifecycle.go`). Guide:
 `internal/rpccli/embedded/WRKC-USAGE.md` (`wrkc info`) and `docs/wrkc-reference.md`.
 
 ## Sub-features
 
 - **Routing.** `wrkc say <ref>` routes by ref. `R-`/`EN-` names the room (an envelope resolves to its room).
-  `T-` names the task's campaign room when the task is in a campaign, and otherwise the task room. A container
+  `T-` (and a workstream's `W-`, since 1f59e43: `wrkc say W-00054` keys room `W-00054`, driven 2026-11-16,
+  T-13642) names the task's campaign room when the task is in a campaign, and otherwise the task room. A container
   routes to its campaign or project room. `agent@project[:task]` with no ref uses the work context of both
   parties. A bare number is a task ref by feature 2's suffix rule: once T-00017 exists, `wrkc say 7` and
   `wrkc log 7` name T-00017's room and `07` names T-00007's (driven 2026-10-26, T-11873).
@@ -106,6 +108,12 @@ printf 'WV withdraw probe\n' | ~/.local/bin/wrkc say T-00004 --to cody@wv-<name>
 
 ## Gotchas
 
+- **Lane suffixes (a4481f1, T-12975).** `--scope-ref agent:<id>:project:<p>:task:<t>/lane:main` is admitted and the
+  envelope's `from.scopeRef` drops the lane (handle form). A handle with a lane (`clod@<p>:primary/lane:main`) and an
+  empty lane (`.../lane:`) are refused `WRKQ_VALIDATION "invalid sessionRef: ..."` (`data.field: scopeRef`). `--to`
+  takes no lane in either form: `cody@<p>:primary/lane:main` is "invalid addressee handle" and the canonical
+  `agent:cody:...:task:primary/lane:main` is "invalid addressee" (`data.field: to`) (2026-11-16, T-13642 drift).
+
 - **HRC delivery can't be driven on a scratch.** HRC's kicker tails the canonical ledger, so a scratch envelope
   is never presented, steered or woken: `presentedTo` stays `[]` and `delivery: queue`. On a scratch you prove
   the ledger (obligations, acks, defer, withdraw, routing). Delivery is hrc-runtime's to verify. A scratch
@@ -134,6 +142,6 @@ written acked and terminal with `note_recorded`, shows only in the addressee's `
 shows every envelope with its sender and addressee. Live, read only: your own `wrkc inbox` matches what you
 know you owe.
 
-Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/06-rooms/drive.txt`
-(the T-12309 replay, then retry defer, `--discharges`, expiry scope, `--wait` and the T-10358 restamp after the NOTE
-drift line). T-10358 still reproduces at 401c525. Live inbox read: `live/reads.txt`.
+Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/06-rooms/drive.txt`
+(the T-12762 replay, then the `--to`/`--scope-ref` lane forms and the W- room after the NOTE drift line). T-10358
+still reproduces at 1f59e43 (its T-12762 drive replayed identically). Live inbox read: `live/reads.txt`.

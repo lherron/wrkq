@@ -28,9 +28,14 @@ MAINTAIN.md. Code: `cmd/wrkp/`, `internal/rpccli/wrkp*.go` (`wrkp.go`, `wrkp_log
   Driven 2026-11-09, T-12762.
 - **Multi-project follow.** `wrkp log --follow a b --ndjson [--after a=C]...` follows several projects on ONE
   `wrkq.commit.wait`; each entry gains `"project"` (container path), the terminal record carries `"cursors":{a,b}`
-  instead of `cursor`, and `wrkp cursor a b` prints `a=C`/`b=C` lines usable as `--after`. Only with `--follow
-  --ndjson`; `--task/--before/--limit/--since` and a bare `--after` are exit 2. Prove the single wait from the
-  daemon's request log: one caller stream of `wrkq.commit.wait`. T-12864.
+  instead of `cursor`, and `wrkp cursor a b` prints `a=C`/`b=C` lines usable as `--after` (`--json`: an array of
+  `{project, cursor}`). Only with `--follow --ndjson`: without `--follow`, or without `--ndjson`, it is `WRKQ_USAGE`
+  "more than one project is accepted only with --follow and --ndjson"; `--task/--before/--limit/--since`, a bare
+  `--after` and a project named twice ("project <p> is named twice") are exit 2. An unknown project fails before the
+  first entry, exit 1, with the server's typed error prefixed by the name (`no-such-proj: container not found: ...`).
+  The daemon's request log shows one caller making sequential `wrkq.commit.wait` calls (3 in an 8 s follow with two
+  posts); the per-project `timelineView` reads are sampled, so count them from `suppressed`. Driven 2026-11-16,
+  T-13642 (T-12864).
 - **Types.** `wrkp types <project>` lists every stored fact type with its count.
 - **Show.** `wrkp show <uuid> --json` returns the full row, including `idempotencyKey`, `occurredAt`,
   `principalRef` and `scopeRef`.
@@ -85,6 +90,11 @@ C1=$(~/.local/bin/wrkp cursor wv-<name>); ~/.local/bin/wrkq touch inbox/wv-visib
 ~/.local/bin/wrkp log wv-<name> --after "$C1" --type 'task.*' --ndjson | jq -c .type      # task.created, task.edited, task.moved
 printf 'refs/heads/main %s refs/heads/main %s\n' "$(git rev-parse HEAD)" 0000000000000000000000000000000000000000 \
   | ~/.local/bin/wrkp git push origin file:///dev/null                                     # one git.push
+~/.local/bin/wrkq mkdir /wv-<name>-b --kind project                                      # a second project
+CA=$(~/.local/bin/wrkp cursor wv-<name>); CB=$(~/.local/bin/wrkp cursor wv-<name>-b)
+( ~/.local/bin/wrkp log --follow wv-<name> wv-<name>-b --ndjson --after wv-<name>=$CA --after wv-<name>-b=$CB --timeout 8s > "$WV_STATE/multi.ndjson" ) & sleep 2
+~/.local/bin/wrkp post wv-<name> --type wv.multi --key m:1 -m a --attr n=1; ~/.local/bin/wrkp post wv-<name>-b --type wv.multi --key m:2 -m b --attr n=2; wait
+jq -c '{type, project, s: .projectEvent.summary, cursors: ((.cursors // {}) | keys)}' "$WV_STATE/multi.ndjson"   # two entries, then terminal with both cursors
 ```
 
 Live, read only: `wrkp types wrkq` and `wrkp log wrkq --type verify.upkeep --limit 1 --json`.
@@ -124,9 +134,10 @@ posts a `git.commit` (sha, branch, author, `files_changed`, plus node, insertion
 `run.settled` with status 0 and 3, each carrying `load1` and `ncpu`, the listing and `just -n` post nothing, and
 just's exit code passes through (3). An unfiltered `wrkp log` shows a new task's `task.created` but not its
 `task.edited` or `task.moved`. A plain `just` posts (the shim leads PATH), an unknown recipe posts nothing, a
-followed post arrives within about 1 s and the follow ends with a `wrkp.log.terminal` row.
+followed post arrives within about 1 s and the follow ends with a `wrkp.log.terminal` row. A two-project follow
+delivers each project's post tagged with its `project` path and ends with `cursors` for both.
 
-Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/07-project-facts/drive.txt`
-(the T-12309 replay, whose plain `just` drives now post, then shim resolution, unknown and nested recipes, the 127
-shim, follow wake and the out-of-band follow after the NOTE drift line).
+Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/07-project-facts/drive.txt`
+(the T-12762 replay, then `wrkp cursor a b`, the two-project follow and its usage refusals after the NOTE drift
+line; the first follow drive's jq dropped its entry lines and is re-recorded below its NOTE).
 Live reads: `live/reads.txt` (`wrkp types wrkq`).

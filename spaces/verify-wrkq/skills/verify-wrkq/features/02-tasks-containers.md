@@ -1,6 +1,6 @@
 # 2. Tasks and containers
 
-This is the core ledger: projects, containers and tasks addressed by `T-<n>`/`P-<n>`, uuid or path. It covers
+This is the core ledger: projects, containers and tasks addressed by `T-<n>`/`W-<n>`/`P-<n>`, uuid or path. It covers
 create, read, update with etags, list, tree, find, search, move, soft delete and restore, container archive with
 its cascade, named subtasks, relations, subject extensions (`wrkq ext`), workstreams, the edit round trip (`cat --output raw` and `apply`), and history
 (`log`). Code: `internal/rpccli/` (`touch.go`, `set.go`, `ls.go`, `tree.go`, `mv.go`, `rm.go`, `search.go`,
@@ -27,7 +27,7 @@ its cascade, named subtasks, relations, subject extensions (`wrkq ext`), workstr
   keys from existing rows. Re-driven 2026-11-09, T-12762: `--meta '{"acp":{"x":1}}'` and `{"foo":null}` refused,
   `--meta null` and `{}` admitted, a workflow-only round trip admitted (feature 8).
 - **Extensions.** `wrkq ext put|get|list|delete <subject> <ns> <kind> <id>` (000071) keeps foreign data off the
-  task with its own etag. The subject is a public `T-`, `P-` or `R-` id (a bare number or path is a usage error,
+  task with its own etag. The subject is a public `T-`, `W-`, `P-` or `R-` id (a bare number or path is a usage error,
   exit 2). `put --body <json object|@file|->` with `--create` refuses an existing record (`WRKQ_CONFLICT`) and
   `--if-match N` a stale etag; `--create --if-match` together is a usage error. A non-object body, or an `ns`/`kind`
   that isn't 1-4 lowercase-led alphanumeric dot segments (`Bad`), is `WRKQ_EXT_INVALID`. `put` returns
@@ -35,13 +35,18 @@ its cascade, named subtasks, relations, subject extensions (`wrkq ext`), workstr
   `{items, nextCursor}` (`--states` filters by the subject task's state), `delete --if-match` `{deleted:true}`.
   The task's etag never moves; the task log gets `task.ext.put`/`task.ext.deleted`, and no webhook fires
   (feature 9). An `ext put` carries the seat scope (`updatedByScopeRef`). Driven 2026-11-09, T-12762.
-- **Workstreams.** `touch|set --kind workstream --covers '{"tasks":[...],"container":"P-.."}'` (000072) records
-  what a workstream covers; `cat --output raw` shows `kind: workstream` and `covers: {...}`. Covers on any other
-  kind, or changing a covering workstream's kind, refuses `covers_requires_workstream`; a missing covered task is
-  `task not found`; `--covers null` then `--kind task` is admitted. A workstream can't be claimed
-  (`WRKQ_WORKSTREAM_NOT_CLAIMABLE`, feature 4), lists in `find --type t --kind workstream` (the `--kind` help
-  text doesn't name `workstream` yet), and its `covers` is lost by
-  `state export` (T-12717, feature 1). Driven 2026-11-09, T-12762.
+- **Workstreams.** `touch --kind workstream [--covers '{"tasks":[...],"container":"P-.."}']` (000072) records
+  what a workstream covers; `cat --output raw` shows `kind: workstream` and `covers: {...}`. Since 1f59e43
+  (000074, T-13294) a workstream's id is `W-<n>`, minted from the **shared** task sequence (`W-00046` then the next
+  task is `T-00047`), and every task selector takes it: `cat`, `set`, `log`, `ext`, `find`, `wrkf`, `wrkc`
+  rooms, `monitor`. A bare number reaches it too (`46` and `00046` both select `W-00046`). The kind is **fixed at
+  create**: `set W-n --kind task` and `set T-n --kind workstream` both refuse `WRKQ_WORKSTREAM_KIND_FIXED` "workstream
+  kind is fixed at create; re-create the row" (also after `--covers null`), and `set --kind workstream` on a workstream
+  is a no-op success. Covers on any other kind refuse `covers_requires_workstream`, and a missing covered task is
+  `task not found`. A workstream can't be a named subtask (`WRKQ_VALIDATION` "workstream cannot be a named subtask"),
+  can't be claimed (`WRKQ_WORKSTREAM_NOT_CLAIMABLE`, feature 4), lists in `find --type t --kind workstream` (the
+  `--kind` help text doesn't name `workstream` yet; `set --kind` help still offers it), and its `covers` is lost by
+  `state export` (T-12717, feature 1). Driven 2026-11-16, T-13642.
 - **Read.** `wrkq cat <sel> --json --one` (one object; without `--one`, JSON `cat` returns an array),
   `--output raw` (the task as Markdown), and `wrkq stat`.
 - **Bare numbers.** A bare 1-4 digit number names the numerically **highest task whose id ends in exactly those
@@ -124,8 +129,9 @@ export WRKQ_PRINCIPAL_REF=agent:<you>
 ~/.local/bin/wrkq ext put T-00001 acp request main --body '{"rev":1}' --create --output json | jq -c '{created,etag:.ext.etag}'
 ~/.local/bin/wrkq ext put T-00001 acp request main --body '{"rev":2}' --if-match 1 --output json | jq -c .ext.etag   # 2
 ~/.local/bin/wrkq ext list T-00001 --ns acp --output json | jq -c '{n:(.items|length)}'; ~/.local/bin/wrkq ext delete T-00001 acp request main --if-match 2
-~/.local/bin/wrkq touch inbox/wv-ws -t "WV workstream" --kind workstream --covers '{"tasks":["T-00001"]}' --json | jq -r '.[0].id'
+~/.local/bin/wrkq touch inbox/wv-ws -t "WV workstream" --kind workstream --covers '{"tasks":["T-00001"]}' --json | jq -r '.[0].id'   # W-000NN
 ~/.local/bin/wrkq touch inbox/wv-nows -t n --covers '{"tasks":["T-00001"]}'             # covers_requires_workstream
+~/.local/bin/wrkq set inbox/wv-ws --kind task; echo rc=$?                               # WRKQ_WORKSTREAM_KIND_FIXED, rc 1
 ```
 
 ## Gotchas
@@ -141,16 +147,22 @@ export WRKQ_PRINCIPAL_REF=agent:<you>
   `02-tasks-containers/drive.txt`; still at 401c525, 2026-11-09).
 - **`--json` refusals carry the server's typed code.** `wrkq set --meta '{"acp":1}' --json` is
   `{"code":"WRKQ_META_KEY_RESERVED","message":"meta_key_reserved: ..."}` and a stale `set --if-match` is
-  `WRKQ_CONFLICT`; the server's error data rides in `error.data`. Branch on `error.code`, not the message. A
-  `WRKQ_ERROR` from a server refusal is a regression (T-12766, 2026-11-09).
+  `WRKQ_CONFLICT`; the server's error data rides in `error.data` (always with `retryable`). Branch on `error.code`,
+  not the message. A `WRKQ_ERROR` from a server refusal is a regression (T-12766, 2026-11-09). In text mode the
+  refusal ends with a `code: <CODE>` line after `Error:` (and `hint:`), so a replay of any text refusal from
+  before d1e7b9c differs by that line (2026-11-16, T-13642 `replay/triage.md`).
+- **`covers.tasks` takes only `T-` ids.** Covering a workstream from another workstream refuses `WRKQ_NOT_FOUND`
+  "task not found: W-00046" although the row exists (`internal/wrkqapi/workstream.go:39`), and the hint says
+  "a task is T-<n>". By design covers list tasks; the wording misleads (2026-11-16, T-13642).
 - Closing a task prints a hint about reconciling worktrees under `~/praesidium/under-construction/`. On a scratch
   it means nothing.
 - `wrkq tree` without a TTY prints JSON lines, and an empty project prints nothing at all.
-- **A one-character task slug fails with a raw store error.** `wrkq touch inbox/x -t x` returns `WRKQ_ERROR`
+- **A one-character task slug fails with a raw store error.** `wrkq touch inbox/x -t x` returns `WRKQ_CONFLICT`
+  with `retryable:true` (since d1e7b9c surfaced the server's code; it read `WRKQ_ERROR` before) and the raw
   `CHECK constraint failed: slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' ...`, because that GLOB needs
-  two characters. Use slugs of two or more characters. Product task T-10355 (2026-10-05, T-10349
-  `02-tasks-containers/drive.txt`; task half still reproduces at 401c525, 2026-11-09, T-12762; the container half
-  is a clean `WRKQ_VALIDATION` since e9c5054).
+  two characters, and `mapStoreError` (`internal/wrkqapi/task_read.go:238`) calls any constraint a conflict. Don't
+  retry it. Use slugs of two or more characters. Product task T-10355 (2026-10-05, T-10349; task half still
+  reproduces at 1f59e43, 2026-11-16, T-13642; the container half is a clean `WRKQ_VALIDATION` since e9c5054).
 
 - **A bare number names the newest task with that suffix, not the T-1xxxx one.** On canonical (2026-10-26),
   `wrkq cat 7` is T-11867, not T-10007, and `07` is T-11807. An agent's "7 means T-10007" shorthand has to pass
@@ -168,12 +180,13 @@ container archive cascades to `cancelled` and `unarchive` reverses exactly that 
 `open_subtask_count`, `log <ID>` and `log <path>` show `task.created` and `task.updated` attributed to you, and a
 bare `2` selects T-00012 once it exists (in `cat`, `set` and `log`), while `02` selects T-00002. `mkdir -p` makes a
 nested path, an `ext` record round-trips put/get/list/delete with its own etag while the task's etag holds, a
-workstream records `covers` and refuses covers on another kind, and a replayed `task.update` key returns the first
+workstream gets a `W-` id from the shared sequence, records `covers`, refuses covers on another kind and keeps its
+kind fixed, and a replayed `task.update` key returns the first
 result.
 
-Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/02-tasks-containers/drive.txt`
-(the T-12309 replay, then the mkdir, meta, ext, workstream, update-replay and search drives after the NOTE drift line).
-T-10355 (task half), T-12318 and T-12319 still reproduce at 401c525.
+Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/02-tasks-containers/drive.txt`
+(the T-12762 replay, then the W- id, kind-fixed, subtask, bare-number, typed-refusal and search drives after the NOTE
+drift line). T-10355 (task half), T-12318 and T-12319 still reproduce at 1f59e43.
 
 T-12376 candidate drive, 2026-11-04Z: `var/wrkq-artifacts/T-12376/rehearsal-drive.txt`
 uses the built CLI against a migrated canonical-snapshot copy. It proves ACP/HCS/

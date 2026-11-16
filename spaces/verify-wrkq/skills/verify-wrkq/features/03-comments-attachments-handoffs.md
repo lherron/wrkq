@@ -90,9 +90,15 @@ H=$(printf 'Next: cody acks.\n' | ~/.local/bin/wrkq handoff create --to cody@wv-
   filters with `--status pending|acknowledged|all`; there is no `--state` (2026-10-20, T-11374
   `03-comments-attachments-handoffs/drive.txt`).
 - **A stale `comment rm --if-match` exits 1 with `WRKQ_CONFLICT`.** `comment rm C-<n> --if-match 99 --yes --json`
-  prints `[]` on stdout, `{"error":{"code":"WRKQ_CONFLICT",...}}` on stderr and exits 1; the comment survives. With
-  several ids the matching ones still delete and the error names each refused id. Before T-12765 (fixed 2026-11-09)
-  it warned, skipped and exited 0.
+  prints `[]` on stdout, `{"error":{"code":"WRKQ_CONFLICT",...}}` on stderr and exits 1; the comment survives. The
+  fence is checked before the preview, so `--dry-run` with a stale `--if-match` is refused the same way. With
+  several ids the matching ones still delete, an unknown id only warns (`Warning: comment not found: C-99999`), and
+  the error is `"N comment deletions failed"` with one `hint` line per refused id. Before T-12765 (fixed 2026-11-09)
+  it warned, skipped and exited 0. Driven 2026-11-16, T-13642.
+- **A duplicate attachment is `WRKQ_CONFLICT` with `retryable:true`.** `attach put` of an existing filename answers
+  `{"code":"WRKQ_CONFLICT","data":{"filename":"...","retryable":true}}`; the same put can never succeed, so pick
+  another `--name`. Handoff refusals keep their own snake-case envelope (`{"error":{"code":"handoff_not_found",
+  "handoff_id",...}}`, exit 4) (2026-11-16, T-13642).
 - `comment add` keeps its own `--json`, so the every-verb `--json` (feature 2) doesn't reach it. On a TTY,
   `script -q /dev/null wrkq comment add T-2 -m x --json` still prints `Comment created: C-<n>` (2026-10-20, T-11374).
 
@@ -105,6 +111,6 @@ successor's scope with you as author, shows `From`, and the successor acknowledg
 idempotency key replays the handoff, a soft-deleted comment shows only with `--include-deleted`, and a raw frame for
 another agent is refused on the scope header.
 
-Driven 2026-11-09 on wv `t-12762` (T-12762 upkeep) with installed 401c525: `var/wrkq-artifacts/T-12762/03-comments-attachments-handoffs/drive.txt`
-(the T-12309 replay, then the scope-header, wake, comment rm, meta, idempotency and `attach path` drives after the
-NOTE drift line).
+Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/03-comments-attachments-handoffs/drive.txt`
+(the T-12762 replay, then the stale-fence `comment rm` single/dry-run/multi, duplicate attachment and handoff
+refusal drives after the NOTE drift line).
