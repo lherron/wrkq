@@ -412,3 +412,20 @@ test("envelope.listView forwards bounded replay selectors without caller identit
   expect(await client.wrkq.envelope.listView(params)).toEqual(result);
   expect(transport.capturedRequests.map(({method,params})=>({method,params}))).toEqual([{ method: "wrkq.envelope.listView", params }]);
 });
+
+// T-13013 forward contract: terminal event fields are optional strings and
+// survive envelope.show without a client-side reconstruction.
+type _FailureDetail = Expect<Equal<WrkqEnvelope["failureDetail"], string | undefined>>;
+type _DischargedBy = Expect<Equal<WrkqEnvelope["dischargedBy"], string | undefined>>;
+
+test("envelope.show preserves terminal detail and exact discharging EN id", async () => {
+  for (const terminal of [
+    { ...ENVELOPE, state: "failed" as const, terminal: true, failureDetail: "its runtime ended first" },
+    { ...ENVELOPE, state: "acked" as const, terminal: true, dischargedBy: "EN-00009" },
+    ENVELOPE,
+  ]) {
+    const transport = new FakeTransport().onResult("wrkq.envelope.show", terminal);
+    const client = await createClient({ transport, autoInitialize: false });
+    expect(await client.wrkq.envelope.show({ envelope: terminal.id })).toEqual(terminal);
+  }
+});
