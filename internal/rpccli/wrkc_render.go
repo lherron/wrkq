@@ -618,7 +618,11 @@ func renderWrkcInboxNDJSON(cmd *cobra.Command, obligations []envelopeWire, view 
 
 func envelopeStateLabel(envelope envelopeWire) string {
 	if envelope.State == "failed" && envelope.FailureReason != nil {
-		return "failed (" + *envelope.FailureReason + ")"
+		label := "failed (" + *envelope.FailureReason + ")"
+		if envelope.FailureDetail != nil {
+			label += ": " + *envelope.FailureDetail
+		}
+		return label
 	}
 	return envelope.State
 }

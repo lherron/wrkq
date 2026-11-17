@@ -182,7 +182,7 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	// untouched, and a deferred envelope is excluded — defer first to hold one
 	// back.
 	seenCounterparty := map[string]bool{}
-	for _, addressee := range addressees {
+	for index, addressee := range addressees {
 		if p.DischargeEnvelopeIDs != nil {
 			break
 		}
@@ -198,7 +198,7 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 		seenCounterparty[counterparty] = true
 		rows, aerr := a.store.Rooms.AckSenderObligationsWithAttribution(
 			attr, room.row.UUID, senderScope, attr.PrincipalRef,
-			addressee.ScopeRef, addressee.PrincipalRef)
+			addressee.ScopeRef, addressee.PrincipalRef, created[index].ID)
 		if aerr != nil {
 			return nil, mapRoomStoreError(aerr, "")
 		}

@@ -2871,3 +2871,29 @@ while coverage remains set refuses `covers_requires_workstream`.
 `wrkq.task.list {kind: "workstream"}` and
 `wrkq.task.findListView {kind: "workstream"}` filter by the singular wire field
 `kind`.
+
+
+### Envelope terminal event fields
+
+`WrkqEnvelope` (including `wrkq.envelope.show`, room log/history, envelope
+list/member pages, inbox views and disposition results) carries two optional
+strings from its terminal event:
+
+- `failureDetail` is the stored `detail` on `envelope.failed`, byte for byte,
+  including the write-time UTF-8-safe byte bound. It is omitted when empty and
+  for all other states. `failureReason` remains the class: `undeliverable`,
+  `runtime_terminated`, `ignored`, `unconfirmed`, or legacy `legacy`.
+- `dischargedBy` is the EN id in `discharged_by` on `envelope.acked`, recorded
+  by explicit scoped discharge (`reason: reply_scoped`) and wide reply-is-ack
+  (`reason: reply`). Each obligation names the reply addressed to its own sender,
+  including fan-out and `--note` replies. Notes themselves are acknowledged with
+  `note_recorded`, without a `dischargedBy`. Presentation, operator ack,
+  `consumed_by_wait`, expiry, withdrawal and failure never supply this field.
+  Historical replies without the event field omit it; no backfill or room-order
+  inference is performed.
+
+No column or migration is added. These fields share the existing terminal-event
+lookup used for acknowledgement `reason`. `wrkc show --json` and the TypeScript
+client preserve both fields; human `wrkc show` prints the failure detail on the
+state line. The praesidium kernel's `room.mail.get` passes the envelope JSON
+through. The reflected DTO change requires lockstep daemon/client activation.

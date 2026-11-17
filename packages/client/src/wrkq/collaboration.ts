@@ -158,6 +158,10 @@ export interface WrkqEnvelope {
   expiresAt?: string;
   delivery: "queue" | "hold";
   failureReason?: WrkqEnvelopeFailureReason;
+  /** Bounded detail from envelope.failed, omitted when none was recorded. */
+  failureDetail?: string;
+  /** Exact EN id of the reply addressed to this sender; absent for older replies. */
+  dischargedBy?: string;
   retryAt?: string;
   deferReason?: string;
   /** Terminal acknowledgement disposition from the envelope.acked event. */

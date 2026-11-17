@@ -74,6 +74,8 @@ type envelopeWire struct {
 	ExpiresAt             *string                    `json:"expiresAt,omitempty"`
 	Delivery              string                     `json:"delivery"`
 	FailureReason         *string                    `json:"failureReason,omitempty"`
+	FailureDetail         *string                    `json:"failureDetail,omitempty"`
+	DischargedBy          *string                    `json:"dischargedBy,omitempty"`
 	RetryAt               *string                    `json:"retryAt,omitempty"`
 	DeferReason           *string                    `json:"deferReason,omitempty"`
 	Reason                *string                    `json:"reason,omitempty"`

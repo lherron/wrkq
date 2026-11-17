@@ -110,8 +110,12 @@ type WrkqEnvelope struct {
 	ExpiresAt     *string `json:"expiresAt,omitempty"`
 	Delivery      string  `json:"delivery"`
 	FailureReason *string `json:"failureReason,omitempty"`
-	RetryAt       *string `json:"retryAt,omitempty"`
-	DeferReason   *string `json:"deferReason,omitempty"`
+	// FailureDetail is the bounded detail stored on envelope.failed.
+	FailureDetail *string `json:"failureDetail,omitempty"`
+	// DischargedBy names the reply envelope recorded on envelope.acked.
+	DischargedBy *string `json:"dischargedBy,omitempty"`
+	RetryAt      *string `json:"retryAt,omitempty"`
+	DeferReason  *string `json:"deferReason,omitempty"`
 	// Reason is the disposition reason carried by the terminal envelope event.
 	// It is populated for acknowledgements so consumers can distinguish reply,
 	// operator, fyi_presented, and consumed_by_wait.

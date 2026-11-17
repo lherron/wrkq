@@ -365,6 +365,7 @@ type EnvelopeDisposition struct {
 	RetryAt          *string
 	RetryPromiseUUID *string
 	Reason           string
+	DischargedBy     string
 }
 
 // DisposeEnvelopeWithAttribution applies one disposition under a
@@ -439,6 +440,10 @@ func disposeEnvelopeTx(tx *sql.Tx, ew *events.Writer, attr attribution.Attributi
 	}
 	if disposition.Reason != "" {
 		payload["reason"] = disposition.Reason
+	}
+	if disposition.State == domain.EnvelopeStateAcked &&
+		(disposition.Reason == "reply" || disposition.Reason == "reply_scoped") && disposition.DischargedBy != "" {
+		payload["discharged_by"] = disposition.DischargedBy
 	}
 	if _, err := logEnvelopeEvent(tx, ew, attr, current.UUID, eventType, current.ETag+1, payload); err != nil {
 		return nil, err

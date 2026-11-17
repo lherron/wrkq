@@ -120,7 +120,11 @@ func (rs *RoomStore) CreateEnvelopesAndDischargeWithAttribution(attr attribution
 			return err
 		}
 		for i := range candidates {
-			updated, derr := disposeEnvelopeTx(tx, ew, attr, candidates[i], EnvelopeDisposition{State: domain.EnvelopeStateAcked, Reason: "reply_scoped"}, 0)
+			replyID, err := dischargingEnvelopeID(created, candidates[i])
+			if err != nil {
+				return err
+			}
+			updated, derr := disposeEnvelopeTx(tx, ew, attr, candidates[i], EnvelopeDisposition{State: domain.EnvelopeStateAcked, Reason: "reply_scoped", DischargedBy: replyID}, 0)
 			if derr != nil {
 				return derr
 			}
@@ -324,7 +328,7 @@ func (rs *RoomStore) validateScopedDischargesTx(tx *sql.Tx, params EnvelopeCreat
 // Sibling envelopes in a fan-out group addressed to OTHER scopes are untouched,
 // and a deferred envelope is deliberately excluded so `defer` before replying
 // really does exclude it.
-func (rs *RoomStore) AckSenderObligationsWithAttribution(attr attribution.Attribution, roomUUID, replierScopeRef, replierPrincipalRef, counterpartyScopeRef, counterpartyPrincipalRef string) ([]domain.Envelope, error) {
+func (rs *RoomStore) AckSenderObligationsWithAttribution(attr attribution.Attribution, roomUUID, replierScopeRef, replierPrincipalRef, counterpartyScopeRef, counterpartyPrincipalRef, dischargedBy string) ([]domain.Envelope, error) {
 	if err := requireAttribution(attr); err != nil {
 		return nil, err
 	}
@@ -345,8 +349,9 @@ func (rs *RoomStore) AckSenderObligationsWithAttribution(attr attribution.Attrib
 	acked := make([]domain.Envelope, 0, len(candidates))
 	for index := range candidates {
 		updated, err := rs.DisposeEnvelopeWithAttribution(attr, candidates[index].UUID, EnvelopeDisposition{
-			State:  domain.EnvelopeStateAcked,
-			Reason: "reply",
+			State:        domain.EnvelopeStateAcked,
+			Reason:       "reply",
+			DischargedBy: dischargedBy,
 		}, 0)
 		if err != nil {
 			return nil, err
@@ -363,4 +368,28 @@ func addresseeMemberRef(addressee EnvelopeAddressee) string {
 		return ref
 	}
 	return addressee.PrincipalRef
+}
+
+// dischargingEnvelopeID selects the reply addressed to the original sender.
+// A scope is the address; attribution must not redirect a scoped reply.
+func dischargingEnvelopeID(created []domain.Envelope, original *domain.Envelope) (string, error) {
+	match := ""
+	for _, reply := range created {
+		addressed := false
+		if original.FromScopeRef != nil {
+			addressed = reply.ToScopeRef != nil && *reply.ToScopeRef == *original.FromScopeRef
+		} else {
+			addressed = reply.ToScopeRef == nil && reply.ToPrincipalRef != nil && *reply.ToPrincipalRef == original.FromPrincipalRef
+		}
+		if addressed {
+			if match != "" {
+				return "", fmt.Errorf("multiple discharging envelopes for %s", original.ID)
+			}
+			match = reply.ID
+		}
+	}
+	if match == "" {
+		return "", fmt.Errorf("no discharging envelope for %s", original.ID)
+	}
+	return match, nil
 }

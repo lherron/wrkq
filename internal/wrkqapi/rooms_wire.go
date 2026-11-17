@@ -103,23 +103,33 @@ func (a *API) envelopeDTO(ctx context.Context, envelope *domain.Envelope, room *
 		reason := string(*envelope.FailureReason)
 		dto.FailureReason = &reason
 	}
-	if envelope.State == domain.EnvelopeStateAcked {
+	if envelope.State == domain.EnvelopeStateAcked || envelope.State == domain.EnvelopeStateFailed {
+		eventType := "envelope." + string(envelope.State)
 		var payload string
 		err := a.db.QueryRowContext(ctx, `SELECT payload FROM event_log
-			WHERE resource_type = 'envelope' AND resource_uuid = ? AND event_type = 'envelope.acked'
-			ORDER BY id DESC LIMIT 1`, envelope.UUID).Scan(&payload)
+			WHERE resource_type = 'envelope' AND resource_uuid = ? AND event_type = ?
+			ORDER BY id DESC LIMIT 1`, envelope.UUID, eventType).Scan(&payload)
 		if err != nil && err != sql.ErrNoRows {
 			return nil, NewInternalError(err)
 		}
 		if err == nil {
 			var event struct {
-				Reason string `json:"reason"`
+				Reason       string `json:"reason"`
+				Detail       string `json:"detail"`
+				DischargedBy string `json:"discharged_by"`
 			}
 			if jerr := json.Unmarshal([]byte(payload), &event); jerr != nil {
-				return nil, NewInternalError(fmt.Errorf("decode envelope.acked payload: %w", jerr))
+				return nil, NewInternalError(fmt.Errorf("decode %s payload: %w", eventType, jerr))
 			}
-			if strings.TrimSpace(event.Reason) != "" {
-				dto.Reason = &event.Reason
+			if envelope.State == domain.EnvelopeStateAcked {
+				if strings.TrimSpace(event.Reason) != "" {
+					dto.Reason = &event.Reason
+				}
+				if (event.Reason == "reply" || event.Reason == "reply_scoped") && event.DischargedBy != "" {
+					dto.DischargedBy = &event.DischargedBy
+				}
+			} else if event.Detail != "" {
+				dto.FailureDetail = &event.Detail
 			}
 		}
 	}

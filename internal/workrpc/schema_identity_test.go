@@ -89,7 +89,8 @@ import (
 // T-12264 adds the side-effect-free envelope.listView and its two DTOs.
 // T-12265 adds promise.listView and workflow.instancesView with four DTOs.
 // T-12376 replaces META_KEY_MIGRATED with META_KEY_RESERVED for closed task metadata.
-const pinnedProtocolSchemaHash = "sha256:7ef5b72a852709bf6f48a2023e36b6dd1168a23240351142314ec29c640c4693"
+// T-13013 adds failureDetail and dischargedBy to WrkqEnvelope.
+const pinnedProtocolSchemaHash = "sha256:3f36f0853abde76a8371f6a5a20a486a7f9c4df8abf6cafcd733b445528f35c1"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
