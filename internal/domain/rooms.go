@@ -97,7 +97,12 @@ const (
 	EnvelopeFailureRuntimeTerminated EnvelopeFailureReason = "runtime_terminated"
 	EnvelopeFailureIgnored           EnvelopeFailureReason = "ignored"
 	EnvelopeFailureUndeliverable     EnvelopeFailureReason = "undeliverable"
-	EnvelopeFailureLegacy            EnvelopeFailureReason = "legacy"
+	// EnvelopeFailureUnconfirmed: the body was handed to the recipient's
+	// harness and no turn confirmed it, so it may or may not have been read.
+	// Unlike undeliverable it did reach the seat; unlike runtime_terminated the
+	// runtime may still be alive. The sender decides whether to resend.
+	EnvelopeFailureUnconfirmed EnvelopeFailureReason = "unconfirmed"
+	EnvelopeFailureLegacy      EnvelopeFailureReason = "legacy"
 )
 
 // RoomMemberSource records how a member came to be in the room. There is no
@@ -275,10 +280,10 @@ func ValidateEnvelopeDelivery(delivery EnvelopeDelivery) error {
 func ValidateEnvelopeFailureReason(reason EnvelopeFailureReason) error {
 	switch reason {
 	case EnvelopeFailureRuntimeTerminated, EnvelopeFailureIgnored,
-		EnvelopeFailureUndeliverable, EnvelopeFailureLegacy:
+		EnvelopeFailureUndeliverable, EnvelopeFailureUnconfirmed, EnvelopeFailureLegacy:
 		return nil
 	default:
-		return &InvalidValueError{Field: "envelope failure reason", Value: string(reason), Allowed: []string{"runtime_terminated", "ignored", "undeliverable", "legacy"}}
+		return &InvalidValueError{Field: "envelope failure reason", Value: string(reason), Allowed: []string{"runtime_terminated", "ignored", "undeliverable", "unconfirmed", "legacy"}}
 	}
 }
 

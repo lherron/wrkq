@@ -208,6 +208,37 @@ func TestEnvelopeFailUndeliverableAdmitsPresented(t *testing.T) {
 	}
 }
 
+// `unconfirmed` (T-13690): the body reached the harness but no turn confirmed
+// it. Mail delivery records a presentation only with landing evidence, so the
+// reason is accepted from pending as well as presented; reasons that claim a
+// reader (runtime_terminated) still refuse a pending envelope.
+func TestEnvelopeFailUnconfirmedAdmitsPendingAndPresented(t *testing.T) {
+	f := newRoomFixture(t)
+	ctx := context.Background()
+	fail := func(id, reason string) (*WrkqEnvelope, error) {
+		return f.api.EnvelopeFail(ctx, EnvelopeFailParams{Envelope: id, Reason: reason, PrincipalRef: "agent:hrc"})
+	}
+	send := func(body string) string {
+		return f.say(t, RoomSayParams{Ref: f.loneTaskID, Body: body, To: []string{"cody"}, PrincipalRef: "agent:clod"}).Envelopes[0].ID
+	}
+
+	pending := send("settled, no turn")
+	presented := send("presented, no turn")
+	f.present(t, presented)
+	for _, id := range []string{pending, presented, pending} {
+		failed, err := fail(id, "unconfirmed")
+		if err != nil {
+			t.Fatalf("fail %s unconfirmed: %v", id, err)
+		}
+		if failed.State != "failed" || failed.FailureReason == nil || *failed.FailureReason != "unconfirmed" {
+			t.Fatalf("failed envelope = %+v", failed)
+		}
+	}
+	if _, err := fail(send("still pending"), "runtime_terminated"); err == nil {
+		t.Fatal("runtime_terminated on a pending envelope succeeded")
+	}
+}
+
 // envelope.fail's optional detail rides the envelope.failed event, bounded by
 // truncation; omitting it leaves the payload as before (T-09657).
 func TestEnvelopeFailCarriesOptionalBoundedDetail(t *testing.T) {

@@ -38,7 +38,11 @@ export type WrkqEnvelopeState =
   | "expired"
   | "withdrawn";
 export type WrkqEnvelopeFailureReason =
-  "runtime_terminated" | "ignored" | "undeliverable" | "legacy";
+  | "runtime_terminated"
+  | "ignored"
+  | "undeliverable"
+  | "unconfirmed"
+  | "legacy";
 export type WrkqRoomMemberSource = "spoke" | "addressed" | "joined";
 
 export interface WrkqRoomWorkRef {

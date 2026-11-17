@@ -1035,7 +1035,7 @@ CREATE TABLE IF NOT EXISTS "envelopes" (
   state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'presented', 'acked', 'deferred', 'failed', 'expired', 'withdrawn')),
   expires_at TEXT,
   delivery TEXT NOT NULL DEFAULT 'queue' CHECK (delivery IN ('queue', 'hold')),
-  failure_reason TEXT CHECK (failure_reason IN ('runtime_terminated', 'ignored', 'undeliverable', 'legacy')),
+  failure_reason TEXT CHECK (failure_reason IN ('runtime_terminated', 'ignored', 'undeliverable', 'unconfirmed', 'legacy')),
   retry_at TEXT,
   defer_reason TEXT,
   terminal_actor TEXT,

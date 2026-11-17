@@ -235,10 +235,15 @@ func (a *API) EnvelopeFail(ctx context.Context, p EnvelopeFailParams) (*WrkqEnve
 	// pending envelope nobody could be born for (rev 5.1 D7) AND of a presented
 	// one whose queued copy the harness broker expired before injection (hcs
 	// T-07891 amendment 6, 2026-09-02): the receipt says queued, not read.
-	if reason == domain.EnvelopeFailureUndeliverable && envelope.State != domain.EnvelopeStatePending && envelope.State != domain.EnvelopeStatePresented && envelope.State != domain.EnvelopeStateFailed {
+	// `unconfirmed` (T-13690) takes the same states: the body reached the
+	// harness, but mail delivery records a presentation only with landing
+	// evidence, so a submission settled with no confirming turn is still
+	// pending when it fails.
+	fromPending := reason == domain.EnvelopeFailureUndeliverable || reason == domain.EnvelopeFailureUnconfirmed
+	if fromPending && envelope.State != domain.EnvelopeStatePending && envelope.State != domain.EnvelopeStatePresented && envelope.State != domain.EnvelopeStateFailed {
 		return nil, NewWrongStateError(map[string]any{"envelope": envelope.ID, "state": string(envelope.State), "verb": "fail"})
 	}
-	if reason != domain.EnvelopeFailureUndeliverable && envelope.State != domain.EnvelopeStatePresented && envelope.State != domain.EnvelopeStateFailed {
+	if !fromPending && envelope.State != domain.EnvelopeStatePresented && envelope.State != domain.EnvelopeStateFailed {
 		return nil, NewWrongStateError(map[string]any{"envelope": envelope.ID, "state": string(envelope.State), "verb": "fail"})
 	}
 	updated, err := a.store.Rooms.FailEnvelopeWithAttribution(attr, envelope.UUID, reason, p.Runtime, p.Detail)

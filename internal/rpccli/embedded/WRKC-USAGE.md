@@ -71,7 +71,7 @@ wrkc inbox --failed
 
 A wait timeout is not a delivery failure or a completed request. Read the returned state. Sender-side failed, expired and withdrawn mail appears in `inbox` while it still asks something of you, judged at read time: never a `fyi`; a reply_required with a task while that task is open; one without a task while it is under 24h old and its room is not stale. `wrkc show`/`log` still read the rest. `--failed` also includes failed mail addressed to you. Failed waits exit non-zero. A fan-out group wait covers every recipient.
 
-If a presenting runtime terminates before replying or deferring, its obligation can fail as `runtime_terminated`; resend in the same room when the request is still needed. For `ignored`, escalate rather than repeatedly sending the same request. Addressed mail is steered into the addressee's live turn when its harness accepts steering; otherwise it is presented at the next turn boundary, and an idle seat starts a turn. `say --preempt` interrupts the turn under operator authority. Silence during a busy turn does not prove failure.
+If a presenting runtime terminates before replying or deferring, its obligation can fail as `runtime_terminated`; resend in the same room when the request is still needed. For `unconfirmed`, the body reached the seat's harness but no turn confirmed it; check the room before resending. For `ignored`, escalate rather than repeatedly sending the same request. Addressed mail is steered into the addressee's live turn when its harness accepts steering; otherwise it is presented at the next turn boundary, and an idle seat starts a turn. `say --preempt` interrupts the turn under operator authority. Silence during a busy turn does not prove failure.
 
 ## Structured output
 

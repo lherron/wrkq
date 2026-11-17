@@ -164,8 +164,10 @@ on the common path; later attention is a pointer to `wrkc show`. It is never
 presented to a different runtime. If the presenting runtime ends undisposed,
 the envelope fails as `runtime_terminated`. Inside a live runtime the kicker may
 send one pointer reminder; ending that reminder turn undisposed fails it as
-`ignored`. If you are not answering now, `defer` with a reason (and optionally a
-retry time): the deferral survives rotation and returns as a pointer.
+`ignored`. If the body was handed to the recipient's harness but no turn
+confirmed it, mail delivery fails it as `unconfirmed`: it reached the seat and
+may or may not have been read, so the sender decides whether to resend. If
+you are not answering now, `defer` with a reason (and optionally a retry time): the deferral survives rotation and returns as a pointer.
 
 `defer` is paused, never terminal — a plain reply leaves it paused. The
 addressee finishes it by naming it in `--discharges`; any terminal disposition
