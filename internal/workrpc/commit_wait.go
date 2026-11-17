@@ -30,6 +30,11 @@ func registerCommitWait(s *Server, database *db.DB) {
 			return result(true), nil
 		}
 		select {
+		case <-s.drained:
+			return result(false), nil
+		default:
+		}
+		select {
 		case slots <- struct{}{}:
 			defer func() { <-slots }()
 		default:
@@ -51,6 +56,10 @@ func registerCommitWait(s *Server, database *db.DB) {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
+			case <-s.drained:
+				// Shutting down: answer with the input token, so the caller's
+				// next wait (against the restarted daemon) replays its cursor.
+				return result(false), nil
 			case <-timer.C:
 				// Preserve the input token on timeout: a racing commit remains visible
 				// to the caller's next wait, even if it skips the read after a timeout.

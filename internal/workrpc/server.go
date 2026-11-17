@@ -30,6 +30,8 @@ type Server struct {
 	shutdown    bool
 	mu          sync.Mutex
 	reads       readBound
+	drainOnce   sync.Once
+	drained     chan struct{}
 }
 
 func NewServer(out io.Writer) *Server {
@@ -38,7 +40,15 @@ func NewServer(out io.Writer) *Server {
 		handlers: map[string]Handler{},
 		maxBytes: DefaultMaxFrameBytes,
 		reads:    readBound{deadline: ReadDeadline, maxAbandoned: MaxAbandonedReads},
+		drained:  make(chan struct{}),
 	}
+}
+
+// Drain tells long-poll handlers (wrkq.commit.wait) that the process is
+// shutting down, so they answer now instead of holding http.Server.Shutdown
+// to its deadline. Ordinary requests are unaffected. Safe to call twice.
+func (s *Server) Drain() {
+	s.drainOnce.Do(func() { close(s.drained) })
 }
 
 func (s *Server) Register(method string, handler Handler) {

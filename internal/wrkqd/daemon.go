@@ -116,6 +116,9 @@ func ServeDaemon(opts DaemonOptions) error {
 		ReadTimeout:  workrpc.HTTPResponseTimeout,
 		WriteTimeout: workrpc.HTTPResponseTimeout,
 	}
+	// Shutdown waits for active requests; parked commit waits would otherwise
+	// hold it to its deadline on every restart.
+	httpServer.RegisterOnShutdown(rpcServer.Drain)
 
 	if opts.Unix != "" {
 		_ = os.Remove(opts.Unix)

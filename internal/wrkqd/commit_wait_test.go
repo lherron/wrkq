@@ -228,3 +228,38 @@ func TestCommitWaitCapAndDisconnect(t *testing.T) {
 		t.Fatal("disconnected waits retained admission slots")
 	}
 }
+
+// A daemon shutdown must not wait out parked commit waits: each returns at
+// once with its own token and changed=false, so http.Server.Shutdown finishes
+// inside its deadline and SIGTERM exits cleanly. Before this, every live
+// restart sat out the full 5s deadline and exited 1.
+func TestCommitWaitReturnsWhenServerDrains(t *testing.T) {
+	database, _ := setupTestEnv(t)
+	h := newCommitWaitHarness(t, database)
+	token := h.wait(t, "", 1000).Token
+	done := make(chan commitWaitReply, 8)
+	for i := 0; i < 8; i++ {
+		go func() { done <- h.wait(t, token, 30000) }()
+	}
+	time.Sleep(50 * time.Millisecond)
+	start := time.Now()
+	h.rpc.Drain()
+	for i := 0; i < 8; i++ {
+		select {
+		case r := <-done:
+			if r.Changed || r.Token != token {
+				t.Fatalf("drained wait = %+v, want unchanged token %s", r, token)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("parked wait did not return on drain")
+		}
+	}
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Fatalf("drain took %s", elapsed)
+	}
+	// A wait that arrives after the drain does not park.
+	start = time.Now()
+	if r := h.wait(t, token, 30000); r.Changed || time.Since(start) > 200*time.Millisecond {
+		t.Fatalf("post-drain wait = %+v after %s", r, time.Since(start))
+	}
+}
