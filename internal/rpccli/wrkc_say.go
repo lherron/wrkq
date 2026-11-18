@@ -50,7 +50,8 @@ Routing (first match wins):
                        Neither task-scoped -> an ad-hoc pair room, reused unless
                        --new.
 
-Only --to fires. Without it this is a log entry and nobody is presented.
+Only --to fires. Without it this is a log entry and nobody is presented, except
+that an agent@project[:task] ref implies --to that handle.
 --note records addressed mail that is never presented: it never wakes, injects,
 steers, or births anyone, and is written terminal. The addressee reads it with
 wrkc notes. Use it for information the recipient doesn't need to see now. It

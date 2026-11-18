@@ -42,7 +42,8 @@ exactly one recipient. Talk survives every runtime that carried it, so context
 is PULLED from the room rather than remembered by a session.
 
 Three rules worth knowing before you use it:
-  · Only --to fires. A say without --to is a log entry; nobody is presented.
+  · Only --to fires. A say without --to is a log entry; nobody is presented,
+    except that a seat-handle ref (agent@project[:lane]) implies --to the handle.
   · Rooms are talk; comments are record. --record is the only bridge.
   · A say is never refused for what a room IS. There is no close and no reopen:
     a room you can resolve always accepts talk, and a stale one only says so.
