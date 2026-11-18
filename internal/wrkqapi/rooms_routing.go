@@ -71,9 +71,8 @@ func (a *API) routeSay(ctx context.Context, attr attribution.Attribution, sender
 		}
 	}
 
-	// 4. An agent handle. A bare token with no "@" is a path, not a handle:
-	// every §4 rule-4 example carries the project segment.
-	if strings.Contains(ref, "@") {
+	// 4. An agent handle.
+	if refIsHandle(ref) {
 		return a.routeToHandle(ctx, attr, senderScope, ref, p)
 	}
 
@@ -226,6 +225,14 @@ func (a *API) routeToContainerUUID(ctx context.Context, attr attribution.Attribu
 		return nil, err
 	}
 	return &routedSay{room: room}, nil
+}
+
+// refIsHandle reports whether a say ref routes by §4 rule 4. A bare token with
+// no "@" is a path, not a handle: every rule-4 example carries the project
+// segment, and no R-/EN-/T-/P- id contains "@". A handle ref implies --to the
+// handle, so it satisfies every flag that requires an addressee.
+func refIsHandle(ref string) bool {
+	return strings.Contains(strings.TrimSpace(ref), "@")
 }
 
 // routeToHandle is §4 rule 4: the room is derived from the work context of the

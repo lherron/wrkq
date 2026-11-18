@@ -51,7 +51,8 @@ Routing (first match wins):
                        --new.
 
 Only --to fires. Without it this is a log entry and nobody is presented, except
-that an agent@project[:task] ref implies --to that handle.
+that an agent@project[:task] ref implies --to that handle, which also satisfies
+--fyi, --note, --wait, --ttl, --preempt and --discharges.
 --note records addressed mail that is never presented: it never wakes, injects,
 steers, or births anyone, and is written terminal. The addressee reads it with
 wrkc notes. Use it for information the recipient doesn't need to see now. It
@@ -97,8 +98,10 @@ agent:<id> to address a scope-less principal such as a human.`,
 			if strings.TrimSpace(body) == "" {
 				return errors.New("say requires a non-empty body")
 			}
+			// A handle ref implies --to the handle, so it is an addressee too.
+			addressed := len(to) > 0 || strings.Contains(ref, "@")
 			if note {
-				if len(to) == 0 {
+				if !addressed {
 					return &clifunnel.UsageError{Err: errors.New("--note requires --to; a say without --to is already a log entry"), Cmd: cmd}
 				}
 				for _, flag := range []string{"fyi", "preempt", "wait", "ttl"} {
@@ -107,10 +110,10 @@ agent:<id> to address a scope-less principal such as a human.`,
 					}
 				}
 			}
-			if wait && len(to) == 0 {
+			if wait && !addressed {
 				return errors.New("--wait requires --to")
 			}
-			if (preempt || ttl != "" || cmd.Flags().Changed("discharges")) && len(to) == 0 {
+			if (preempt || ttl != "" || cmd.Flags().Changed("discharges")) && !addressed {
 				return errors.New("--preempt, --ttl, and --discharges require --to")
 			}
 

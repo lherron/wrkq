@@ -210,6 +210,40 @@ func TestRoutingRule4_TargetWins(t *testing.T) {
 	}
 }
 
+// TestHandleRefImpliedToSatisfiesAddresseeFlags: a handle ref implies --to, so
+// the flags that require an addressee (--fyi, --note) accept it without one.
+func TestHandleRefImpliedToSatisfiesAddresseeFlags(t *testing.T) {
+	f := newRoomFixture(t)
+	for _, tc := range []struct {
+		name       string
+		params     RoomSayParams
+		obligation domain.EnvelopeObligation
+	}{
+		{"fyi", RoomSayParams{FYI: true}, domain.EnvelopeObligationFYI},
+		{"note", RoomSayParams{Note: true}, domain.EnvelopeObligationNote},
+	} {
+		p := tc.params
+		p.Ref, p.Body = "cody@proj:primary", "implied "+tc.name
+		p.PrincipalRef, p.ScopeRef = "agent:clod", "clod@proj:primary"
+		got := f.say(t, p)
+		if len(got.Envelopes) != 1 || got.Envelopes[0].To == nil ||
+			*got.Envelopes[0].To.ScopeRef != "cody@proj:primary" {
+			t.Fatalf("%s: handle ref did not imply --to: %+v", tc.name, got.Envelopes)
+		}
+		if got.Envelopes[0].Obligation != string(tc.obligation) {
+			t.Fatalf("%s: obligation = %q, want %q", tc.name, got.Envelopes[0].Obligation, tc.obligation)
+		}
+	}
+	// A non-handle ref still needs an explicit --to for --fyi.
+	_, err := f.api.RoomSay(context.Background(), RoomSayParams{
+		Ref: f.loneTaskID, Body: "nobody", FYI: true,
+		PrincipalRef: "agent:clod", ScopeRef: "clod@proj:primary",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--fyi requires --to") {
+		t.Fatalf("task-ref --fyi without --to: err = %v, want the requires --to refusal", err)
+	}
+}
+
 // TestAdhocPairRoomReuseNewAndThirdMember covers §4's pair-room rules: reuse the
 // open pair room, --new forces a fresh one, and a third member makes it a group
 // room so the next unsolicited pair say opens a NEW pair room rather than

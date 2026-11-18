@@ -34,11 +34,14 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 	if err != nil {
 		return nil, err
 	}
-	if p.FYI && len(p.To) == 0 {
+	// An explicit --to or a handle ref (which implies --to the handle) is an
+	// addressee; the flags below need one.
+	addressed := len(p.To) > 0 || refIsHandle(p.Ref)
+	if p.FYI && !addressed {
 		return nil, NewValidationError("--fyi requires --to; a say without an addressee is a log entry", map[string]any{"field": "to"})
 	}
 	if p.Note {
-		if len(p.To) == 0 {
+		if !addressed {
 			return nil, NewValidationError("--note requires --to; a say without an addressee is already a log entry", map[string]any{"field": "to"})
 		}
 		for _, conflict := range []struct {
@@ -50,13 +53,13 @@ func (a *API) RoomSay(ctx context.Context, p RoomSayParams) (*WrkqRoomSayResult,
 			}
 		}
 	}
-	if strings.TrimSpace(p.TTL) != "" && len(p.To) == 0 {
+	if strings.TrimSpace(p.TTL) != "" && !addressed {
 		return nil, NewValidationError("--ttl requires --to", map[string]any{"field": "to"})
 	}
-	if p.Hold && len(p.To) == 0 {
+	if p.Hold && !addressed {
 		return nil, NewValidationError("--preempt requires --to", map[string]any{"field": "to"})
 	}
-	if p.DischargeEnvelopeIDs != nil && len(p.To) == 0 {
+	if p.DischargeEnvelopeIDs != nil && !addressed {
 		return nil, NewValidationError("dischargeEnvelopeIds requires --to", map[string]any{"field": "to"})
 	}
 	expiresAt, _, err := normalizePromiseReviewTime("", p.TTL, false)
