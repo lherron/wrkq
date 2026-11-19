@@ -108,17 +108,19 @@ characters dropped, leading/trailing hyphens trimmed, must start with
 
 ## Execution modes: local SQLite vs. RPC
 
-The production `wrkq` CLI no longer talks to SQLite directly for durable
-operations — it routes through `internal/workrpc`. The `WRKQ_DB` locator can
-be either:
+The production `wrkq` CLI routes durable operations through `internal/workrpc`.
+The `WRKQ_DB` locator selects the transport:
 
-- a **local SQLite path** — direct file access, WAL mode; or
+- a **local SQLite path** — the `wrkq_local` build opens the file in WAL mode
+  and dispatches through the in-process RPC registry;
 - **`rpc://host[:port]`** (default port `7171`) — JSON-RPC frames sent over
-  HTTP `POST /v1/rpc` (`internal/workrpc/remote_stdio.go`) to a remote
-  `wrkqd`.
+  HTTP `POST /v1/rpc` to a remote `wrkqd`. Ordinary commands use the Go client
+  in `pkg/client`, and `rpc --stdio` uses the forwarding bridge in
+  `internal/workrpc/remote_stdio.go`.
 
-This lets a machine with no local canonical DB use a remote one as its store
-of record. A live example from this environment (`wrkq whoami` in RPC mode):
+The portable build (`just build-portable`) requires an `rpc://` locator. It
+ships without SQLite support. Example output from `wrkq whoami --json` in RPC
+mode:
 
 ```json
 {
@@ -147,7 +149,7 @@ Admin/daemon path-owning surfaces are intentionally local-only and reject
 | `internal/selectors`, `internal/paths` | Friendly IDs, UUIDs, typed selectors, paths, slug normalization. |
 | `internal/search` | Sidecar search service over task/comment/handoff chunks. |
 | `internal/scope` | ASP runtime-scope reduction to `agent:<id>` principals. |
-| `internal/webhooks` | Outbound webhook emission on task mutations. |
+| `internal/webhooks` | Outbound task, workflow, campaign, promise, and collaboration webhooks. |
 | `internal/workflow`, `internal/wrkfapi`, `internal/workrpc`, `internal/wrkfcli` | wrkf workflow engine, its API layer, unified RPC registry, and CLI. |
 | `packages/client` | `@wrkq/client` — Bun TypeScript JSON-RPC client for wrkq/wrkf. |
 | `mcp-server/` | MCP stdio server exposing selected wrkq operations to LLM hosts. |

@@ -21,10 +21,10 @@ HTTP at `/v1/rpc`.
 Call `rpc.initialize` first with protocol version `2026-06-30`. Its result
 includes `protocolSchemaHash`, `database.migrationHash`, `capabilities`, and
 `methods`. Check compatibility before business dispatch. Lifecycle methods
-are `rpc.shutdown` and the `rpc.exit` notification; stdin EOF also ends stdio.
-`$/cancelRequest` is accepted on a best-effort basis. Remote hook execution
-honors request-context cancellation and refuses post-execution persistence
-after cancellation.
+are `rpc.shutdown` and the `rpc.exit` notification. Stdin EOF also ends stdio.
+The stdio server accepts `$/cancelRequest` as a no-op, and the remote stdio
+bridge drops it. Remote hook execution honors HTTP request-context cancellation
+and refuses post-execution persistence after cancellation.
 
 Use `WRKQ_DB` or `--db` for a local path or `rpc://host[:port]` locator.
 Hook catalogs are explicit canonical-node configuration: local mode accepts

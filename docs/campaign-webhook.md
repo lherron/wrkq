@@ -28,8 +28,8 @@ Schema: `wrkq.campaign-transition.v1`
 Conversion uses `old_campaign_state: null` and
 `new_campaign_state: "draft"|"active"`. Activation uses `draft -> active`.
 Close uses `draft -> cancelled` or `active -> completed|cancelled`.
-`actor` retains the established webhook actor field but carries the canonical
-principal identity; `principal_ref` makes that authority explicit.
+`actor` and `principal_ref` carry the canonical principal identity. When no
+principal is supplied, `actor` is `"system"` and `principal_ref` is empty.
 
 `event_id` is the committed `event_log.id`. `idempotency_key` is the same
 integer. Consumers must use it to make repeated deliveries safe.
@@ -45,6 +45,10 @@ Structured subscriptions can select:
 - `"container"` or `"container.*"` for container events;
 - `"task"` or `"task.*"` for task events only;
 - `"workflow"` or `"workflow.*"` for workflow events only;
+- `"promise"` or `"promise.*"` for promise events only;
+- `"envelope"`, `"envelope.*"`, `"room"`, `"room.*"`, or `"collaboration"`
+  for envelope, room, and member events;
+- an exact event name such as `"container.campaign_state_changed"`;
 - `"*"` / `"all"`, a bare URL, or an empty event list for all families.
 
 Task-class subscriptions never receive `container.*`. Campaign templates may
