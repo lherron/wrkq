@@ -2,7 +2,7 @@
 
 There are two ways to watch the ledger from outside. `wrkq monitor` streams events and blocks until a
 condition holds; it is the agent observation feed for the Claude Monitor tool. **Webhooks** make the daemon
-POST to subscribed URLs when tasks, workflows or containers change. Webhooks can be per container (inherited
+POST to subscribed URLs when tasks, workflows, containers, promises or rooms change. Webhooks can be per container (inherited
 downward) or global, on the internal root. Code: `internal/rpccli/monitor.go`, `internal/rpccli/webhook.go`,
 `internal/rpccli/container.go` (`container set --webhook-*`), `internal/webhooks/` and `internal/webhooksub/`.
 
@@ -32,7 +32,15 @@ downward) or global, on the internal root. Code: `internal/rpccli/monitor.go`, `
   `collaboration_ledger_meta` id and `head` is `MAX(event_log.id)`, both read in the same snapshot as `items`. A
   cursor above `head` keeps it as `high_water` (cursor 999999 -> `high_water 999999`, `head 125`). A client can tell a
   restored or replaced store from a quiet one. Driven 2026-11-02, T-12309 against `sqlite3 -readonly` on the scratch file.
-- **Container webhooks.** `wrkq container set <c> --webhook-url URL [--webhook-events task|workflow|container|<name>]`,
+- **Event classes** (docs/campaign-webhook.md since 7bb0600; `internal/webhooks/webhooks.go:861-923`). A bare URL
+  gets every family. `--webhook-events` takes `task`, `workflow`, `container`, `promise`/`promise.*`,
+  `envelope`/`envelope.*`/`room`/`room.*`/`collaboration`, or an exact event name (an unknown name such as
+  `nope.event` is accepted, rc 0). `container set --help` still lists only `task, workflow, container`. A bare
+  `/bare/{ticket_id}` URL also gets `envelope.created` and `promise.created`, POSTed to the **literal**
+  `/bare/%7Bticket_id%7D`: the placeholder doesn't expand for those families (product task T-14444). Use
+  `{envelope_id}` with `collaboration` and `{promise_id}` with `promise` (`/env/EN-<n>`, `/pr/PR-<n>`). Driven
+  2026-11-23, T-14442.
+- **Container webhooks.** `wrkq container set <c> --webhook-url URL [--webhook-events <class>|<name>]`,
   plus `--add-webhook-url`, `--remove-webhook-url`, `--webhook-urls '<json>'` and `--all`. `{ticket_id}` in a URL
   expands to the task id and `{project_id}` to the subscribing container's `P-<n>`. The body carries `event`,
   `ticket_id`, `event_seq` and more. Every POST carries `User-Agent: wrkq/<version>` (0655f69; all 15 sink rows
@@ -82,6 +90,9 @@ kill %2   # stop the sink before wv down
 - Delivery is asynchronous. Give the sink a few seconds before you count its lines, and prove "no delivery" with
   a count after a fixed wait.
 - The sink is your own process. `wv down` doesn't stop it.
+- **A `monitor wait` across a daemon stop** ends rc=3 ("daemon unreachable ... retrying is safe") on its next read,
+  right after the TERM, not at its `--timeout`: its parked `commit.wait` is answered by the drain (feature 1;
+  2026-11-23, T-14442).
 
 ## Proven when
 
@@ -90,8 +101,8 @@ timeout` with exit 1 for a state that never arrives. `watch --raw` streams event
 and then updating a task in it POSTs exactly two `task` events (`created`, `updated`) to `/hook/<task id>`, with
 increasing `event_seq` (a comment adds a third, `comment_added`).
 
-Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/09-monitor-webhooks/drive.txt`
-and `evidence/t-13642/sink.jsonl` (with `user_agent`): the T-12762 replay (its `tailView` frames, the `-32603`
-measurement, wake latency, stall, ext and replay webhook drives), then the cancelled-wait re-measure and the W-
-workstream wait and webhook path (`/hook/W-<n>`, `ticket_id: "W-<n>"`) after the NOTE drift line. Live read
-of the global sinks (three: ACP loopback and tailnet, taskboard): `live/reads.txt`.
+Driven 2026-11-23 on wv `t-14442` (T-14442 upkeep) with installed b3301fd: `var/wrkq-artifacts/T-14442/09-monitor-webhooks/drive.txt`
+and `evidence/t-14442/sink.jsonl` (with `user_agent`): the T-13642 replay (its T-12762 replay plus the W- wait and
+webhook path), then the event-class drive (bare, `collaboration`, `promise` and exact-name URLs on container
+`hooks14442`) after the NOTE drift line. Live read of the global sinks (three: ACP loopback and tailnet, taskboard):
+`live/reads.txt`.

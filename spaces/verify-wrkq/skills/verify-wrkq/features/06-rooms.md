@@ -5,9 +5,9 @@ addressee, with an obligation (`reply_required` by default, `fyi`, or `note`). A
 standing obligations from that counterparty in the room. `defer` pauses an obligation, and `withdraw` takes
 back unpresented mail. HRC delivers envelopes to live seats by tailing the ledger. That delivery side lives in
 hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.go`, `wrkc_room.go`,
-`wrkc_envelope.go`, `wrkc_identity.go`), `internal/wrkqapi/` (`envelope_reads.go`, `envelope_dispositions.go`,
-`room_scope_refs.go`, `rooms_say.go`, `rooms_verbs.go`)
-and `internal/store/` (rooms, envelopes, `envelope_lifecycle.go`). Guide:
+`wrkc_envelope.go`, `wrkc_identity.go`, `wrkc_render.go`), `internal/wrkqapi/` (`envelope_reads.go`,
+`envelope_dispositions.go`, `room_scope_refs.go`, `rooms_say.go`, `rooms_routing.go`, `rooms_wire.go`, `rooms_verbs.go`)
+and `internal/store/` (rooms, envelopes, `envelope_send.go`, `envelope_lifecycle.go`). Guide:
 `internal/rpccli/embedded/WRKC-USAGE.md` (`wrkc info`) and `docs/wrkc-reference.md`.
 
 ## Sub-features
@@ -25,19 +25,33 @@ and `internal/store/` (rooms, envelopes, `envelope_lifecycle.go`). Guide:
   gone), a ref containing whitespace (`"hello there cody" is not a room ref`, refused before stdin is read,
   T-11005), and `-` when stdin is a TTY or a socket (`body comes from stdin: use a heredoc (<<'EOF') or -m`). An
   empty stdin is refused `stdin is empty` (exit 1). Driven 2026-10-20, T-11374.
-- **Addressing.** Only `--to` presents. A say without `--to` is a log entry: `to: null`, `obligation: none`,
-  nobody presented, and nothing acked. `--to a,b` fans out into one envelope per addressee under a shared
-  `groupId`.
+- **Addressing.** Only an addressee presents: `--to`, or a seat-handle ref. A say without either is a log entry:
+  `to: null`, `obligation: none`, nobody presented, and nothing acked. `--to a,b` fans out into one envelope per
+  addressee under a shared `groupId`.
+- **A handle ref implies `--to`** (3cc20a7, b3301fd, T-13787). Any ref containing `@` (`rooms_routing.go:234`)
+  addresses that handle, and since b3301fd that satisfies `--fyi`, `--note`, `--ttl`, `--preempt`, `--wait` and
+  `--discharges` without an explicit `--to` (`rooms_say.go:39-63`, CLI mirror `wrkc_say.go:102`). Before, each was
+  refused ("--fyi requires --to", exit 2 for `--note`, exit 1 for the rest). From a `:primary` scope it lands in an
+  ad-hoc pair room (`R-00001`), and the other party's `wrkc say clod@<p>:primary --discharges EN-<n>` reuses it
+  (`acked: [EN-<n>]`). Task/`R-`/`EN-`/`W-`/path refs still refuse (`--fyi requires --to` `WRKQ_VALIDATION`,
+  `--note` exit 2). A malformed handle (`cody@`) passes the flag check and is refused in routing: `WRKQ_VALIDATION
+  "invalid agent handle: ..."`, `data.field: ref`. Driven 2026-11-23, T-14442.
 - **Reply is the ack.** A say with `--to` acks the sender's own pending or presented obligations in that room from
   the same counterparty (`acked: [EN-...]`). Each envelope carries `replyTo`. Only `reply_required` envelopes that
   are pending or presented are acked. A **deferred** envelope is not (`acked: []`, it stays `deferred`). Finish it
-  with `--discharges EN-<n>` on the reply. `--fyi` without `--to` is refused (`a say without an addressee is a
-  log entry`).
+  with `--discharges EN-<n>` on the reply. `--fyi` without an addressee (`--to` or a handle ref) is refused (`a say
+  without an addressee is a log entry`).
+- **`dischargedBy`** (c0e607e, T-13013). An envelope acked by a reply (`reply`, wide reply-is-ack) or by
+  `--discharges` (`reply_scoped`) carries `dischargedBy: EN-<reply>`, the reply addressed to that envelope's
+  sender: in a fan-out reply to two senders each original names its own envelope (`envelope_send.go:123,354,375`).
+  The note that discharges has `dischargedBy: null`, and notes, operator ack, expiry, withdraw and fail never set
+  it; replies older than c0e607e have none (no backfill). JSON only: human `wrkc show` prints `reason: reply` and
+  no discharge line. Driven 2026-11-23, T-14442.
 - **Notes.** `--note` (with `--to`) records addressed mail that is never presented: the envelope is written
   `obligation: note`, `state: acked`, `terminal: true`, `presentedTo: []`, with `envelope.created` then
   `envelope.acked` (reason `note_recorded`) in the event log. It never wakes, injects or births a seat. A `--note`
   reply is still the ack: it discharges the replier's pending `reply_required` from that counterparty
-  (`acked: [EN-...]`). `--note` without `--to`, or with `--fyi`, `--wait`, `--ttl` or `--preempt`, is a usage
+  (`acked: [EN-...]`). `--note` without an addressee (`--to` or a handle ref), or with `--fyi`, `--wait`, `--ttl` or `--preempt`, is a usage
   refusal (exit 2), and the server refuses the same combinations `WRKQ_VALIDATION` with `data.field` (95b3340,
   T-11305; driven 2026-10-20, T-11374).
 - **wrkc notes.** `wrkc notes [--since 36h|7d|<timestamp>] --json` returns `{principalRef, scopeRef, items[]}`,
@@ -45,6 +59,9 @@ and `internal/store/` (rooms, envelopes, `envelope_lifecycle.go`). Guide:
   `invalid notesSince` (`WRKQ_VALIDATION`). The human form says `no notes in <window>` when empty.
 - **Inbox.** `wrkc inbox --as <principal> --scope-ref <scope> --output json` returns
   `{groups[].room, groups[].items[], deferred[], failed, sentExpired, sentFailed, sentWithdrawn, recentNotes}`.
+  `failed[]` is filled only under `--failed` (the key is there, empty, without it). `sentFailed[]` rows are summary
+  rows with `failureReason` and **no `failureDetail`**, though the human `sent, failed` line prints the detail
+  (product task T-14443, 2026-11-23, T-14442).
   `recentNotes` counts the notes addressed to you in the last 24h. Notes never appear in `groups`. The human
   inbox ends with `1 note in the last 24h: wrkc notes` when the count is non-zero.
 - **Defer and withdraw.** `wrkc defer EN-<n> --reason ... [--retry-after ...]` pauses an obligation (paused,
@@ -66,6 +83,15 @@ and `internal/store/` (rooms, envelopes, `envelope_lifecycle.go`). Guide:
 - **Expiry.** `--ttl 2s` mail expires at the next sweep after its TTL. An inbox sweep stamps the reader's scope; a
   `wrkc show` sweep leaves `updated_by_scope_ref` null. The sender sees it in `inbox ... sentExpired`. Driven
   2026-11-09, T-12762.
+- **Failure reasons** (20fbafb, 000075, T-13690; c0e607e). The RPC-only `wrkq.envelope.fail {envelope, reason,
+  detail?}` (no wrkc verb) fails mail with `runtime_terminated`, `ignored`, `undeliverable` or `unconfirmed`;
+  `legacy` is migration-only (`WRKQ_VALIDATION "legacy is migration-only ..."`), an unknown reason lists the allowed
+  ones. `unconfirmed` and `undeliverable` are admitted from `pending`, `presented` or `failed`; the others need
+  `presented` (`runtime_terminated` on a pending envelope is `WRKQ_WRONG_STATE`). A repeat on a failed envelope is a
+  no-op that keeps the first reason and detail. The live writer of `unconfirmed` is praesidium-kernel's
+  mail-delivery reconcile (broker settled `submission.lost`, or the runtime ended first), so a scratch only gets it
+  from a raw frame. `failureDetail` (trimmed, at most 2048 bytes) rides every full envelope in JSON, and human
+  show/log/inbox print `failed (<reason>): <detail>`. Driven 2026-11-23, T-14442 (`replay/rooms.sh` has the frame).
 - **Ledger page.** The RPC-only `wrkq.envelope.listView {states?, ids?, limit?, cursor?}` (96051e4, no CLI verb)
   reads stored envelope state in `EN-` sequence order **without** presenting, acking or sweeping anything: by
   default the live states (`pending`, `presented`, `deferred`), and with `ids` the named envelopes in any state.
@@ -122,6 +148,8 @@ printf 'WV withdraw probe\n' | ~/.local/bin/wrkc say T-00004 --to cody@wv-<name>
   (`to: null`, `obligation: none`) and left EN-00001 `pending`. The same reply with
   `--to clod@...:primary` acked it (2026-10-05, T-10298 `06-rooms/drive.txt`). Reply with the envelope's exact
   `replyTo` as `--to`.
+- **Piped reads default to JSON.** `wrkc show`, `wrkc log` and `wrkc inbox` into a pipe print JSON, so a
+  `grep '^state:'` finds nothing. Pass `--output human` to grep the human form (2026-11-23, T-14442).
 - Inbox groups carry `.items`, not `.envelopes`. Say results carry `.envelopes` and `.acked`. Members carry
   `.items[].memberRef`.
 - The default `reply_required` makes the addressee owe a reply. Use `--fyi` for probes you don't want answered.
@@ -138,10 +166,12 @@ the addressee's inbox. The addressee's `--to` reply returns `acked: [that id]` a
 `acked`/`terminal`. Defer moves the next one to `deferred[]`, and withdraw marks one `withdrawn`. A `--note` is
 written acked and terminal with `note_recorded`, shows only in the addressee's `recentNotes` and `wrkc notes`, and a
 `--note` reply acks the envelope it answers. A `--retry-after` defer re-pends at its time with a `promise.resolved`,
-`--wait` returns on the reply, and `--ttl` mail lands in the sender's `sentExpired`. `wrkc log`
+`--wait` returns on the reply, and `--ttl` mail lands in the sender's `sentExpired`. A handle ref with `--fyi`/`--note`
+works without `--to`; a reply sets the original's `dischargedBy`; an `unconfirmed` fail shows its detail in human
+show/log/inbox. `wrkc log`
 shows every envelope with its sender and addressee. Live, read only: your own `wrkc inbox` matches what you
 know you owe.
 
-Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/06-rooms/drive.txt`
-(the T-12762 replay, then the `--to`/`--scope-ref` lane forms and the W- room after the NOTE drift line). T-10358
-still reproduces at 1f59e43 (its T-12762 drive replayed identically). Live inbox read: `live/reads.txt`.
+Driven 2026-11-23 on wv `t-14442` (T-14442 upkeep) with installed b3301fd: `var/wrkq-artifacts/T-14442/06-rooms/drive.txt`
+(the T-13642 replay, then `unconfirmed`, renderings, `dischargedBy` and the handle-ref implied `--to` after the NOTE
+drift line). T-10358 still reproduces at b3301fd (replayed identically). Live inbox read: `live/reads.txt`.

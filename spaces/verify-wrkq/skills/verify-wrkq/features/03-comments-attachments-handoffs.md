@@ -111,6 +111,5 @@ successor's scope with you as author, shows `From`, and the successor acknowledg
 idempotency key replays the handoff, a soft-deleted comment shows only with `--include-deleted`, and a raw frame for
 another agent is refused on the scope header.
 
-Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/03-comments-attachments-handoffs/drive.txt`
-(the T-12762 replay, then the stale-fence `comment rm` single/dry-run/multi, duplicate attachment and handoff
-refusal drives after the NOTE drift line).
+Driven 2026-11-23 on wv `t-14442` (T-14442 upkeep) with installed b3301fd: `var/wrkq-artifacts/T-14442/03-comments-attachments-handoffs/drive.txt`,
+the T-13642 replay, which covers its T-12762 replay and its stale-fence `comment rm`, duplicate attachment and handoff refusal drives. All replayed identically; no wrkq change in this feature since 4581b4f.

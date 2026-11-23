@@ -95,6 +95,5 @@ path and shows `membership: enrolled`. `find --campaign` returns both the reside
 `container.campaign_close_nudged`, recorded when the last direct member goes terminal. `mkdir --campaign` makes an
 active (or `=draft` a draft) campaign in one write, and a member under a subdirectory is not a member.
 
-Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/05-campaigns/drive.txt`
-(the T-12762 replay, then the close refusal with a W- straggler, an enrolled workstream and the `data.members` delete
-refusal after the NOTE drift line).
+Driven 2026-11-23 on wv `t-14442` (T-14442 upkeep) with installed b3301fd: `var/wrkq-artifacts/T-14442/05-campaigns/drive.txt`,
+the T-13642 replay, which covers its T-12762 replay and its W- straggler, enrolled workstream and `data.members` drives. T-10355 (one-char slug, `WRKQ_CONFLICT retryable:true`) still reproduces; no wrkq change in this feature since 4581b4f.

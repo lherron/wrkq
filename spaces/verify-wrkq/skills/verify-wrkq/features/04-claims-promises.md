@@ -46,6 +46,8 @@ promises, `envelope_lifecycle.go` for retry promises). Background: AGENTS.md "Fe
 - **Bootstrap page.** The RPC-only `wrkq.promise.listView {states?, limit?, cursor?}` (5fbf10c, no CLI verb) pages
   every owner's promises in `(created_at, uuid)` order, `open` only by default. Feature 10 has its shape and
   refusals. Driven 2026-11-02, T-12309: `limit 1` returned clod's PR-00002 with a cursor, the next page cody's PR-00003.
+  `created_at` has whole-second precision, so two promises created in the same second page in **uuid** (random)
+  order: the same drive put cody's PR-00003 first on 2026-11-23 (T-14442 replay 04 #19). Assert the set, not the order.
 
 ## How to get to it
 
@@ -105,6 +107,5 @@ it drops it from `ready`, and resolving it leaves `state: resolved` with three `
 workstream is unclaimable, a claimed task completes only with the holder's credentials, and an on-behalf promise is
 owned by the other agent.
 
-Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/04-claims-promises/drive.txt`
-(the T-12762 replay, then lane-suffixed and malformed `--scope`, typed holder data and the W- workstream refusal
-after the NOTE drift line). T-11374's five zsh driver-error claims (see Gotchas) are not replayed.
+Driven 2026-11-23 on wv `t-14442` (T-14442 upkeep) with installed b3301fd: `var/wrkq-artifacts/T-14442/04-claims-promises/drive.txt`,
+the T-13642 replay, which covers its T-12762 replay and its lane `--scope`, typed holder data and W- refusal drives. Only random claim tokens, T-12319 and the listView same-second order differed. T-11374's five zsh driver-error claims (see Gotchas) are not replayed.

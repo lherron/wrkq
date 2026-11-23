@@ -184,9 +184,8 @@ workstream gets a `W-` id from the shared sequence, records `covers`, refuses co
 kind fixed, and a replayed `task.update` key returns the first
 result.
 
-Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/02-tasks-containers/drive.txt`
-(the T-12762 replay, then the W- id, kind-fixed, subtask, bare-number, typed-refusal and search drives after the NOTE
-drift line). T-10355 (task half), T-12318 and T-12319 still reproduce at 1f59e43.
+Driven 2026-11-23 on wv `t-14442` (T-14442 upkeep) with installed b3301fd: `var/wrkq-artifacts/T-14442/02-tasks-containers/drive.txt`,
+the T-13642 replay, which covers its T-12762 replay and its W- id, kind-fixed, subtask, bare-number, typed-refusal and search drives; no wrkq change in this feature since 4581b4f, so no drift drives. T-10355 (task half), T-12318 and T-12319 still reproduce at b3301fd. `search` may answer with index `status: indexing` right after a write; the ids are unaffected.
 
 T-12376 candidate drive, 2026-11-04Z: `var/wrkq-artifacts/T-12376/rehearsal-drive.txt`
 uses the built CLI against a migrated canonical-snapshot copy. It proves ACP/HCS/

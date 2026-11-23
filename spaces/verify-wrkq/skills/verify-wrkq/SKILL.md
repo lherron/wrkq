@@ -116,7 +116,8 @@ serve the agent guides.
 ## Cleanup
 
 `wv down <name>` stops the scratch's `wrkqd` (only the pid that `up` recorded, and only while it still serves
-that store) and removes its state directory. `wv down <name> --dry-run` shows the plan first. `wv list` shows
+that store), reports `stop_ms`, and removes its state directory. If the daemon is still running 10 s after SIGTERM,
+it refuses `still_running` and keeps the state (pid, log), so it never orphans a live daemon (2026-11-23, T-14442). `wv down <name> --dry-run` shows the plan first. `wv list` shows
 every scratch with its pid, port and liveness. Also stop anything you started next to the scratch, such as a
 webhook sink (feature 9). The evidence directories stay.
 
@@ -142,7 +143,7 @@ object. A refusal prints `{error, message, next}` and exits 1.
 | `run` | `wv run N -- CMD ...` | Runs one command with N's environment |
 | `rec` | `wv rec FILE 'CMD'` | Runs CMD under `bash -o pipefail` in the caller's environment, and appends `## <UTC ms>`, `$ CMD`, the output and `exit: <code>` to FILE (and stdout) |
 | `evidence` | `wv evidence N DIR` | Copies the daemon log and hook catalog, and writes health, `wrkqadm doctor --json`, `wrkq tree /wv-N --state all` and a `.backup` of the store into DIR |
-| `down` | `wv down N [--dry-run]` | Stops N's `wrkqd` and removes its state |
+| `down` | `wv down N [--dry-run]` | Stops N's `wrkqd` (SIGTERM, up to 10 s), prints `stop_ms`, and removes its state. Refuses `still_running` and keeps the state if the daemon outlives the 10 s |
 | `list` | `wv list` | Every scratch, with pid, port, `alive` and `started_at` |
 
 `WV_HOME` (default `~/praesidium/var/state/wrkq-wv`) moves the scratch root. `WV_BIN` (default `~/.local/bin`)

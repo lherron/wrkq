@@ -1,8 +1,9 @@
 # 10. RPC and @wrkq/client
 
 wrkq and wrkf share one JSON-RPC protocol (`protocolVersion` `2026-06-30`, pinned by `protocolSchemaHash`;
-`sha256:7ef5b72a852709bf...` since `wrkq.commit.wait` and the `ext` methods, 6c0582b..b3339db; it was
-`sha256:c79874ef...` from 5fbf10c and `sha256:3d3ffa73...` from 95b3340).
+`sha256:3f36f0853abde76a...` since c0e607e added `failureDetail`/`dischargedBy` to `WrkqEnvelope` (T-13013); it was
+`sha256:7ef5b72a...` since `wrkq.commit.wait` and the `ext` methods (6c0582b..b3339db), `sha256:c79874ef...` from
+5fbf10c and `sha256:3d3ffa73...` from 95b3340).
 `wrkq rpc --stdio` and `wrkf rpc --stdio` serve it over stdin and stdout, either against a local store
 (`--db path`) or bridged to a daemon (`rpc://`). `@wrkq/client` is the Bun TypeScript client. It spawns that
 stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rides the same protocol. Code:
@@ -55,10 +56,18 @@ stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rid
   `rpc.initialize` before it resolves. An `rpc://` locator goes through `WRKQ_DB`, so the client never parses
   CLI output and never calls wrkqd HTTP itself. Errors are `WorkRpcError` with `domainCode` and `retryable`.
   `client.wrkq.commit.wait()` acquires (`changed:true`) and `commit.wait({since, timeoutMs:1000})` times out
-  `changed:false` with the same token (published `0.1.0-dev.20261111054154`, driven 2026-11-16, T-13642).
+  `changed:false` with the same token (published `0.1.0-dev.20261118085100`, driven 2026-11-23, T-14442).
 - **Publishing.** A main-checkout `just install` on a producer node with a clean tracked tree (source read: `justfile`) publishes a timestamped `@wrkq/client` to the node's
-  Verdaccio (`npm view @wrkq/client dist-tags`). Consumers pin it. A new client refuses an old server on a
-  protocol-hash mismatch.
+  Verdaccio (`npm view @wrkq/client dist-tags`). Consumers pin it. Only the **Go** client (every Go CLI over `rpc://`)
+  refuses a server whose protocol hash differs (`pkg/client/transport.go:230-235`, source-only). The TS client never
+  compares: `createClient` only awaits `rpc.initialize` (`client.ts:450-452`), so `0.1.0-dev.20261111054154`
+  (pinned `7ef5b72a`) ran `client-drive.ts` clean against `3f36f085` (2026-11-23, T-14442). The server refuses
+  only a wrong `protocolVersion`.
+- **Cancel is a no-op.** `rpc.initialize` advertises `capabilities.cancel: true`, but `$/cancelRequest` does
+  nothing on the stdio server (`server.go:128-131`) and the `rpc://` bridge drops notifications
+  (`remote_stdio.go:99-104`): a 3 s `commit.wait` cancelled at once still answered `changed:false` after 3.0 s.
+  `docs/wrkf-rpc.md` (7bb0600) says so; `docs/wrkq-wrkf-rpc.md:229,276` still says "best-effort" (2026-11-23,
+  T-14442).
 
 ## How to get to it
 
@@ -127,7 +136,8 @@ creates a task attributed to your principal, replays the same id on the same
 The published client's three view methods and `commit.wait` answer. Live: `rpc.initialize` names the canonical
 revision and the same hash.
 
-Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/10-rpc-client/drive.txt`, published
-`@wrkq/client@0.1.0-dev.20261111054154` with `spaces/verify-wrkq/fixtures/client-drive.ts` and the prior passes'
-`fixtures/client-views.ts` (copied, `command` by install path), then the W- create/show and kind-fixed frames after the
-NOTE drift line. Live: `live/reads.txt` (canonical serves 1f59e43, hash `sha256:7ef5b72a...`, 190 methods).
+Driven 2026-11-23 on wv `t-14442` (T-14442 upkeep) with installed b3301fd: `var/wrkq-artifacts/T-14442/10-rpc-client/drive.txt`, published
+`@wrkq/client@0.1.0-dev.20261118085100` with `spaces/verify-wrkq/fixtures/client-drive.ts` and the prior passes'
+`fixtures/client-views.ts` (copied, `command` by install path), then initialize, the cancel no-op and the previous
+client `0.1.0-dev.20261111054154` after the NOTE drift line. Live: `live/reads.txt` (canonical serves b3301fd, hash
+`sha256:3f36f085...`, 190 methods).

@@ -15,6 +15,15 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
   or `timeoutMs` (`changed:false`, the same token). `timeoutMs` defaults to 25000 and is clamped to 1000..30000, so
   10 waits about 1 s. An unknown key (`sinse`) or a string `timeoutMs` is `-32602`. `monitor`, `wrkf watch`,
   `wrkp log --follow` and `wrkc say --wait` park on it between reads (7f26a88). Driven 2026-11-09, T-12762.
+  At most 512 waits park at once; the next answers `changed:false` at once without parking (`commit_wait.go:19,37-41`,
+  source-only).
+- **Shutdown drains parked waits** (908ffb7, T-13697). On SIGTERM `http.Server.Shutdown` runs `workrpc.Server.Drain`:
+  every parked `commit.wait`, and any that arrives after, answers at once `changed:false` with the caller's **own**
+  token, so its next wait against the restarted daemon replays the cursor. Before, each SIGTERM sat out the 5 s
+  shutdown deadline and exited 1 (`context deadline exceeded`). A `monitor wait` parked across the stop ends rc=3
+  with "daemon unreachable ... retrying is safe" on its next read. Driven 2026-11-23, T-14442 on a dedicated scratch
+  (6 parked waits, exit 52 ms after TERM, 0 `deadline exceeded` lines; `evidence/t-14442-drain.wrkqd.log`). Send the
+  TERM yourself (`kill $(cat $WV_STATE/pid)`) and copy `wrkqd.log` out before `wv down`, which deletes it.
 - **Init.** `wrkqadm --db P init` creates and migrates a store, creates `attachments/` next to it, and seeds the
   principal-owned and plain `inbox` projects.
 - **Serve.** `wrkqd -addr H:P -db P` takes either `-token` or `-node-tokens`/`-node-tokens-file`. With node
@@ -180,16 +189,18 @@ Never migrate, restart or bootout the canonical daemon in a verification drive.
 
 On a fresh `wv up`, health is ok with the token and 401 without it, a tokenless client gets the token refusal,
 a dead locator gets the "retrying is safe" refusal, `whoami` names the scratch locator, doctor reports every row
-ok, `migrate --status` lists every migration as applied (000074_workstream_ids last at 1f59e43), and `migrate` refuses
+ok, `migrate --status` lists every migration as applied (000075_envelope_unconfirmed last at b3301fd), and `migrate` refuses
 the serving store. `WRKQ_PROFILE=1` prints the breakdown, the snapshot, `state verify` and `patch validate`
 reads succeed on the scratch file, `state verify` refuses a `--no-canonical` export (exit 4), and `patch rebase`
 emits no `remove` ops. The daemon log has an `http.listen` line and one `http.request` line per request
 with `client: wrkq/<installed version>`, a `caller` and an `op`, the refusals as `warn` lines with their code and
 message, and sampled polls with a `suppressed` count. `commit.wait` answers a fresh acquire `changed:true`, a
-current token `changed:false` after the 1 s clamp, and wakes within about 1 s of a write. On the canonical daemon, read only: health is ok and `rpc.initialize`
-names a revision.
+current token `changed:false` after the 1 s clamp, and wakes within about 1 s of a write; on SIGTERM parked waits
+answer `changed:false` with their own token and the daemon exits well under 1 s. On the canonical daemon, read only:
+health is ok and `rpc.initialize` names a revision.
 
-Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/01-store-daemon/drive.txt`,
-`evidence/t-13642/`, live reads in `live/reads.txt` (canonical serves 1f59e43, same protocol hash). Every feature's
-drive.txt starts with a replay of T-12762's drives (each entry after a `NOTE replay T-12762 ...` line, diffed in
-`replay/compare.txt`, triaged in `replay/triage.md`), then its drift drives after a `NOTE drift T-13642` line.
+Driven 2026-11-23 on wv `t-14442` (T-14442 upkeep) with installed b3301fd: `var/wrkq-artifacts/T-14442/01-store-daemon/drive.txt`,
+`evidence/t-14442/` and `evidence/t-14442-drain.wrkqd.log`, live reads in `live/reads.txt` (canonical serves b3301fd,
+hash `sha256:3f36f085...`). Every feature's drive.txt starts with a replay of T-13642's drives (each entry after a
+`NOTE replay T-13642 ...` line, diffed in `replay/compare.txt`, triaged in `replay/triage.md`), then its drift drives
+after a `NOTE drift T-14442` line.

@@ -137,7 +137,5 @@ just's exit code passes through (3). An unfiltered `wrkp log` shows a new task's
 followed post arrives within about 1 s and the follow ends with a `wrkp.log.terminal` row. A two-project follow
 delivers each project's post tagged with its `project` path and ends with `cursors` for both.
 
-Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/07-project-facts/drive.txt`
-(the T-12762 replay, then `wrkp cursor a b`, the two-project follow and its usage refusals after the NOTE drift
-line; the first follow drive's jq dropped its entry lines and is re-recorded below its NOTE).
-Live reads: `live/reads.txt` (`wrkp types wrkq`).
+Driven 2026-11-23 on wv `t-14442` (T-14442 upkeep) with installed b3301fd: `var/wrkq-artifacts/T-14442/07-project-facts/drive.txt`,
+the T-13642 replay, which covers its T-12762 replay and its `wrkp cursor a b`, two-project follow and usage refusal drives. Only the scratch uuid in the cursor and a wall-clock time differed; no wrkq change in this feature since 4581b4f. The follow's shutdown behaviour is feature 1's drain drive. Live reads: `live/reads.txt` (`wrkp types wrkq`).

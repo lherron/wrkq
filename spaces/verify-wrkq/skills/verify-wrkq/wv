@@ -130,11 +130,16 @@ cmd_down() {
     python3 -c 'import json,sys;print(json.dumps({"name":sys.argv[1],"dry_run":True,"would_stop_pid":int(sys.argv[2]) if sys.argv[2] else None,"would_remove":sys.argv[3]}))' "$n" "$pid" "$s"
     return
   fi
+  local t0 ms=0
   if [[ -n "$pid" ]]; then
-    kill "$pid"; for _ in $(seq 1 25); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
+    t0="$(python3 -c 'import time;print(int(time.time()*1000))')"
+    kill "$pid"; for _ in $(seq 1 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
+    ms=$(( $(python3 -c 'import time;print(int(time.time()*1000))') - t0 ))
+    # Never delete the state of a daemon that is still running: that orphans it with no pid file to find it by.
+    kill -0 "$pid" 2>/dev/null && refuse still_running "wrkqd pid $pid did not exit within 10 s of SIGTERM; state kept at $s" "kill -9 $pid, read $s/wrkqd.log, then wv down $n"
   fi
   rm -rf "$s"
-  python3 -c 'import json,sys;print(json.dumps({"name":sys.argv[1],"stopped_pid":int(sys.argv[2]) if sys.argv[2] else None,"removed":sys.argv[3]}))' "$n" "$pid" "$s"
+  python3 -c 'import json,sys;print(json.dumps({"name":sys.argv[1],"stopped_pid":int(sys.argv[2]) if sys.argv[2] else None,"stop_ms":int(sys.argv[4]),"removed":sys.argv[3]}))' "$n" "$pid" "$s" "$ms"
 }
 
 cmd_list() {

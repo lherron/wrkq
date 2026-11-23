@@ -84,6 +84,18 @@ One more (2026-11-16, T-13642):
   first T-13642 run lost 8 entries to exit 127 (`replay/aborted-run1/`). `grep -o '\$A/[^ "]*' replay.sh | sort -u`
   lists them.
 
+Two more (2026-11-23, T-14442):
+
+- Order a replay of a replay by the prior pass's own `replay.sh`, not by timestamps. A pass's replayed entries keep
+  the stamps of the drives *it* ran (whole seconds before 2026-11-16), so their ties are still ambiguous; its
+  `replay.sh` lists the exact order it ran them, keyed by each `NOTE replay <task> <feature> #<k>` line. T-14442's
+  `replay/gen.py` sorts those by `replay.sh` position, then the drift entries by their ms stamps: 0 tie diffs (T-13642
+  had 12).
+- Write a drift drive's command with `read -r -d '' CMD <<'X' || true` and `r <feature> "$CMD"`, never
+  `r <feature> "$(cat <<'X' ... X)"`. macOS `/bin/bash` is 3.2, and it mangles a heredoc inside `"$(...)"`: T-14442's
+  first drain drive lost the braces of its JSON-RPC frames and parked nothing (kept in 01's drive.txt with a re-record
+  NOTE).
+
 Run Doctor first, and again after any surprise. Drive each feature's "Driving it" section on the scratch, **plus
 every drift or new behavior that step 2 flagged**, with `wv rec` into `NN-<feature>/drive.txt`. Do the canonical
 read-only reads (SKILL.md "Launch") into `live/`. Check each result against "Proven when". Run

@@ -126,10 +126,8 @@ names the missing evidence. The transition is refused until that evidence exists
 two transitioned events. A `wrkf watch --follow` on the instance ends `met` within about 1 s of the last
 transition.
 
-Driven 2026-11-16 on wv `t-13642` (T-13642 upkeep) with installed 1f59e43: `var/wrkq-artifacts/T-13642/08-workflows/drive.txt`,
-the T-12762 replay (both fixtures, the `instancesView` frames, the invalid-template drives with the fixtures copied to
-`fixtures/`, watch, meta closure, the out-of-band transition and the T-10356/T-10357 restamps), then the W- workflow
-and a T-10356 re-drive after the NOTE drift line. T-10356 and T-10357 still reproduce at 1f59e43. Live read: `wrkf workflow list --json` in `live/reads.txt`.
+Driven 2026-11-23 on wv `t-14442` (T-14442 upkeep) with installed b3301fd: `var/wrkq-artifacts/T-14442/08-workflows/drive.txt`,
+the T-13642 replay, which covers its T-12762 replay, the W- workflow and the T-10356 re-drive. Only `instanceId`/`inputHash` differed. T-10356 and T-10357 still reproduce at b3301fd. `wrkf watch` parks on `wrkq.commit.wait`, so a daemon stop answers it through feature 1's drain. Live read: `wrkf workflow list --json` in `live/reads.txt`.
 
 T-12376 candidate metadata-closure drive, 2026-11-04Z:
 `var/wrkq-artifacts/T-12376/rehearsal-drive.txt` attaches the existing
