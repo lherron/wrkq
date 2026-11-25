@@ -58,77 +58,43 @@ func checkRequiredEvidenceKinds(checkID string, check CheckSpec, facts map[strin
 	for _, kind := range check.EvidenceKinds {
 		add(kind)
 	}
-	switch check.HookID {
-	case "plan_ready":
-		add("source_spec")
-		add("decomposition_plan")
-	case "architect_verdict":
-		add("architect_verdict")
-	case "delegated_tasks_recorded":
-		add("delegated_task_manifest")
-	case "branch_ready":
-		if factPathBool(facts, "branch.required") {
-			add("branch_evidence")
+	for _, id := range []string{check.HookID, checkID} {
+		switch id {
+		case "plan_ready":
+			add("source_spec")
+			add("decomposition_plan")
+		case "architect_verdict":
+			add("architect_verdict")
+		case "delegated_tasks_recorded":
+			add("delegated_task_manifest")
+		case "branch_ready":
+			if factPathBool(facts, "branch.required") {
+				add("branch_evidence")
+			}
+		case "stacked_terminal":
+			add("stacked_terminal")
+		case "red_verified":
+			add("red_evidence")
+			add("closure_evidence")
+			add("artifact_verification")
+		case "impl_verified":
+			add("impl_evidence")
+			add("closure_evidence")
+			add("artifact_verification")
+		case "live_smoke_verified":
+			add("live_smoke_evidence")
+		case "coordinator_smoke_verified":
+			add("coordinator_runbook")
+			add("coordinator_smoke_execution")
+			add("impl_evidence")
+		case "observer_review_verdict":
+			add("completion_claim")
+			add("observer_completion_review")
+		case "cleanup_verified":
+			add("cleanup_evidence")
+		case "report_ready":
+			add("report_evidence")
 		}
-	case "stacked_terminal":
-		add("stacked_terminal")
-	case "red_verified":
-		add("red_evidence")
-		add("closure_evidence")
-		add("artifact_verification")
-	case "impl_verified":
-		add("impl_evidence")
-		add("closure_evidence")
-		add("artifact_verification")
-	case "live_smoke_verified":
-		add("live_smoke_evidence")
-	case "coordinator_smoke_verified":
-		add("coordinator_runbook")
-		add("coordinator_smoke_execution")
-		add("impl_evidence")
-	case "observer_review_verdict":
-		add("completion_claim")
-		add("observer_completion_review")
-	case "cleanup_verified":
-		add("cleanup_evidence")
-	case "report_ready":
-		add("report_evidence")
-	}
-	switch checkID {
-	case "plan_ready":
-		add("source_spec")
-		add("decomposition_plan")
-	case "architect_verdict":
-		add("architect_verdict")
-	case "delegated_tasks_recorded":
-		add("delegated_task_manifest")
-	case "branch_ready":
-		if factPathBool(facts, "branch.required") {
-			add("branch_evidence")
-		}
-	case "stacked_terminal":
-		add("stacked_terminal")
-	case "red_verified":
-		add("red_evidence")
-		add("closure_evidence")
-		add("artifact_verification")
-	case "impl_verified":
-		add("impl_evidence")
-		add("closure_evidence")
-		add("artifact_verification")
-	case "live_smoke_verified":
-		add("live_smoke_evidence")
-	case "coordinator_smoke_verified":
-		add("coordinator_runbook")
-		add("coordinator_smoke_execution")
-		add("impl_evidence")
-	case "observer_review_verdict":
-		add("completion_claim")
-		add("observer_completion_review")
-	case "cleanup_verified":
-		add("cleanup_evidence")
-	case "report_ready":
-		add("report_evidence")
 	}
 	out := make([]string, 0, len(set))
 	for kind := range set {
