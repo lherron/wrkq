@@ -445,12 +445,7 @@ func (a *API) evaluateEnvelopeCondition(ctx context.Context, c monitorCondition,
 func (c monitorCondition) satisfiedBy(state string) bool {
 	switch c.kind {
 	case "all-terminal":
-		switch state {
-		case "completed", "cancelled", "archived", "deleted":
-			return true
-		default:
-			return false
-		}
+		return domain.IsTaskTerminal(state)
 	case "state":
 		return c.states[state]
 	default:

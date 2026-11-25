@@ -72,7 +72,7 @@ type EnvelopeListParams struct {
 }
 
 // stillOwedSQL is StillOwedSince's predicate over the unaliased envelopes
-// table. The terminal set matches the API's isTerminalTaskState; a task row
+// table. The terminal set matches domain.IsTaskTerminal; a task row
 // that no longer exists counts as terminal.
 const stillOwedSQL = `obligation = 'reply_required' AND (
 	(task_uuid IS NOT NULL AND EXISTS (SELECT 1 FROM tasks t WHERE t.uuid = envelopes.task_uuid

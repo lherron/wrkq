@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/taskmember"
 )
@@ -289,7 +290,7 @@ func loadTimelineMembersTx(
 			value := outcome.String
 			member.Outcome = &value
 		}
-		if isTimelineTerminal(member.State) {
+		if domain.IsTaskTerminal(member.State) {
 			terminal++
 		}
 		if member.State == "completed" && (!outcome.Valid || strings.TrimSpace(outcome.String) == "") {
@@ -315,15 +316,6 @@ func loadTimelineMembersTx(
 	}
 	return members, WrkqTimelineRollup{Terminal: terminal, Total: len(members)},
 		missing, decisions, sortedCampaignFootprint(footprintCounts), lastActivityAt, nil
-}
-
-func isTimelineTerminal(state string) bool {
-	switch state {
-	case "completed", "cancelled", "archived", "deleted":
-		return true
-	default:
-		return false
-	}
 }
 
 func timelineLabelsContain(raw, label string) bool {

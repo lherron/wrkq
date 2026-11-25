@@ -12,6 +12,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/bulk"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/paths"
 	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/spf13/cobra"
@@ -569,8 +570,7 @@ func completionSubtaskNotice(raw json.RawMessage) ([]string, error) {
 	}
 	var open []string
 	for _, sub := range task.Subtasks {
-		switch sub.State {
-		case "completed", "cancelled", "archived", "deleted":
+		if domain.IsTaskTerminal(sub.State) {
 			continue
 		}
 		open = append(open, sub.ID)

@@ -242,7 +242,7 @@ func (a *API) hydrateRoomState(ctx context.Context, room *domain.Room) (*roomSta
 		state.key = ref.ID
 		state.workState = taskState
 		state.workTerminalAt = terminalAt.String
-		if isTerminalTaskState(taskState) {
+		if domain.IsTaskTerminal(taskState) {
 			state.work = domain.RoomWorkTerminal
 		}
 		// A task that later joined a campaign keeps its own room readable and
@@ -396,13 +396,4 @@ func (a *API) containerRoomKey(ctx context.Context, containerUUID string) (strin
 		return "", NewInternalError(err)
 	}
 	return path, nil
-}
-
-func isTerminalTaskState(state string) bool {
-	switch state {
-	case "completed", "cancelled", "archived", "deleted":
-		return true
-	default:
-		return false
-	}
 }

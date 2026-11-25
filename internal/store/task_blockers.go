@@ -86,17 +86,6 @@ func (ts *TaskStore) BlockedBy(taskUUID string) ([]BlockingTask, error) {
 	return blockers, nil
 }
 
-// isCompletionState returns true if the given state represents a "completed" blocker
-// that should no longer block other tasks.
-func isCompletionState(state string) bool {
-	switch state {
-	case "completed", "cancelled", "archived", "deleted":
-		return true
-	default:
-		return false
-	}
-}
-
 // incompleteBlockerExcludedStates are the blocker states that no longer block:
 // completion states plus idea, which is uncommitted work.
 const incompleteBlockerExcludedStates = `('completed', 'archived', 'deleted', 'cancelled', 'idea')`

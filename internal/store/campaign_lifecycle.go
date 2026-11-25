@@ -347,14 +347,11 @@ func classifyCampaignMembers(members []campaignMemberRow) ([]CampaignMemberDiagn
 	stragglers := []CampaignMemberDiagnostic{}
 	missing := []CampaignMemberDiagnostic{}
 	for _, row := range members {
-		switch row.State {
-		case "completed", "cancelled", "archived", "deleted":
-			if row.State == "completed" && (!row.outcome.Valid || strings.TrimSpace(row.outcome.String) == "") {
-				missing = append(missing, row.CampaignMemberDiagnostic)
-			}
-		default:
+		if !domain.IsTaskTerminal(row.State) {
 			// idea and draft are intentionally open here.
 			stragglers = append(stragglers, row.CampaignMemberDiagnostic)
+		} else if row.State == string(domain.StateCompleted) && (!row.outcome.Valid || strings.TrimSpace(row.outcome.String) == "") {
+			missing = append(missing, row.CampaignMemberDiagnostic)
 		}
 	}
 	return stragglers, missing

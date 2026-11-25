@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/lherron/wrkq/internal/attribution"
+	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
 	"github.com/lherron/wrkq/internal/taskmember"
 	"github.com/lherron/wrkq/internal/webhooks"
@@ -78,7 +79,7 @@ func (ts *TaskStore) ArchiveWithViaAttribution(attr attribution.Attribution, tas
 		if err != nil {
 			return err
 		}
-		if !isCompletionState(currentState) {
+		if !domain.IsTaskTerminal(currentState) {
 			if err := maybeLogCampaignCloseNudgeForTask(tx, ew, attr, taskUUID); err != nil {
 				return err
 			}
@@ -192,7 +193,7 @@ func (ts *TaskStore) PurgeWithAttribution(attr attribution.Attribution, taskUUID
 		webhookInfo = &info
 
 		campaignUUID := ""
-		if !isCompletionState(currentState) {
+		if !domain.IsTaskTerminal(currentState) {
 			campaignUUID, err = campaignUUIDForTaskTx(tx, taskUUID)
 			if err != nil {
 				return err

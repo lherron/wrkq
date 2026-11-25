@@ -44,6 +44,16 @@ func IsValidState(state string) bool {
 	return err == nil
 }
 
+// IsTaskTerminal reports whether state is a terminal task lifecycle state.
+func IsTaskTerminal(state string) bool {
+	switch State(state) {
+	case StateCompleted, StateCancelled, StateArchived, StateDeleted:
+		return true
+	default:
+		return false
+	}
+}
+
 // DefaultViewStates is the producer-owned actionable discovery set: the states
 // a view shows when the caller names none. tree/ls send it explicitly from the
 // CLI (their server refuses a request without `states`); find's producer

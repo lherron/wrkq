@@ -176,7 +176,7 @@ func (ts *TaskStore) updateFieldsTx(tx *sql.Tx, ew *events.Writer, attr attribut
 
 		newState, hasStateChange := fields["state"].(string)
 		stateChanged := hasStateChange && currentState != newState
-		transitioningToCompletion := hasStateChange && !isCompletionState(currentState) && isCompletionState(newState)
+		transitioningToCompletion := hasStateChange && !domain.IsTaskTerminal(currentState) && domain.IsTaskTerminal(newState)
 		fieldNames := sortedFieldNames(fields)
 		oldValues, err := loadTaskFieldValues(tx, taskUUID, fieldNames)
 		if err != nil {
