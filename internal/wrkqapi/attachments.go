@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/lherron/wrkq/internal/attach"
+	"github.com/lherron/wrkq/internal/attribution"
 	"github.com/lherron/wrkq/internal/cursor"
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/events"
@@ -116,55 +117,17 @@ func (a *API) AttachmentAdd(ctx context.Context, p AttachmentAddParams) (*WrkqAt
 		return nil, aerr
 	}
 
-	tx, err := a.db.Begin()
+	attachUUID, err := a.createAttachment(stagedAttachment{
+		taskUUID:     taskUUID,
+		filename:     filename,
+		relativePath: relativePath,
+		absPath:      absPath,
+		mimeType:     mimeType,
+		size:         size,
+		checksum:     checksum,
+	}, attr, p.Task)
 	if err != nil {
-		_ = os.Remove(absPath)
-		return nil, NewInternalError(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	res, ierr := tx.Exec(`
-		INSERT INTO attachments (
-			id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum,
-			created_by_principal_ref, created_by_scope_ref
-		)
-		VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?)
-	`, taskUUID, filename, relativePath, mimeType, size, checksum,
-		attr.PrincipalRef, scopeBind(attr))
-	if ierr != nil {
-		_ = os.Remove(absPath)
-		return nil, mapStoreError(ierr, p.Task)
-	}
-
-	var attachUUID string
-	lastID, _ := res.LastInsertId()
-	if scanErr := tx.QueryRow("SELECT uuid FROM attachments WHERE rowid = ?", lastID).Scan(&attachUUID); scanErr != nil {
-		_ = os.Remove(absPath)
-		return nil, NewInternalError(scanErr)
-	}
-
-	payloadData := map[string]any{"filename": filename, "size_bytes": size, "mime_type": mimeType, "task_id": taskUUID}
-	if err := store.StampTaskCampaignContext(tx, taskUUID, payloadData); err != nil {
-		_ = os.Remove(absPath)
-		return nil, NewInternalError(err)
-	}
-	payload, _ := json.Marshal(payloadData)
-	payloadStr := string(payload)
-	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
-		PrincipalRef: attr.PrincipalRef,
-		ScopeRef:     attr.ScopeRef,
-		ResourceType: "attachment",
-		ResourceUUID: &attachUUID,
-		EventType:    "attachment.created",
-		Payload:      &payloadStr,
-	}); eerr != nil {
-		_ = os.Remove(absPath)
-		return nil, NewInternalError(eerr)
-	}
-
-	if cerr := a.db.CommitEvents(tx); cerr != nil {
-		_ = os.Remove(absPath)
-		return nil, NewInternalError(cerr)
+		return nil, err
 	}
 
 	dto, lerr := a.loadAttachment(attachUUID)
@@ -177,6 +140,76 @@ func (a *API) AttachmentAdd(ctx context.Context, p AttachmentAddParams) (*WrkqAt
 		}
 	}
 	return dto, nil
+}
+
+type stagedAttachment struct {
+	taskUUID     string
+	filename     string
+	relativePath string
+	absPath      string
+	mimeType     string
+	size         int64
+	checksum     string
+}
+
+// createAttachment commits the metadata row and creation event for a staged file.
+// It removes that file on transaction failure. After commit, the file belongs to
+// the attachment even if the caller fails to load the DTO or store its replay.
+func (a *API) createAttachment(file stagedAttachment, attr attribution.Attribution, taskSelector string) (string, error) {
+	tx, err := a.db.Begin()
+	if err != nil {
+		_ = os.Remove(file.absPath)
+		return "", NewInternalError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, ierr := tx.Exec(`
+		INSERT INTO attachments (
+			id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum,
+			created_by_principal_ref, created_by_scope_ref
+		)
+		VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?)
+	`, file.taskUUID, file.filename, file.relativePath, file.mimeType, file.size, file.checksum,
+		attr.PrincipalRef, scopeBind(attr))
+	if ierr != nil {
+		_ = os.Remove(file.absPath)
+		return "", mapStoreError(ierr, taskSelector)
+	}
+
+	var attachUUID string
+	lastID, _ := res.LastInsertId()
+	if scanErr := tx.QueryRow("SELECT uuid FROM attachments WHERE rowid = ?", lastID).Scan(&attachUUID); scanErr != nil {
+		_ = os.Remove(file.absPath)
+		return "", NewInternalError(scanErr)
+	}
+
+	payloadData := map[string]any{
+		"filename": file.filename, "size_bytes": file.size, "mime_type": file.mimeType, "task_id": file.taskUUID,
+	}
+	if err := store.StampTaskCampaignContext(tx, file.taskUUID, payloadData); err != nil {
+		_ = os.Remove(file.absPath)
+		return "", NewInternalError(err)
+	}
+	payload, _ := json.Marshal(payloadData)
+	payloadStr := string(payload)
+	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
+		PrincipalRef: attr.PrincipalRef,
+		ScopeRef:     attr.ScopeRef,
+		ResourceType: "attachment",
+		ResourceUUID: &attachUUID,
+		EventType:    "attachment.created",
+		Payload:      &payloadStr,
+	}); eerr != nil {
+		_ = os.Remove(file.absPath)
+		return "", NewInternalError(eerr)
+	}
+
+	if cerr := a.db.CommitEvents(tx); cerr != nil {
+		_ = os.Remove(file.absPath)
+		return "", NewInternalError(cerr)
+	}
+
+	return attachUUID, nil
 }
 
 // AttachmentList returns the attachments for a task.

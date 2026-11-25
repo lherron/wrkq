@@ -16,9 +16,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lherron/wrkq/internal/attach"
-	"github.com/lherron/wrkq/internal/domain"
-	"github.com/lherron/wrkq/internal/events"
-	"github.com/lherron/wrkq/internal/store"
 )
 
 const nsAttachmentAddBytes = "wrkq.attachment.addBytes"
@@ -367,55 +364,17 @@ func (a *API) finalizeUpload(ctx context.Context, uploadID string, up *attachmen
 		return nil, aerr
 	}
 
-	tx, err := a.db.Begin()
+	attachUUID, err := a.createAttachment(stagedAttachment{
+		taskUUID:     up.taskUUID,
+		filename:     up.filename,
+		relativePath: relativePath,
+		absPath:      absPath,
+		mimeType:     up.mimeType,
+		size:         up.received,
+		checksum:     checksum,
+	}, attr, up.taskUUID)
 	if err != nil {
-		_ = os.Remove(absPath)
-		return nil, NewInternalError(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	res, ierr := tx.Exec(`
-		INSERT INTO attachments (
-			id, task_uuid, filename, relative_path, mime_type, size_bytes, checksum,
-			created_by_principal_ref, created_by_scope_ref
-		)
-		VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?)
-	`, up.taskUUID, up.filename, relativePath, up.mimeType, up.received, checksum,
-		attr.PrincipalRef, scopeBind(attr))
-	if ierr != nil {
-		_ = os.Remove(absPath)
-		return nil, mapStoreError(ierr, up.taskUUID)
-	}
-
-	var attachUUID string
-	lastID, _ := res.LastInsertId()
-	if scanErr := tx.QueryRow("SELECT uuid FROM attachments WHERE rowid = ?", lastID).Scan(&attachUUID); scanErr != nil {
-		_ = os.Remove(absPath)
-		return nil, NewInternalError(scanErr)
-	}
-
-	payloadData := map[string]any{"filename": up.filename, "size_bytes": up.received, "mime_type": up.mimeType, "task_id": up.taskUUID}
-	if err := store.StampTaskCampaignContext(tx, up.taskUUID, payloadData); err != nil {
-		_ = os.Remove(absPath)
-		return nil, NewInternalError(err)
-	}
-	payload, _ := json.Marshal(payloadData)
-	payloadStr := string(payload)
-	if eerr := events.NewWriter(a.db.DB).LogEvent(tx, &domain.Event{
-		PrincipalRef: attr.PrincipalRef,
-		ScopeRef:     attr.ScopeRef,
-		ResourceType: "attachment",
-		ResourceUUID: &attachUUID,
-		EventType:    "attachment.created",
-		Payload:      &payloadStr,
-	}); eerr != nil {
-		_ = os.Remove(absPath)
-		return nil, NewInternalError(eerr)
-	}
-
-	if cerr := a.db.CommitEvents(tx); cerr != nil {
-		_ = os.Remove(absPath)
-		return nil, NewInternalError(cerr)
+		return nil, err
 	}
 
 	dto, lerr := a.loadAttachment(attachUUID)
