@@ -163,8 +163,8 @@ TEXT
 wrkc defer EN-00002 --reason 'Waiting on installed validation' --retry-after 10m
 ```
 
-See [docs/wrkc-reference.md](docs/wrkc-reference.md) for routing, obligations
-and identity.
+See [rooms and obligations](docs/wrkq-concepts.md#rooms-and-obligations) for routing,
+replies, and identity.
 
 ## Watching work
 
@@ -261,13 +261,11 @@ contracts. See [AGENTS.md](AGENTS.md) for agent-specific working rules.
 
 - [docs/SPEC.md](docs/SPEC.md): canonical product, domain, CLI and daemon
   contract. It wins when docs disagree.
-- [docs/wrkq-overview.md](docs/wrkq-overview.md): architecture and data model
-- [docs/wrkq-cli-reference.md](docs/wrkq-cli-reference.md): command reference
+- Run `wrkq <command> --help` for current command syntax.
 - [docs/wrkq-concepts.md](docs/wrkq-concepts.md): handoffs, search, monitoring,
-  attribution
+  attribution, and room mail
 - [docs/wrkq-operations.md](docs/wrkq-operations.md): database location,
   backups, daemon deployment
-- [docs/wrkc-reference.md](docs/wrkc-reference.md): rooms and obligations
 - [docs/wrkf-rpc.md](docs/wrkf-rpc.md): wrkf RPC recovery and client guide
 
 ## License

@@ -14,9 +14,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newCommentCmd mirrors `wrkq comment`. Only `add` is implemented so far (via
-// wrkq.comment.add); ls/cat/rm are pending (ls needs the list-view projection
-// ruling, see docs/rpc-cli-migration.md).
+// newCommentCmd registers task comment commands. List and cat use the server's
+// compatibility projections to preserve the CLI response shapes.
 func newCommentCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "comment", Short: "Manage task comments"}
 	cmd.AddCommand(newCommentAddCmd())

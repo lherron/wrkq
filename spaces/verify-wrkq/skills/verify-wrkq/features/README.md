@@ -25,5 +25,5 @@ and Proven when. The last lines of each file name the drive that last proved it 
 - Re-drive a feature after any change to its code. Put the evidence under your task's `artifact_dir` in the
   layout from [SKILL.md](../SKILL.md) (`NN-<feature>/drive.txt`, `evidence/<scratch>/`, `live/`), and update the
   file's last line.
-- The contracts (`docs/wrkq-wrkf-rpc.md`, `docs/wrkf-rpc.md`, `docs/wrkc-reference.md`, `docs/SPEC.md`) say what
+- The contracts (`docs/wrkq-wrkf-rpc.md`, `docs/wrkf-rpc.md`, `docs/SPEC.md`) say what
   was specified. These files say what the installed build does and how to watch it do it.

@@ -127,10 +127,8 @@ changed field/operation; for human-only coverage, cite the explicit ruling and s
 
 - [Durable architecture law](architecture/README.md) — canonical invariant/risk records, producer contracts, and their generated projections; consult and cite record ids before changing a recorded surface.
 - [Search index operations](internal/search/README.md) — FTS5, dense vectors, llama-server operating notes, and canonical launch args.
-- [Domain model operations](internal/domain/README.md) — resources, addressing, optimistic concurrency, attachments, comments, and migrations.
-- [wrkq product/domain/CLI/daemon spec](docs/SPEC.md) — canonical product and command contract.
+- [wrkq product/domain/CLI/daemon spec](docs/SPEC.md) — domain resources, addressing, concurrency, attachments, comments, and CLI contracts.
 - [wrkq/wrkf RPC machine contract](docs/wrkq-wrkf-rpc.md) — maintained wire contract; [wrkf recovery guide](docs/wrkf-rpc.md) explains clients and recovery.
 - [wrkq change validation](docs/change-validation.md) — when to run verify / verify-full / install+smoke and where the wrkf template fits.
-- [Agent-enablement changelog](docs/enablement-changelog.md) — target-local retro carrier for sensor/workflow changes.
 - [Rule-authoring template](docs/rule-template.md) — author any new build-failing rule deliberately with a 7-field candidate and when-to-use policy.
 - [Embedded agent usage block](internal/rpccli/embedded/WRKQ-USAGE.md) — task lifecycle and wrkq command quick reference.

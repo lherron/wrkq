@@ -35,13 +35,6 @@ For multi-role wrkq code changes, attach the wrkf template at
 It carries red, verify, full-verify, review, and installed-binary evidence
 through the S10 workflow; it does not replace the commands above.
 
-## Enablement retro carrier
-
-After an agent-enablement pass changes wrkq's sensors, workflow, or docs, add a
-dated entry to [docs/enablement-changelog.md](docs/enablement-changelog.md).
-Keep it short: what changed, what proof ran, what should promote or sunset, and
-whether the change stays target-local.
-
 ## New build-failing rules
 
 Before adding a new lint, structural guard, or meta-lint, fill out the

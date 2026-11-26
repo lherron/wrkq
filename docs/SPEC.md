@@ -152,9 +152,11 @@ the agent identity; runtime/task/project provenance must travel through
 
 ### Principals and legacy actor compatibility
 
-Canonical caller identity is a principal ref (`agent:<id>`). It does not
-require an actor row and is stored separately from runtime scope and delivery
-provenance.
+Mutations require a canonical caller principal (`agent:<id>`) for attribution.
+Authorization checks use the operation’s own authority, such as the claim fence
+for completing held work. The principal requires no actor row and is stored
+separately from runtime scope and delivery provenance. `WRKQ_ACTOR`,
+`WRKQ_ACTOR_ID`, and `WRKF_ACTOR` are retired as caller authority.
 
 The physical `actors` table has **not** been dropped or compacted. It remains an
 intentional compatibility surface for:
@@ -316,7 +318,8 @@ Comments are append-only task notes. They can be soft-deleted with
 and `wrkq cat` output exclude deleted comments.
 
 `wrkq cat` includes comments by default. Use `--exclude-comments` to omit them.
-There is no canonical `--include-comments` flag.
+The comments block in `wrkq cat` output is read-only. `wrkq apply` does not
+import it as comments.
 
 ### Outcomes
 
@@ -402,8 +405,9 @@ Attachment metadata is stored in SQLite. Bytes live under:
 
 `<attach_dir>/tasks/<task_uuid>/...`
 
-Task moves and renames do not move attachment bytes because storage is keyed by
-task UUID. Purging a task removes its attachment directory.
+Attachment storage is keyed by task UUID, so a move or rename leaves the
+attachment paths intact. A task soft delete keeps the bytes. `wrkq rm --purge`
+removes the task’s attachment directory.
 
 ### Task Relations
 
@@ -710,8 +714,10 @@ Canonical state lives in one SQLite database. Connections are opened with WAL
 mode and a busy timeout. Migrations live under `internal/db/migrations` and are
 embedded into the binaries.
 
-Mutable rows carry `etag INTEGER`. Mutating commands that expose `--if-match`
-must reject stale writes when the current etag differs from the expected etag.
+Mutable rows carry `etag INTEGER`. Commands that expose `--if-match` use it
+for optimistic concurrency and reject writes whose expected etag is stale.
+Check the typed `WRKQ_CONFLICT` error in automation. Exit status depends on the
+command. For example, `wrkq set --if-match` exits 1 on a stale task etag.
 
 Events are appended to `event_log` with resource type, UUID, event type, etag,
 `principal_ref`, optional `scope_ref`, legacy actor UUID when available,
@@ -778,7 +784,7 @@ Canonical markdown that remains:
 | `docs/wrkf-rpc.md` | Frozen wrkf JSON-RPC machine contract. |
 | `internal/rpccli/embedded/WRKQ-USAGE.md` | Embedded agent guide; the single source served by `usage`/`info`/`agent-info`. |
 | `internal/rpccli/embedded/WRKC-USAGE.md` | Embedded wrkc agent guide served by `wrkc info`. |
-| `docs/wrkc-reference.md` | wrkc room/routing/obligation reference; the detail the injected guide omits. |
+| `docs/wrkq-concepts.md` | Guide to room routing and obligations, search, monitoring, and handoffs. |
 | `mcp-server/README.md` | Local package README for the MCP stdio wrapper. |
 | `pbc/templates/` | Workflow artifact templates used by the PBC sample preset. |
 | `vendor/` | Third-party vendored documentation; not a wrkq spec surface. |

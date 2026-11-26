@@ -15,7 +15,6 @@ import (
 // mirroredCommand describes a command surface represented by an explicit
 // not-implemented mirror stub. Top-level stubs are expected to remain empty for
 // primary cutover; nested development stubs may still use newStubCmd directly.
-// Coverage status per command lives in docs/rpc-cli-migration.md.
 type mirroredCommand struct {
 	use     string
 	aliases []string

@@ -1292,8 +1292,7 @@ interface WrkqAttachmentAddBytesResult {
 DTO. Both `WrkqAttachmentBytes` and `WrkqAttachmentAddBytesResult` are cataloged +
 fingerprinted (byte-transfer boundary, **not canonical**). Absence of byte
 capability (no explicit attach dir) hard-gates with `WRKQ_VALIDATION`; there is no
-silent host-path fallback. See `architecture/records/invariants/
-wrkq.wrkf-rpc.attachment-byte-transfer.yaml` and `docs/rpc-cli-migration.md`.
+silent host-path fallback. See invariant `wrkq.wrkf-rpc.attachment-byte-transfer`.
 
 Attachment storage config (attach dir + max size) is sourced from the SAME wrkq
 configuration on both the `wrkq` and `wrkf` rpc entrypoints. When no attach dir

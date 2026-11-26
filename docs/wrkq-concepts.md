@@ -1,6 +1,6 @@
 ---
 id: wrkq/concepts
-title: wrkq concepts - handoffs, search, monitoring
+title: wrkq concepts
 kind: guide
 authority: descriptive
 status: active
@@ -8,12 +8,46 @@ visibility: internal
 provenance: authored
 ---
 
-# wrkq concepts: handoffs, search, monitoring
+# wrkq concepts
 
-This page explains three cross-cutting wrkq mechanisms that are easy to
-confuse with each other or with adjacent systems: handoffs, the search/index
-subsystem, and the event-log/monitor/watch/diff family. Command syntax lives
-in [the CLI reference](/docs/wrkq/cli-reference).
+Use `wrkq <command> --help` or `wrkc <command> --help` for command syntax.
+
+## Rooms and obligations
+
+A room keeps the conversation across runtime changes. A task in a campaign
+routes new messages to the campaign room. If the task had its own room, its
+older history stays there and links to the campaign room. A named subtask
+uses its owner's effective room and keeps its own tag so readers can filter
+the shared conversation. When addressing a seat by handle, a task-scoped
+recipient's work determines the room first, then a task-scoped sender's work.
+Two primary seats use a pair room unless they address an existing room.
+Completed work stays reachable for grading and follow-up.
+
+Reply using the envelope's exact `replyTo` handle. Two seats of one agent can
+owe different replies. A bare name resolves to the most recently presented
+reply-required sender of that name, a unique room member, or the room's task
+or project scope. Ambiguous membership refuses the send so the original
+obligation stays visible.
+
+A reply acknowledges pending and presented mail from that counterparty in
+the room. Use `--discharges` to select particular envelopes, including
+deferred ones. Deferral survives runtime rotation. A retry promise makes the
+envelope visible again in the pending inbox at the scheduled time while
+`show` still reports the stored deferred state. A reply with `--note` can
+discharge mail without waking the recipient.
+
+Presentation binds the obligation to the receiving runtime. If that runtime
+ends without disposing of it, `runtime_terminated` means the sender can issue
+a new envelope. An `unconfirmed` failure means the harness received the body
+but a turn never confirmed presentation. Check the room before deciding
+whether to resend. `ignored` means the runtime ended its reminder turn
+without disposing of the obligation.
+
+The sender's failure inbox follows active work. It drops failures attached
+to terminal tasks and hides unattached failures after 24 hours (or when their
+room goes stale). This window comes from the observed resend history, where
+none of the sampled mail was resent after 24 hours. `show` and `log` retain
+the full ledger. A wait timeout by itself leaves the envelope unchanged.
 
 ## Handoffs
 

@@ -12,11 +12,9 @@ import (
 var trackedDocs = []string{
 	"AGENTS.md",
 	"internal/search/README.md",
-	"internal/domain/README.md",
 	"docs/SPEC.md",
 	"docs/wrkf-rpc.md",
 	"docs/change-validation.md",
-	"docs/enablement-changelog.md",
 	"internal/rpccli/embedded/WRKQ-USAGE.md",
 	// architecture/ durable-law surface: keep its router + ADR provenance reachable.
 	// (Generated projections INVARIANTS.md/RISKS.md/index.jsonl are gated by

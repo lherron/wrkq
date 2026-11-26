@@ -8,7 +8,7 @@ hrc-runtime, not here. Code: `cmd/wrkc/`, `internal/rpccli/wrkc*.go` (`wrkc_say.
 `wrkc_envelope.go`, `wrkc_identity.go`, `wrkc_render.go`), `internal/wrkqapi/` (`envelope_reads.go`,
 `envelope_dispositions.go`, `room_scope_refs.go`, `rooms_say.go`, `rooms_routing.go`, `rooms_wire.go`, `rooms_verbs.go`)
 and `internal/store/` (rooms, envelopes, `envelope_send.go`, `envelope_lifecycle.go`). Guide:
-`internal/rpccli/embedded/WRKC-USAGE.md` (`wrkc info`) and `docs/wrkc-reference.md`.
+`internal/rpccli/embedded/WRKC-USAGE.md` (`wrkc info`) and `docs/wrkq-concepts.md#rooms-and-obligations`.
 
 ## Sub-features
 
