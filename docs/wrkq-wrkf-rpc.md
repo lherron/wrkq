@@ -223,8 +223,13 @@ rpc.exit
 $/cancelRequest
 ```
 
-`rpc.initialize` must be the first call. Business methods called before
-initialization return a structured validation error (`WRKQ_VALIDATION`).
+`rpc.initialize` must be the first call. On the local stdio server, business
+methods called before initialization return a structured validation error
+(`WRKQ_VALIDATION`). wrkqd does not refuse them, and neither does the remote
+stdio bridge, which forwards to it: every HTTP client shares one dispatcher, so
+a process-wide flag enforced nothing per client and refused long-lived clients
+after each restart. Clients still initialize first to verify the protocol
+version, schema hash and surface.
 
 The stdio server accepts `$/cancelRequest` as a no-op. The remote stdio bridge
 drops the notification. HTTP request-context cancellation is a separate

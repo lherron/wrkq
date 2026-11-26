@@ -197,3 +197,43 @@ func TestServeDaemonRejectsNonLoopbackWithoutToken(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// A wrkqd process serves every HTTP client from one dispatcher, so a
+// process-wide initialize gate refused long-lived clients after each restart
+// until some other client happened to initialize the new process (T-14717).
+func TestDaemonAnswersBusinessCallBeforeAnyInitialize(t *testing.T) {
+	database, _ := setupTestEnv(t)
+	dbPath := database.Path()
+	_ = database.Close()
+	addr := freeAddr(t)
+	stop := serveDaemon(t, DaemonOptions{Addr: addr, DBPath: dbPath, Token: "test-token"})
+	defer stop()
+
+	post := func(body string) workrpc.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/v1/rpc", bytes.NewReader([]byte(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer test-token")
+		httpResp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = httpResp.Body.Close() }()
+		var resp workrpc.Response
+		if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp
+	}
+
+	business := post(`{"jsonrpc":"2.0","id":1,"method":"wrkq.commit.wait","params":{"timeoutMs":1}}`)
+	if business.Error != nil {
+		t.Fatalf("business call before any rpc.initialize was refused: %+v", business.Error)
+	}
+	initialize := post(`{"jsonrpc":"2.0","id":2,"method":"rpc.initialize","params":{"protocolVersion":"2026-06-30"}}`)
+	if initialize.Error != nil || len(initialize.Result) == 0 {
+		t.Fatalf("rpc.initialize after a business call: result=%s error=%+v", initialize.Result, initialize.Error)
+	}
+}

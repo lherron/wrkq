@@ -105,6 +105,7 @@ func ServeDaemon(opts DaemonOptions) (*os.File, error) {
 	os.Stdout = os.Stderr
 	rpcServer := workrpc.NewServer(io.Discard)
 	workrpc.RegisterAPI(rpcServer, api, rpcOpts)
+	rpcServer.SkipInitializeGate()
 
 	server := &daemonServer{
 		db:       database,

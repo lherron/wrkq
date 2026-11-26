@@ -51,6 +51,17 @@ func (s *Server) Drain() {
 	s.drainOnce.Do(func() { close(s.drained) })
 }
 
+// SkipInitializeGate opens the dispatcher to business calls with no prior
+// rpc.initialize. wrkqd uses it: all its HTTP clients share one dispatcher, so
+// the gate enforced nothing per client and refused long-lived clients after
+// every restart until some client initialized the new process. A stdio server
+// has one client and keeps the gate.
+func (s *Server) SkipInitializeGate() {
+	s.mu.Lock()
+	s.initialized = true
+	s.mu.Unlock()
+}
+
 func (s *Server) Register(method string, handler Handler) {
 	if isWrkfDomainMethod(method) {
 		handler = guardLegacyActorParams(handler)
