@@ -577,6 +577,16 @@ func (a *API) resolveContainerMoveTarget(containerUUID, dstPath string) (*string
 			Kind string `json:"kind,omitempty"`
 		}{Ref: dstPath, Kind: "container"}, err)
 	}
+	if parentUUID == nil {
+		// A single-segment destination is top-level, which is the root
+		// container's child (as ContainerCreate anchors it). The store refuses
+		// a non-project there.
+		rootUUID, rerr := store.RootContainerUUID(a.db)
+		if rerr != nil {
+			return nil, "", NewInternalError(rerr)
+		}
+		parentUUID = &rootUUID
+	}
 	return parentUUID, normalizedSlug, nil
 }
 
