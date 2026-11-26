@@ -269,6 +269,7 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 			ID       string `json:"id"`
 			UUID     string `json:"uuid"`
 			Slug     string `json:"slug"`
+			Path     string `json:"path"`
 			Title    string `json:"title"`
 			State    string `json:"state"`
 			Priority int    `json:"priority"`
@@ -281,8 +282,11 @@ func runTouch(cmd *cobra.Command, args []string, o touchOpts) error {
 		if derr != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to create artifact directory %s: %v\n", artifactDir, derr)
 		}
+		if o.subtask {
+			dto.Path = path
+		}
 		results = append(results, touchResult{
-			ID: dto.ID, UUID: dto.UUID, Slug: dto.Slug, Path: path,
+			ID: dto.ID, UUID: dto.UUID, Slug: dto.Slug, Path: dto.Path,
 			Title: dto.Title, State: dto.State, Priority: dto.Priority, Kind: dto.Kind,
 			ArtifactDir: artifactDir,
 		})

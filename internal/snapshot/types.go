@@ -77,6 +77,7 @@ type ContainerEntry struct {
 	SortIndex             int64   `json:"sort_index,omitempty"`
 	WebhookURLs           *string `json:"webhook_urls,omitempty"`
 	Root                  *string `json:"root,omitempty"`
+	Short                 *string `json:"short,omitempty"`
 	Specification         *string `json:"specification,omitempty"`
 	Labels                *string `json:"labels,omitempty"`
 	CampaignState         *string `json:"campaign_state,omitempty"`

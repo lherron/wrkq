@@ -14,6 +14,7 @@ type ContainerCatViewParams struct {
 // sort_index, webhook_urls, and created_by/updated_by actor slugs — none of
 // which are on the canonical WrkqContainer DTO. Not a domain resource.
 type WrkqContainerCatView struct {
+	Short       *string                   `json:"short,omitempty"`
 	ID          string                    `json:"id"`
 	UUID        string                    `json:"uuid"`
 	Slug        string                    `json:"slug"`

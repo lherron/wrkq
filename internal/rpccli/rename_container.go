@@ -166,7 +166,17 @@ func runRenameContainer(cmd *cobra.Command, ref, newSlug string, f renameContain
 		params["expectEtag"] = f.ifMatch
 	}
 	if _, uerr := tr.Call(ctx, "wrkq.container.update", params); uerr != nil {
-		return errors.New(renameUpdateErr(uerr, f.ifMatch))
+		message := renameUpdateErr(uerr, f.ifMatch)
+		var conflict *Error
+		if errors.As(uerr, &conflict) && conflict.DomainID == "WRKQ_CONFLICT" {
+			var data struct {
+				Holder string `json:"holder"`
+			}
+			if json.Unmarshal(conflict.Data, &data) == nil && data.Holder != "" {
+				return rpcRefusal(conflict)
+			}
+		}
+		return errors.New(message)
 	}
 
 	if !tty {

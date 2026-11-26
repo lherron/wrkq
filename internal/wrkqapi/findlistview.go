@@ -91,9 +91,18 @@ func (a *API) FindListView(ctx context.Context, p FindListViewParams) (*WrkqFind
 		return nil, NewValidationError(err.Error(), map[string]any{"field": "sort"})
 	}
 
+	paths := make([]string, 0, len(p.Paths))
+	for _, path := range p.Paths {
+		canonical, err := selectors.CanonicalizeProjectShort(a.db, path)
+		if err != nil {
+			return nil, NewInternalError(err)
+		}
+		paths = append(paths, canonical)
+	}
+
 	opts := findQueryOptions{
 		subtasks: p.Subtasks, ownerState: p.OwnerState,
-		paths:                p.Paths,
+		paths:                paths,
 		typeFilter:           p.Type,
 		slugGlob:             p.SlugGlob,
 		state:                p.State,

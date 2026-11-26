@@ -20,9 +20,10 @@ import (
 )
 
 type wrkpGitProject struct {
-	ID   string
-	Slug string
-	Root string
+	Short string
+	ID    string
+	Slug  string
+	Root  string
 }
 
 type wrkpGitRef struct {
@@ -269,6 +270,11 @@ func resolveWrkpGitProject(ctx context.Context, tr Transport, git wrkpGitRunner,
 				return project, nil
 			}
 		}
+		for _, project := range projects {
+			if override == project.Short {
+				return project, nil
+			}
+		}
 		return wrkpGitProject{}, fmt.Errorf("project %q was not found; skipping", override)
 	}
 	canonicalTop, err := canonicalWrkpGitRoot(toplevel)
@@ -330,7 +336,11 @@ func listWrkpGitProjects(ctx context.Context, tr Transport) ([]wrkpGitProject, e
 			if item.Root != nil {
 				root = *item.Root
 			}
-			projects = append(projects, wrkpGitProject{ID: item.ID, Slug: item.Slug, Root: root})
+			short := ""
+			if item.Short != nil {
+				short = *item.Short
+			}
+			projects = append(projects, wrkpGitProject{ID: item.ID, Slug: item.Slug, Root: root, Short: short})
 		}
 		if view.Next == "" {
 			return projects, nil

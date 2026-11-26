@@ -1365,6 +1365,7 @@ wrkq.container.list
 wrkq.container.taskCounts [complete producer-owned subtree-count aggregate]
 wrkq.project.listView   [CLI compatibility projection for `wrkq projects`]
 wrkq.project.setRoot    [dedicated top-level project checkout-root mutation]
+wrkq.project.setShort   [dedicated top-level project short-name mutation]
 wrkq.projectEvent.post  [attributed foreign-fact mutation]
 wrkq.projectEvent.get
 wrkq.projectEvent.typesView
@@ -1422,8 +1423,9 @@ wrkq.container.deleteRecursive
 > project-root scoping, filters archived projects unless requested, and paginates
 > by slug using the legacy cursor envelope:
 > `{ items: WrkqProjectEntry[], next_cursor? }`, where each entry is
-> `{type,id,slug,title,path,root}`. `root` is nullable and returned exactly as
-> stored; consumers expand `~/...` for their own host.
+> `{type,id,slug,title,path,root,short?}`. `root` is nullable and returned exactly as
+> stored; consumers expand `~/...` for their own host. The optional `short`
+> is the input alias registered by the project.
 
 > **`wrkq.project.setRoot`** accepts
 > `{project,root,expectEtag?,actor?}` and returns the updated
@@ -1434,6 +1436,17 @@ wrkq.container.deleteRecursive
 > caller normalizes absolute paths beneath its `$HOME` to `~/...`; paths outside
 > `$HOME` remain absolute. This dedicated method does not widen the narrow
 > `wrkq.container.update` patch.
+
+> **`wrkq.project.setShort`** accepts `{project,short,expectEtag?,actor?}`
+> and returns the updated `WrkqProjectEntry`. An empty string clears the alias.
+> Otherwise, the short must match `^[a-z][a-z0-9-]{1,15}$` and cannot equal any
+> top-level slug or another project's short. Invalid values return
+> `WRKQ_VALIDATION`. A collision returns `WRKQ_CONFLICT` with the holder's slug,
+> including when a project create or rename attempts to take a reserved short.
+> `wrkq set <project> --short` uses this method. Project selectors resolve a
+> short as an exact input token or as the first path segment. Reads and
+> mutations return canonical paths and identities. Project rows in container
+> show, list, catView, and timelineView expose the optional `short` field.
 
 ```ts
 interface WrkqContainerShowParams { path?: string; project?: string }
@@ -1448,6 +1461,7 @@ interface WrkqContainer {
   uuid: string;
   id: string;
   slug: string;
+  short?: string;
   title: string;
   description: string;  // campaign brief; available on every container
   specification?: string;

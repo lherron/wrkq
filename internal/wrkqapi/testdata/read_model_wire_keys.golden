@@ -196,6 +196,26 @@ updated_by_principal_ref: string
 caused_by: array
 promises: array
 
+## wrkq.container.catView (project with short)
+$: object
+short: string
+id: string
+uuid: string
+slug: string
+title: string
+description: string
+kind: string
+parent_id: string
+parent_uuid: string
+path: string
+sort_index: number
+etag: number
+created_at: string
+updated_at: string
+created_by: string
+updated_by: string
+promises: array
+
 ## wrkq.container.catView
 $: object
 id: string
@@ -514,6 +534,7 @@ items[].slug: string
 items[].title: string
 items[].path: string
 items[].root: null
+items[].short: string
 next_cursor: string
 
 ## wrkq.tree.view

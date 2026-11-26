@@ -28,6 +28,7 @@ type ContainerTimelineViewParams struct {
 // archive fields are orthogonal to campaign adornment and therefore exist for
 // every container.
 type WrkqTimelineContainer struct {
+	Short         *string  `json:"short,omitempty"`
 	UUID          string   `json:"uuid"`
 	ID            string   `json:"id"`
 	Slug          string   `json:"slug"`

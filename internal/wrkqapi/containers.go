@@ -324,7 +324,7 @@ func (a *API) ContainerList(ctx context.Context, p ContainerListParams) (*WrkqCo
 
 	query := `SELECT c.uuid, c.id, c.slug, c.title, c.description, c.specification,
 		c.labels, c.campaign_state, c.kind, c.parent_uuid, c.etag,
-		c.created_at, c.updated_at, c.archived_at, COALESCE(v.path, c.slug)
+		c.created_at, c.updated_at, c.archived_at, COALESCE(v.path, c.slug), c.short
 		FROM containers c
 		LEFT JOIN v_container_paths v ON v.uuid = c.uuid`
 	if len(where) > 0 {
@@ -503,7 +503,7 @@ func (a *API) loadContainer(containerUUID string) (*WrkqContainer, error) {
 	row := a.db.QueryRow(`
 		SELECT c.uuid, c.id, c.slug, c.title, c.description, c.specification,
 		       c.labels, c.campaign_state, c.kind, c.parent_uuid, c.etag,
-		       c.created_at, c.updated_at, c.archived_at, COALESCE(v.path, c.slug)
+		       c.created_at, c.updated_at, c.archived_at, COALESCE(v.path, c.slug), c.short
 		FROM containers c
 		LEFT JOIN v_container_paths v ON v.uuid = c.uuid
 		WHERE c.uuid = ?`, containerUUID)
@@ -670,6 +670,12 @@ func mapContainerStoreError(err error, selector string) error {
 	if errors.As(err, &mismatch) {
 		return NewConflictError("container etag precondition failed", map[string]any{"currentEtag": mismatch.Actual})
 	}
+	var shortConflict *store.ProjectShortConflict
+	if errors.As(err, &shortConflict) {
+		return NewConflictError(shortConflict.Error(), map[string]any{
+			"field": shortConflict.Field, "value": shortConflict.Value, "holder": shortConflict.Holder,
+		})
+	}
 	var enrolled *store.CampaignDeleteBlockedError
 	if errors.As(err, &enrolled) {
 		return NewValidationError(enrolled.Error(), map[string]any{"container": selector, "members": campaignDiagnosticsDTO(enrolled.Members)})
@@ -729,14 +735,14 @@ func scanContainerRow(s rowScanner) (*WrkqContainer, error) {
 		title                                sql.NullString
 		description                          string
 		specification, labels, campaignState sql.NullString
-		parentUUID, archivedAt               sql.NullString
+		parentUUID, archivedAt, short        sql.NullString
 		etag                                 int64
 		createdAt, updatedAt                 string
 	)
 	if err := s.Scan(
 		&containerUUID, &id, &slug, &title, &description, &specification, &labels,
 		&campaignState, &kind, &parentUUID, &etag,
-		&createdAt, &updatedAt, &archivedAt, &path,
+		&createdAt, &updatedAt, &archivedAt, &path, &short,
 	); err != nil {
 		return nil, err
 	}
@@ -744,6 +750,7 @@ func scanContainerRow(s rowScanner) (*WrkqContainer, error) {
 		UUID:          containerUUID,
 		ID:            id,
 		Slug:          slug,
+		Short:         nullStringPtr(short),
 		Title:         title.String,
 		Description:   description,
 		Specification: nullStringPtr(specification),

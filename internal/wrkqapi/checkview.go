@@ -53,7 +53,11 @@ func (a *API) InboxView(ctx context.Context, p InboxViewParams) (*WrkqInboxView,
 	}
 	results := []WrkqInboxEntry{}
 
-	pathLike := p.InboxPath + "/%"
+	inboxPath, err := selectors.CanonicalizeProjectShort(a.db, p.InboxPath)
+	if err != nil {
+		return nil, NewInternalError(err)
+	}
+	pathLike := inboxPath + "/%"
 	openQuery := `
 		SELECT t.uuid, t.id, t.slug, t.title, t.state, t.priority, t.kind, t.due_at, t.etag,
 		       t.requested_by_project_id, t.assigned_project_id, t.acknowledged_at, t.resolution,
@@ -63,7 +67,7 @@ func (a *API) InboxView(ctx context.Context, p InboxViewParams) (*WrkqInboxView,
 		WHERE t.state = 'open'
 		  AND (cp.path = ? OR cp.path LIKE ?)
 		ORDER BY t.priority ASC, t.created_at ASC`
-	rows, err := a.db.QueryContext(ctx, openQuery, p.InboxPath, pathLike)
+	rows, err := a.db.QueryContext(ctx, openQuery, inboxPath, pathLike)
 	if err != nil {
 		return nil, NewInternalError(err)
 	}
@@ -74,6 +78,10 @@ func (a *API) InboxView(ctx context.Context, p InboxViewParams) (*WrkqInboxView,
 	results = append(results, open...)
 
 	if p.ProjectID != "" {
+		projectID, err := selectors.CanonicalizeProjectShort(a.db, p.ProjectID)
+		if err != nil {
+			return nil, NewInternalError(err)
+		}
 		ackQuery := `
 			SELECT t.uuid, t.id, t.slug, t.title, t.state, t.priority, t.kind, t.due_at, t.etag,
 			       t.requested_by_project_id, t.assigned_project_id, t.acknowledged_at, t.resolution,
@@ -84,7 +92,7 @@ func (a *API) InboxView(ctx context.Context, p InboxViewParams) (*WrkqInboxView,
 			  AND t.state IN ('completed', 'cancelled')
 			  AND t.acknowledged_at IS NULL
 			ORDER BY t.updated_at DESC`
-		ackRows, err := a.db.QueryContext(ctx, ackQuery, p.ProjectID)
+		ackRows, err := a.db.QueryContext(ctx, ackQuery, projectID)
 		if err != nil {
 			return nil, NewInternalError(err)
 		}

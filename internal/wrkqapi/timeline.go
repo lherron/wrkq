@@ -12,6 +12,7 @@ import (
 
 	"github.com/lherron/wrkq/internal/domain"
 	"github.com/lherron/wrkq/internal/paths"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/taskmember"
 )
 
@@ -151,7 +152,11 @@ func resolveTimelineContainerTx(ctx context.Context, tx *sql.Tx, raw string) (st
 	case len(token) == 36 && strings.Count(token, "-") == 4:
 		err = tx.QueryRowContext(ctx, "SELECT uuid FROM containers WHERE uuid = ?", token).Scan(&containerUUID)
 	default:
-		segments := paths.SplitPath(token)
+		path, resolveErr := selectors.CanonicalizeProjectShort(tx, token)
+		if resolveErr != nil {
+			return "", NewInternalError(resolveErr)
+		}
+		segments := paths.SplitPath(path)
 		if len(segments) == 0 {
 			return "", NewNotFoundError(token, "container")
 		}
@@ -162,10 +167,7 @@ func resolveTimelineContainerTx(ctx context.Context, tx *sql.Tx, raw string) (st
 			}
 			segments[index] = normalized
 		}
-		canonicalPath := paths.JoinPath(segments...)
-		err = tx.QueryRowContext(
-			ctx, "SELECT uuid FROM v_container_paths WHERE path = ?", canonicalPath,
-		).Scan(&containerUUID)
+		err = tx.QueryRowContext(ctx, "SELECT uuid FROM v_container_paths WHERE path = ?", paths.JoinPath(segments...)).Scan(&containerUUID)
 	}
 	if err == sql.ErrNoRows {
 		return "", NewNotFoundError(token, "container")
@@ -184,25 +186,26 @@ func loadTimelineContainerTx(
 	var (
 		container                                        WrkqTimelineContainer
 		specification, labels, campaignState, parentUUID sql.NullString
-		archivedAt                                       sql.NullString
+		archivedAt, short                                sql.NullString
 		createdAt, updatedAt                             string
 	)
 	err := tx.QueryRowContext(ctx, `
 		SELECT c.id, c.slug, c.title, c.description, c.specification, c.labels,
 		       c.campaign_state, c.kind, c.parent_uuid, COALESCE(v.path, c.slug),
-		       c.etag, c.created_at, c.updated_at, c.archived_at
+		       c.etag, c.created_at, c.updated_at, c.archived_at, c.short
 		  FROM containers c
 		  LEFT JOIN v_container_paths v ON v.uuid = c.uuid
 		 WHERE c.uuid = ?
 	`, containerUUID).Scan(
 		&container.ID, &container.Slug, &container.Title, &container.Description,
 		&specification, &labels, &campaignState, &container.Kind, &parentUUID, &container.Path,
-		&container.ETag, &createdAt, &updatedAt, &archivedAt,
+		&container.ETag, &createdAt, &updatedAt, &archivedAt, &short,
 	)
 	if err != nil {
 		return WrkqTimelineContainer{}, nil, NewInternalError(err)
 	}
 	container.UUID = containerUUID
+	container.Short = nullStringPtr(short)
 	container.Specification = nullStringPtr(specification)
 	container.Labels = parseLabels(labels.String)
 	container.ParentUUID = parentUUID.String

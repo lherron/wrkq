@@ -36,17 +36,8 @@ func WalkContainerPath(database rowQueryer, path string) (string, string, error)
 			return "", "", fmt.Errorf("invalid slug %q: %w", segment, err)
 		}
 
-		query := `SELECT uuid, id FROM containers WHERE slug = ? AND `
-		args := []interface{}{slug}
-		if currentUUID == nil {
-			query += topLevelClause
-		} else {
-			query += `parent_uuid = ?`
-			args = append(args, *currentUUID)
-		}
-
 		var uuid string
-		err = database.QueryRow(query, args...).Scan(&uuid, &friendlyID)
+		uuid, friendlyID, err = lookupContainerSegment(database, segment, slug, currentUUID)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return "", "", fmt.Errorf("container not found: %s", paths.JoinPath(segments[:i+1]...))
@@ -57,6 +48,37 @@ func WalkContainerPath(database rowQueryer, path string) (string, string, error)
 	}
 
 	return *currentUUID, friendlyID, nil
+}
+
+// CanonicalizeProjectShort expands a registered short in the first path
+// segment. It also works on path prefixes that need not resolve to a row.
+func CanonicalizeProjectShort(database rowQueryer, path string) (string, error) {
+	token := strings.TrimLeft(path, "/")
+	first, rest, _ := strings.Cut(token, "/")
+	if first == "" {
+		return path, nil
+	}
+	normalized, err := paths.NormalizeSlug(first)
+	if err != nil {
+		return path, nil
+	}
+	var slug string
+	err = database.QueryRow(`
+		SELECT c.slug FROM containers c
+		WHERE c.short = ? AND c.kind = 'project' AND c.`+topLevelClause+`
+		  AND NOT EXISTS (
+		    SELECT 1 FROM containers WHERE slug = ? AND `+topLevelClause+`
+		  )`, first, normalized).Scan(&slug)
+	if err == sql.ErrNoRows {
+		return path, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if rest != "" {
+		return paths.JoinPath(slug, rest), nil
+	}
+	return slug, nil
 }
 
 // ResolveParentContainer resolves all but the last segment of a path.
@@ -101,17 +123,7 @@ func WalkContainerSegment(database rowQueryer, slug string, parentUUID *string) 
 		return "", "", fmt.Errorf("invalid slug %q: %w", slug, err)
 	}
 
-	query := `SELECT uuid, id FROM containers WHERE slug = ? AND `
-	args := []interface{}{normalizedSlug}
-	if parentUUID == nil {
-		query += topLevelClause
-	} else {
-		query += `parent_uuid = ?`
-		args = append(args, *parentUUID)
-	}
-
-	var uuid, friendlyID string
-	err = database.QueryRow(query, args...).Scan(&uuid, &friendlyID)
+	uuid, friendlyID, err := lookupContainerSegment(database, slug, normalizedSlug, parentUUID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", "", fmt.Errorf("container not found: %s", normalizedSlug)
@@ -122,30 +134,20 @@ func WalkContainerSegment(database rowQueryer, slug string, parentUUID *string) 
 	return uuid, friendlyID, nil
 }
 
-// LookupContainerSegment checks if a container exists without returning an error for not found.
-// Returns (uuid, friendlyID, exists). Use this when you want to check existence before creating.
-func LookupContainerSegment(database rowQueryer, slug string, parentUUID *string) (string, string, bool) {
-	normalizedSlug, err := paths.NormalizeSlug(slug)
-	if err != nil {
-		return "", "", false
-	}
-
-	query := `SELECT uuid, id FROM containers WHERE slug = ? AND `
-	args := []interface{}{normalizedSlug}
+// lookupContainerSegment compares shorts against the original input, because
+// NormalizeSlug folds case and strips punctuation for ordinary slugs.
+func lookupContainerSegment(database rowQueryer, raw, slug string, parentUUID *string) (string, string, error) {
+	query := `SELECT uuid, id FROM containers WHERE slug = ? AND parent_uuid = ?`
+	args := []any{slug, parentUUID}
 	if parentUUID == nil {
-		query += topLevelClause
-	} else {
-		query += `parent_uuid = ?`
-		args = append(args, *parentUUID)
+		query = `SELECT uuid, id FROM containers WHERE ` + topLevelClause + `
+			AND (slug = ? OR (kind = 'project' AND short = ?))
+			ORDER BY (slug = ?) DESC LIMIT 1`
+		args = []any{slug, raw, slug}
 	}
-
 	var uuid, friendlyID string
-	err = database.QueryRow(query, args...).Scan(&uuid, &friendlyID)
-	if err != nil {
-		return "", "", false
-	}
-
-	return uuid, friendlyID, true
+	err := database.QueryRow(query, args...).Scan(&uuid, &friendlyID)
+	return uuid, friendlyID, err
 }
 
 // ResolveTaskByPath resolves a task by its container path + task slug.
@@ -167,7 +169,7 @@ func ResolveTaskByPath(database rowQueryer, path string) (string, string, error)
 			return "", "", err
 		}
 		if i < len(segments)-1 {
-			if uuid, _, exists := LookupContainerSegment(database, slug, parentUUID); exists {
+			if uuid, _, err := lookupContainerSegment(database, segment, slug, parentUUID); err == nil {
 				parentUUID = &uuid
 				continue
 			}

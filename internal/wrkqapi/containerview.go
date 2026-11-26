@@ -43,7 +43,7 @@ func (a *API) ContainerCatView(ctx context.Context, p ContainerCatViewParams) (*
 
 	var (
 		id, slug, title, description, kind           string
-		parentUUID, archivedAt, webhookRaw           *string
+		parentUUID, archivedAt, webhookRaw, short    *string
 		sortIndex                                    int
 		etag                                         int64
 		createdAt, updatedAt                         string
@@ -53,12 +53,12 @@ func (a *API) ContainerCatView(ctx context.Context, p ContainerCatViewParams) (*
 		SELECT id, slug, title, description, kind,
 		       parent_uuid, webhook_urls, sort_index, etag,
 		       created_at, updated_at, archived_at,
-		       created_by_principal_ref, updated_by_principal_ref
+		       created_by_principal_ref, updated_by_principal_ref, short
 		FROM containers WHERE uuid = ?`, containerUUID).Scan(
 		&id, &slug, &title, &description, &kind,
 		&parentUUID, &webhookRaw, &sortIndex, &etag,
 		&createdAt, &updatedAt, &archivedAt,
-		&createdByPrincipalRef, &updatedByPrincipalRef,
+		&createdByPrincipalRef, &updatedByPrincipalRef, &short,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, NewNotFoundError(selector, "container")
@@ -92,7 +92,7 @@ func (a *API) ContainerCatView(ctx context.Context, p ContainerCatViewParams) (*
 		return nil, NewInternalError(err)
 	}
 	view := &WrkqContainerCatView{
-		ID: id, UUID: containerUUID, Slug: slug, Title: title, Description: description,
+		ID: id, UUID: containerUUID, Slug: slug, Short: short, Title: title, Description: description,
 		Kind: kind, ParentID: parentID, ParentUUID: parentUUID, ParentPath: parentPath,
 		Path: containerPath, WebhookURLs: webhookURLs, SortIndex: sortIndex, Etag: etag,
 		CreatedAt: createdAt, UpdatedAt: updatedAt, ArchivedAt: archivedAt,

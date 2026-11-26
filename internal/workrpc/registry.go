@@ -399,6 +399,9 @@ func registerWrkqMethods(s *Server, api *wrkfapi.API, opts RegistryOptions) {
 	s.Register("wrkq.project.setRoot", apiHandler(func(ctx context.Context, p wrkqapi.ProjectSetRootParams) (any, error) {
 		return wq.ProjectSetRoot(ctx, p)
 	}))
+	s.Register("wrkq.project.setShort", apiHandler(func(ctx context.Context, p wrkqapi.ProjectSetShortParams) (any, error) {
+		return wq.ProjectSetShort(ctx, p)
+	}))
 	s.Register("wrkq.webhook.add", apiHandler(func(ctx context.Context, p wrkqapi.WebhookMutateParams) (any, error) {
 		return wq.WebhookAdd(ctx, p)
 	}))

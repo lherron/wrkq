@@ -15,6 +15,7 @@ export interface WrkqProjectEntry {
   title?: string;
   path: string;
   root: string | null;
+  short?: string;
 }
 
 export interface WrkqProjectListViewParams {
@@ -39,5 +40,13 @@ export interface WrkqProjectSetRootParams {
   /** Optional CAS; stale values fail without changing root, etag, attribution, or events. */
   expectEtag?: number;
   /** Canonical caller principal (`agent:<id>` or full agent ScopeRef); bare legacy identities are invalid. */
+  actor?: string;
+}
+
+export interface WrkqProjectSetShortParams {
+  project: string;
+  /** Empty string clears the alias. */
+  short: string;
+  expectEtag?: number;
   actor?: string;
 }

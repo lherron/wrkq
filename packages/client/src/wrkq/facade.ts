@@ -105,6 +105,7 @@ import type {
   WrkqProjectEntry,
   WrkqProjectListViewParams,
   WrkqProjectSetRootParams,
+  WrkqProjectSetShortParams,
   WrkqProjectsListView,
 } from "./project.js";
 import type {
@@ -285,6 +286,7 @@ export interface WrkqContainerFacade {
 export interface WrkqProjectFacade {
   listView(params?: WrkqProjectListViewParams): Promise<WrkqProjectsListView>;
   setRoot(params: WrkqProjectSetRootParams): Promise<WrkqProjectEntry>;
+  setShort(params: WrkqProjectSetShortParams): Promise<WrkqProjectEntry>;
 }
 
 export interface WrkqProjectEventFacade {

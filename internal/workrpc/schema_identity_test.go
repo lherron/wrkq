@@ -90,7 +90,8 @@ import (
 // T-12265 adds promise.listView and workflow.instancesView with four DTOs.
 // T-12376 replaces META_KEY_MIGRATED with META_KEY_RESERVED for closed task metadata.
 // T-13013 adds failureDetail and dischargedBy to WrkqEnvelope.
-const pinnedProtocolSchemaHash = "sha256:3f36f0853abde76a8371f6a5a20a486a7f9c4df8abf6cafcd733b445528f35c1"
+// T-14699 adds project short names and the fenced setShort method.
+const pinnedProtocolSchemaHash = "sha256:ec61561e0e7994d093933b9d5ed5f8522b7dd39a7c93ba529672911689c310fc"
 
 func TestProtocolSchemaHashPinned(t *testing.T) {
 	if got := ProtocolSchemaHash(); got != pinnedProtocolSchemaHash {
@@ -109,9 +110,9 @@ func TestProtocolCatalogCardinality(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"methods", len(MethodCatalog()), 190},
+		{"methods", len(MethodCatalog()), 191},
 		{"errorCodes", len(ErrorCodeCatalog()), 32},
-		{"dtos", len(dtoCatalog), 177},
+		{"dtos", len(dtoCatalog), 178},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s catalog: want %d, got %d", tc.name, tc.want, tc.got)

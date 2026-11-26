@@ -18,7 +18,8 @@ type WrkqProjectEntry struct {
 	Path  string `json:"path"`
 	// Root is the stored host-portable checkout root. It is intentionally not
 	// expanded here; consumers expand ~/... for their own host.
-	Root *string `json:"root"`
+	Root  *string `json:"root"`
+	Short *string `json:"short,omitempty"`
 }
 
 // WrkqProjectsListView is the server-owned compatibility projection for

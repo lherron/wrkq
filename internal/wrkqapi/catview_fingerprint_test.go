@@ -79,6 +79,8 @@ func TestReadModelResponsesMarshalTheGoldenKeyOrderAndTypes(t *testing.T) {
 	row("wrkq.task.catView (completed, acknowledged, outcome, resolution, parent)", v3, err)
 	v3a, err := api.TaskCatView(ctx, TaskCatViewParams{Task: f.archivedID})
 	row("wrkq.task.catView (archived)", v3a, err)
+	project, err := api.ContainerCatView(ctx, ContainerCatViewParams{Path: "oth"})
+	row("wrkq.container.catView (project with short)", project, err)
 	v4, err := api.ContainerCatView(ctx, ContainerCatViewParams{Path: "proj/wave"})
 	row("wrkq.container.catView", v4, err)
 	v5, err := api.ContainerTaskCounts(ctx, ContainerTaskCountsParams{IncludeArchived: true})
@@ -212,6 +214,9 @@ func seedReadModelGolden(t *testing.T, api *API) readModelGoldenFixture {
 	must("create project", err)
 	_, err = api.ContainerCreate(ctx, ContainerCreateParams{Path: "other", Kind: "project", Title: "Other project"})
 	must("create other project", err)
+	short := "oth"
+	_, err = api.ProjectSetShort(ctx, ProjectSetShortParams{Project: "other", Short: &short})
+	must("set project short", err)
 	_, err = api.ContainerCreate(ctx, ContainerCreateParams{Path: "proj/wave", Kind: "feature"})
 	must("create campaign container", err)
 	labels := []string{"wire"}

@@ -30,6 +30,7 @@ export interface WrkqContainerListParams {
 }
 
 export interface WrkqContainer {
+  short?: string;
   uuid: string;
   id: string;
   slug: string;

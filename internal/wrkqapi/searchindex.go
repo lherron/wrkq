@@ -15,6 +15,7 @@ import (
 	"github.com/lherron/wrkq/internal/search/embed"
 	"github.com/lherron/wrkq/internal/search/indexdb"
 	"github.com/lherron/wrkq/internal/search/indexer"
+	"github.com/lherron/wrkq/internal/selectors"
 	"github.com/lherron/wrkq/internal/store"
 )
 
@@ -100,6 +101,15 @@ func (a *API) SearchListView(ctx context.Context, p SearchListViewParams) (*Wrkq
 	}
 	defer func() { _ = idx.Close() }()
 
+	paths := make([]string, 0, len(p.Paths))
+	for _, path := range p.Paths {
+		canonical, err := selectors.CanonicalizeProjectShort(a.db, path)
+		if err != nil {
+			return nil, NewInternalError(err)
+		}
+		paths = append(paths, canonical)
+	}
+
 	svc := search.NewService(a.db, idx, a.denseEmbedder())
 	sctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -107,7 +117,7 @@ func (a *API) SearchListView(ctx context.Context, p SearchListViewParams) (*Wrkq
 	resp, err := svc.Search(sctx, search.Options{
 		Query:                p.Query,
 		Subtasks:             p.Subtasks,
-		Paths:                p.Paths,
+		Paths:                paths,
 		State:                p.State,
 		Kind:                 p.Kind,
 		Labels:               p.Labels,

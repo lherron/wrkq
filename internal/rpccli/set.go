@@ -23,7 +23,7 @@ import (
 func newSetCmd() *cobra.Command {
 	var description, specification, outcome, state, title, slug, labels, meta, kind, assignee, dueAt, startAt string
 	var parentTask, parentID, requestedBy, assignedProject, resolution, causedBy, campaign string
-	var projectRoot, requester, requesterScope string
+	var projectRoot, projectShort, requester, requesterScope string
 	var metaFile, covers string
 	var priority, jobs, batchSize int
 	var ifMatch int64
@@ -36,7 +36,13 @@ func newSetCmd() *cobra.Command {
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("root") {
-				return runSetProjectRoot(cmd, args, projectRoot, ifMatch, dryRun)
+				if cmd.Flags().Changed("short") {
+					return fmt.Errorf("specify only one of --root or --short")
+				}
+				return runSetProjectField(cmd, args, "root", projectRoot, ifMatch, dryRun)
+			}
+			if cmd.Flags().Changed("short") {
+				return runSetProjectField(cmd, args, "short", projectShort, ifMatch, dryRun)
 			}
 			claims := &stdinClaims{}
 			patch := map[string]any{}
@@ -206,7 +212,7 @@ func newSetCmd() *cobra.Command {
 	}
 	cmd.Flags().Int64Var(&ifMatch, "if-match", 0, "Only update if etag matches")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be changed without applying")
-	cmd.Flags().IntVarP(&jobs, "jobs", "j", 1, "Number of parallel workers (0 = auto-detect CPU count)")
+	cmd.Flags().IntVarP(&jobs, "jobs", "j", 1, "Number of parallel workers (0 = auto-detect; --ordered preserves input order)")
 	cmd.Flags().BoolVar(&continueOnError, "continue-on-error", false, "Continue processing on errors")
 	cmd.Flags().IntVar(&batchSize, "batch-size", 1, "Group operations into batches (not yet implemented)")
 	cmd.Flags().BoolVar(&ordered, "ordered", false, "Preserve input order (disables parallelism)")
@@ -234,6 +240,7 @@ func newSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&resolution, "resolution", "", "Update task resolution")
 	cmd.Flags().StringVar(&causedBy, "caused-by", "", "Replace causal lineage with comma-separated task IDs (empty string clears; omit to leave unchanged)")
 	cmd.Flags().StringVar(&campaign, "campaign", "", "Enroll in a draft or active campaign by ID or path; the task keeps its own project (empty string unenrolls)")
+	cmd.Flags().StringVar(&projectShort, "short", "", "Set a top-level project short name (empty clears it)")
 	cmd.Flags().StringVar(&projectRoot, "root", "", "Set a top-level project's checkout root (stored as ~/... when under $HOME; empty clears; consumers expand it)")
 	_ = cmd.Flags().MarkHidden("batch-size") // Accepted for compatibility; it has no behavior.
 	_ = cmd.Flags().MarkHidden("meta-file")  // Named by --meta to retain the 40-line help budget.
@@ -241,11 +248,12 @@ func newSetCmd() *cobra.Command {
 	// --requester-scope is named by --requester's help line.
 	_ = cmd.Flags().MarkHidden("parent-id")
 	_ = cmd.Flags().MarkHidden("requester-scope")
-	_ = batchSize // Legacy accepts --batch-size but does not apply batching.
+	_ = cmd.Flags().MarkHidden("ordered") // Named by --jobs to retain the help budget.
+	_ = batchSize                         // Legacy accepts --batch-size but does not apply batching.
 	return refuseRepeatedFlags(cmd)
 }
 
-func runSetProjectRoot(cmd *cobra.Command, args []string, rawRoot string, ifMatch int64, dryRun bool) error {
+func runSetProjectField(cmd *cobra.Command, args []string, field, value string, ifMatch int64, dryRun bool) error {
 	for _, name := range []string{
 		"description", "specification", "outcome", "state", "priority", "title", "slug",
 		"labels", "meta", "meta-file", "due-at", "start-at", "kind", "covers",
@@ -253,29 +261,34 @@ func runSetProjectRoot(cmd *cobra.Command, args []string, rawRoot string, ifMatc
 		"resolution", "caused-by", "campaign",
 	} {
 		if cmd.Flags().Changed(name) {
-			return fmt.Errorf("--root cannot be combined with task field --%s", name)
+			return fmt.Errorf("--%s cannot be combined with task field --%s", field, name)
 		}
 	}
 	if len(args) != 1 {
-		return fmt.Errorf("--root requires exactly one project")
+		return fmt.Errorf("--%s requires exactly one project", field)
 	}
 	project := strings.TrimSpace(args[0])
 	if project == "" || project == "-" {
-		return fmt.Errorf("--root requires a project slug, ID, or UUID")
+		return fmt.Errorf("--%s requires a project slug, ID, or UUID", field)
 	}
 	if parsed := selectors.Parse(project); parsed.Type == selectors.TypeTask || (strings.HasPrefix(parsed.Token, "T-") || strings.HasPrefix(parsed.Token, "W-")) {
-		return fmt.Errorf("--root can only be set on a top-level project; task ID %q is not a project", project)
+		return fmt.Errorf("--%s can only be set on a top-level project; task ID %q is not a project", field, project)
 	}
 
-	root, err := normalizeRegisteredProjectRoot(rawRoot)
-	if err != nil {
-		return err
+	method := "wrkq.project.setShort"
+	if field == "root" {
+		root, err := normalizeRegisteredProjectRoot(value)
+		if err != nil {
+			return err
+		}
+		value = root
+		method = "wrkq.project.setRoot"
 	}
 	if dryRun {
 		return encodeJSONIndent(cmd, map[string]any{
 			"dry_run": true,
 			"project": project,
-			"root":    root,
+			field:     value,
 		})
 	}
 
@@ -288,14 +301,14 @@ func runSetProjectRoot(cmd *cobra.Command, args []string, rawRoot string, ifMatc
 	if err != nil {
 		return err
 	}
-	params := map[string]any{"project": project, "root": root}
+	params := map[string]any{"project": project, field: value}
 	if actor != "" {
 		params["actor"] = actor
 	}
 	if ifMatch != 0 {
 		params["expectEtag"] = ifMatch
 	}
-	raw, err := tr.Call(cmd.Context(), "wrkq.project.setRoot", params)
+	raw, err := tr.Call(cmd.Context(), method, params)
 	if err != nil {
 		if re, ok := err.(*Error); ok {
 			return rpcRefusal(re)
@@ -307,10 +320,14 @@ func runSetProjectRoot(cmd *cobra.Command, args []string, rawRoot string, ifMatc
 		return err
 	}
 	if isStdoutTTY(cmd.OutOrStdout()) {
-		if updated.Root == nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "Cleared project root for %s\n", updated.Slug)
+		stored := updated.Short
+		if field == "root" {
+			stored = updated.Root
+		}
+		if stored == nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "Cleared project %s for %s\n", field, updated.Slug)
 		} else {
-			fmt.Fprintf(cmd.OutOrStdout(), "Set project root for %s to %s\n", updated.Slug, *updated.Root)
+			fmt.Fprintf(cmd.OutOrStdout(), "Set project %s for %s to %s\n", field, updated.Slug, *stored)
 		}
 		return nil
 	}

@@ -226,6 +226,29 @@ func validateSnapshot(snap *Snapshot) error {
 		return fmt.Errorf("container %s must have kind root, has %q", domain.RootContainerUUID, root.Kind)
 	}
 
+	projectNames := make(map[string]string)
+	for _, container := range snap.Containers {
+		if container.ParentUUID == domain.RootContainerUUID {
+			projectNames[container.Slug] = container.Slug
+		}
+	}
+	for _, container := range snap.Containers {
+		if container.Short == nil {
+			continue
+		}
+		if container.Kind != string(domain.ContainerKindProject) || container.ParentUUID != domain.RootContainerUUID {
+			return fmt.Errorf("container %s must be a top-level project to have a short", container.ID)
+		}
+		short := *container.Short
+		if err := domain.ValidateProjectShort(short); err != nil {
+			return fmt.Errorf("container %s: %w", container.ID, err)
+		}
+		if holder, taken := projectNames[short]; taken {
+			return fmt.Errorf("project short %q is reserved by project %q", short, holder)
+		}
+		projectNames[short] = container.Slug
+	}
+
 	// Every cross-entity reference must resolve inside the snapshot.
 	for uuid, container := range snap.Containers {
 		if container.Kind == "" {
@@ -482,11 +505,11 @@ func importContainers(tx *sql.Tx, snap *Snapshot) error {
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO containers (uuid, id, slug, title, kind, description, parent_uuid, sort_index,
-		                        webhook_urls, root, specification, labels, campaign_state,
+		                        webhook_urls, root, short, specification, labels, campaign_state,
 		                        etag, created_at, updated_at, archived_at,
 		                        created_by_principal_ref, created_by_scope_ref,
 		                        updated_by_principal_ref, updated_by_scope_ref)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -498,7 +521,7 @@ func importContainers(tx *sql.Tx, snap *Snapshot) error {
 		if _, err := stmt.Exec(uuid, c.ID, c.Slug, c.Title, c.Kind, c.Description,
 			nullableSnapshotString(c.ParentUUID), c.SortIndex,
 			nullableSnapshotPointer(c.WebhookURLs),
-			nullableSnapshotPointer(c.Root), nullableSnapshotPointer(c.Specification),
+			nullableSnapshotPointer(c.Root), nullableSnapshotPointer(c.Short), nullableSnapshotPointer(c.Specification),
 			nullableSnapshotPointer(c.Labels), nullableSnapshotPointer(c.CampaignState),
 			c.ETag, c.CreatedAt, c.UpdatedAt, nullableSnapshotString(c.ArchivedAt),
 			nullableSnapshotString(c.CreatedByPrincipalRef), nullableSnapshotPointer(c.CreatedByScopeRef),

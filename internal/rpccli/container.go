@@ -21,6 +21,7 @@ import (
 // projection. Field order is load-bearing for JSON/NDJSON/porcelain; human
 // markdown localizes its timestamps at the presentation boundary.
 type containerCatModel struct {
+	Short       *string                   `json:"short,omitempty"`
 	ID          string                    `json:"id"`
 	UUID        string                    `json:"uuid"`
 	Slug        string                    `json:"slug"`
@@ -412,6 +413,9 @@ func renderContainerMarkdown(out io.Writer, c *containerCatModel, noFrontmatter 
 		fmt.Fprintf(out, "id: %s\n", c.ID)
 		fmt.Fprintf(out, "uuid: %s\n", c.UUID)
 		fmt.Fprintf(out, "slug: %s\n", c.Slug)
+		if c.Short != nil {
+			fmt.Fprintf(out, "short: %s\n", *c.Short)
+		}
 		fmt.Fprintf(out, "title: %s\n", c.Title)
 		fmt.Fprintf(out, "kind: %s\n", c.Kind)
 		fmt.Fprintf(out, "path: %s\n", c.Path)

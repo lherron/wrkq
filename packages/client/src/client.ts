@@ -225,6 +225,7 @@ class WorkClientImpl implements WorkClient {
     project: {
       listView: (p) => this.call("wrkq.project.listView", p ?? {}),
       setRoot: (p) => this.call("wrkq.project.setRoot", p),
+      setShort: (p) => this.call("wrkq.project.setShort", p),
     },
     projectEvent: {
       post: (p) => this.call("wrkq.projectEvent.post", p),

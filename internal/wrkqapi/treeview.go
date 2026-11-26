@@ -39,6 +39,11 @@ func (a *API) TreeView(ctx context.Context, p TreeViewParams) (*WrkqTreeView, er
 	if p.PruneEmpty != nil {
 		pruneEmpty = *p.PruneEmpty
 	}
+	path, err := selectors.CanonicalizeProjectShort(a.db, p.Path)
+	if err != nil {
+		return nil, NewInternalError(err)
+	}
+	p.Path = path
 	root, err := a.buildTreeNode(ctx, p.Path, p.MaxDepth, filter, pruneEmpty, includeClosedPromises, p.IncludeCampaignMembers, 0)
 	if err != nil {
 		return nil, err

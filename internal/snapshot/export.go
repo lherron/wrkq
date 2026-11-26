@@ -282,7 +282,7 @@ func exportPromises(db *sql.DB, snap *Snapshot) error {
 func exportContainers(db *sql.DB, snap *Snapshot) error {
 	rows, err := db.Query(`
 		SELECT uuid, id, slug, title, kind, description, parent_uuid, sort_index,
-		       webhook_urls, root, specification, labels, campaign_state,
+		       webhook_urls, root, short, specification, labels, campaign_state,
 		       etag, created_at, updated_at, archived_at,
 		       created_by_principal_ref, created_by_scope_ref,
 		       updated_by_principal_ref, updated_by_scope_ref
@@ -298,12 +298,12 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 		var uuid string
 		var entry ContainerEntry
 		var parentUUID, archivedAt, createdByPrincipal, updatedByPrincipal sql.NullString
-		var webhookURLs, root, specification, labels, campaignState sql.NullString
+		var webhookURLs, root, short, specification, labels, campaignState sql.NullString
 		var createdByScope, updatedByScope sql.NullString
 
 		if err := rows.Scan(&uuid, &entry.ID, &entry.Slug, &entry.Title, &entry.Kind,
 			&entry.Description, &parentUUID, &entry.SortIndex,
-			&webhookURLs, &root, &specification, &labels, &campaignState,
+			&webhookURLs, &root, &short, &specification, &labels, &campaignState,
 			&entry.ETag, &entry.CreatedAt, &entry.UpdatedAt, &archivedAt,
 			&createdByPrincipal, &createdByScope, &updatedByPrincipal, &updatedByScope); err != nil {
 			return err
@@ -315,6 +315,7 @@ func exportContainers(db *sql.DB, snap *Snapshot) error {
 		entry.UpdatedByPrincipalRef = updatedByPrincipal.String
 		entry.WebhookURLs = snapshotNullString(webhookURLs)
 		entry.Root = snapshotNullString(root)
+		entry.Short = snapshotNullString(short)
 		entry.Specification = snapshotNullString(specification)
 		entry.Labels = snapshotNullString(labels)
 		entry.CampaignState = snapshotNullString(campaignState)

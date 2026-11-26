@@ -46,7 +46,7 @@ func (a *API) ContainerCampaignPortfolio(
 	rows, err := tx.QueryContext(ctx, `
 		SELECT c.uuid, c.id, c.slug, c.title, c.description, c.specification,
 		       c.labels, c.campaign_state, c.kind, c.parent_uuid, c.etag,
-		       c.created_at, c.updated_at, c.archived_at, COALESCE(v.path, c.slug)
+		       c.created_at, c.updated_at, c.archived_at, COALESCE(v.path, c.slug), c.short
 		  FROM containers c
 		  LEFT JOIN v_container_paths v ON v.uuid = c.uuid
 		 WHERE `+where+`

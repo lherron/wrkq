@@ -18,7 +18,8 @@ type projectEntry struct {
 	Title string `json:"title,omitempty"`
 	Path  string `json:"path"`
 	// Root is returned exactly as stored. Consumers expand ~/... locally.
-	Root *string `json:"root"`
+	Root  *string `json:"root"`
+	Short *string `json:"short,omitempty" yaml:"short,omitempty"`
 }
 
 func newProjectsCmd() *cobra.Command {
@@ -36,7 +37,7 @@ making it easy to see what projects exist when working in a scoped context.
 Examples:
   wrkq projects              # List all projects in table format
   wrkq projects --json       # Output as JSON
-  wrkq projects -1           # One project slug per line
+  wrkq projects -1           # One project per line
   wrkq projects -a           # Include archived projects`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -83,16 +84,20 @@ Examples:
 				return err
 			}
 			if one || nul {
-				slugs := make([]string, 0, len(projects))
+				entries := make([]string, 0, len(projects))
 				for _, project := range projects {
-					slugs = append(slugs, project.Slug)
+					entry := project.Slug
+					if project.Short != nil {
+						entry += "\t" + *project.Short
+					}
+					entries = append(entries, entry)
 				}
 				delimiter := "\n"
 				if nul {
 					delimiter = "\x00"
 				}
-				fmt.Fprint(cmd.OutOrStdout(), strings.Join(slugs, delimiter))
-				if len(slugs) > 0 && !nul {
+				fmt.Fprint(cmd.OutOrStdout(), strings.Join(entries, delimiter))
+				if len(entries) > 0 && !nul {
 					fmt.Fprintln(cmd.OutOrStdout())
 				}
 				return nil
@@ -136,8 +141,8 @@ Examples:
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&ndjson, "ndjson", false, "Output as newline-delimited JSON")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
-	cmd.Flags().BoolVarP(&one, "one", "1", false, "One entry per line")
-	cmd.Flags().BoolVarP(&nul, "nul", "0", false, "NUL-separated output")
+	cmd.Flags().BoolVarP(&one, "one", "1", false, "One entry per line (slug and optional tab-separated short)")
+	cmd.Flags().BoolVarP(&nul, "nul", "0", false, "NUL-separated entries (slug and optional tab-separated short)")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum number of results to return (0 = no limit)")
 	cmd.Flags().StringVar(&cursorTok, "cursor", "", "Pagination cursor from previous page")
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Include archived projects")
@@ -157,10 +162,14 @@ func decodeProjectEntries(items []json.RawMessage) ([]projectEntry, error) {
 }
 
 func projectTableData(projects []projectEntry) ([]string, [][]string) {
-	headers := []string{"ID", "Slug", "Title"}
+	headers := []string{"ID", "Slug", "Title", "Short"}
 	rows := make([][]string, 0, len(projects))
 	for _, project := range projects {
-		rows = append(rows, []string{project.ID, project.Slug, project.Title})
+		short := ""
+		if project.Short != nil {
+			short = *project.Short
+		}
+		rows = append(rows, []string{project.ID, project.Slug, project.Title, short})
 	}
 	return headers, rows
 }

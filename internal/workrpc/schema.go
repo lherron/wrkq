@@ -143,6 +143,7 @@ var dtoSchemaTypes = map[string]reflect.Type{
 	"WrkqProjectEventType":            dtoType[wrkqapi.WrkqProjectEventType](),
 	"WrkqProjectEventTypesView":       dtoType[wrkqapi.WrkqProjectEventTypesView](),
 	"WrkqProjectsListView":            dtoType[wrkqapi.WrkqProjectsListView](),
+	"ProjectSetShortParams":           dtoType[wrkqapi.ProjectSetShortParams](),
 	"WrkqProjectEntry":                dtoType[wrkqapi.WrkqProjectEntry](),
 	"WebhookRow":                      dtoType[wrkqapi.WebhookRow](),
 	"WrkqWorkflowAttachResult":        dtoType[wrkqapi.WrkqWorkflowAttachResult](),

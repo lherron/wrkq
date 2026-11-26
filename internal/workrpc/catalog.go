@@ -157,6 +157,7 @@ var methodCatalog = []string{
 	"wrkq.container.taskCounts",
 	"wrkq.project.listView",
 	"wrkq.project.setRoot",
+	"wrkq.project.setShort",
 	"wrkq.projectEvent.post",
 	"wrkq.projectEvent.get",
 	"wrkq.projectEvent.typesView",
@@ -383,8 +384,9 @@ var dtoCatalog = []string{
 	"WrkqProjectEventType",
 	"WrkqProjectEventTypesView",
 	"WrkqProjectsListView", // CLI compatibility projection (projects)
-	"WrkqProjectEntry",     // element of projects listView (includes nullable registered root)
-	"WebhookRow",           // element of wrkq.webhook.listView (legacy {url:<value>} row)
+	"WrkqProjectEntry",     // element of projects listView
+	"ProjectSetShortParams",
+	"WebhookRow", // element of wrkq.webhook.listView (legacy {url:<value>} row)
 	"WrkqWorkflowAttachResult",
 	"WrkqWorkflowInspectResult",
 	"WrkqWorkflowInstancesResult",

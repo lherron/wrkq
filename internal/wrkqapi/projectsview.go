@@ -25,7 +25,7 @@ func (a *API) ProjectsListView(ctx context.Context, p ProjectsListViewParams) (*
 	}
 
 	query := `
-		SELECT uuid, id, slug, title, root
+		SELECT id, slug, title, root, short
 		FROM containers
 		WHERE parent_uuid = (SELECT uuid FROM containers WHERE kind = 'root')
 	`
@@ -51,9 +51,9 @@ func (a *API) ProjectsListView(ctx context.Context, p ProjectsListViewParams) (*
 
 	projects := []WrkqProjectEntry{}
 	for rows.Next() {
-		var uuid, id, slug string
-		var title, root sql.NullString
-		if err := rows.Scan(&uuid, &id, &slug, &title, &root); err != nil {
+		var id, slug string
+		var title, root, short sql.NullString
+		if err := rows.Scan(&id, &slug, &title, &root, &short); err != nil {
 			return nil, NewInternalError(fmt.Errorf("failed to scan row: %w", err))
 		}
 		titleStr := slug
@@ -67,6 +67,7 @@ func (a *API) ProjectsListView(ctx context.Context, p ProjectsListViewParams) (*
 			Title: titleStr,
 			Path:  slug,
 			Root:  nullStringPtr(root),
+			Short: nullStringPtr(short),
 		})
 	}
 	if err := rows.Err(); err != nil {

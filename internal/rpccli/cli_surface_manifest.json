@@ -2440,7 +2440,7 @@
           {
             "name": "nul",
             "shorthand": "0",
-            "usage": "NUL-separated output",
+            "usage": "NUL-separated entries (slug and optional tab-separated short)",
             "type": "bool",
             "default": "false",
             "hidden": false
@@ -2448,7 +2448,7 @@
           {
             "name": "one",
             "shorthand": "1",
-            "usage": "One entry per line",
+            "usage": "One entry per line (slug and optional tab-separated short)",
             "type": "bool",
             "default": "false",
             "hidden": false
@@ -3840,7 +3840,7 @@
           {
             "name": "jobs",
             "shorthand": "j",
-            "usage": "Number of parallel workers (0 = auto-detect CPU count)",
+            "usage": "Number of parallel workers (0 = auto-detect; --ordered preserves input order)",
             "type": "int",
             "default": "1",
             "hidden": false
@@ -3881,7 +3881,7 @@
             "usage": "Preserve input order (disables parallelism)",
             "type": "bool",
             "default": "false",
-            "hidden": false
+            "hidden": true
           },
           {
             "name": "outcome",
@@ -3935,6 +3935,12 @@
           {
             "name": "root",
             "usage": "Set a top-level project's checkout root (stored as ~/... when under $HOME; empty clears; consumers expand it)",
+            "type": "string",
+            "hidden": false
+          },
+          {
+            "name": "short",
+            "usage": "Set a top-level project short name (empty clears it)",
             "type": "string",
             "hidden": false
           },

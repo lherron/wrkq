@@ -84,6 +84,11 @@ func (cs *ContainerStore) CreateWithAttribution(attr attribution.Attribution, pa
 	}
 
 	err = cs.store.withTx(func(tx *sql.Tx, ew *events.Writer) error {
+		if kind == string(domain.ContainerKindProject) {
+			if err := checkProjectSlugAgainstShort(tx, rootUUID, params.Slug); err != nil {
+				return err
+			}
+		}
 		res, err := tx.Exec(`
 			INSERT INTO containers (
 				id, slug, title, parent_uuid, kind,
@@ -193,6 +198,15 @@ func (cs *ContainerStore) UpdateFieldsWithAttribution(attr attribution.Attributi
 		}
 		if err := validateContainerKindUpdate(rootUUID, currentKind, currentParentUUID, fields); err != nil {
 			return err
+		}
+
+		isProject := currentKind == string(domain.ContainerKindProject) && currentParentUUID != nil && *currentParentUUID == rootUUID
+		if isProject {
+			if err := validateProjectShortUpdate(tx, rootUUID, containerUUID, fields); err != nil {
+				return err
+			}
+		} else if _, hasShort := fields["short"]; hasShort {
+			return fmt.Errorf("project short can only be set on a top-level project container")
 		}
 
 		// Build UPDATE query
@@ -403,7 +417,7 @@ func validateContainerKindUpdate(rootUUID, currentKind string, currentParentUUID
 const containerColumns = `uuid, id, slug, title, parent_uuid, kind, sort_index, webhook_urls, etag,
 	created_at, updated_at, archived_at,
 	created_by_principal_ref, updated_by_principal_ref,
-	created_by_scope_ref, updated_by_scope_ref`
+	created_by_scope_ref, updated_by_scope_ref, short`
 
 // containerWithRootColumns adds the root marker the single-container reads return.
 const containerWithRootColumns = containerColumns + `, root`
@@ -420,7 +434,7 @@ func scanContainer(scanner rowScanner, withRoot bool) (*domain.Container, error)
 		&c.ParentUUID, &kind, &c.SortIndex, &c.WebhookURLs, &c.ETag,
 		&createdAt, &updatedAt, &archivedAt,
 		&createdByPrincipal, &updatedByPrincipal,
-		&createdByScope, &updatedByScope,
+		&createdByScope, &updatedByScope, &c.Short,
 	}
 	if withRoot {
 		dest = append(dest, &c.Root)

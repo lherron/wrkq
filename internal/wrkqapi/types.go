@@ -563,6 +563,7 @@ type RelationRemoveParams struct {
 // WrkqContainer is the stable container resource DTO (camelCase; no DB column
 // names leak). path is computed.
 type WrkqContainer struct {
+	Short         *string  `json:"short,omitempty"`
 	UUID          string   `json:"uuid"`
 	ID            string   `json:"id"`
 	Slug          string   `json:"slug"`
@@ -669,6 +670,14 @@ type ProjectSetRootParams struct {
 	Root       string `json:"root"`
 	ExpectETag int64  `json:"expectEtag,omitempty"`
 	Actor      string `json:"actor,omitempty"`
+}
+
+// ProjectSetShortParams assigns or clears the input alias for one top-level project.
+type ProjectSetShortParams struct {
+	Project    string  `json:"project"`
+	Short      *string `json:"short"`
+	ExpectETag int64   `json:"expectEtag,omitempty"`
+	Actor      string  `json:"actor,omitempty"`
 }
 
 // ContainerUpdateParams mirrors WrkqContainerUpdateParams. Patch is a raw message

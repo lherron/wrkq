@@ -60,6 +60,10 @@ func (a *API) LsListView(ctx context.Context, p LsListViewParams) (*WrkqLsListVi
 
 	var entries []WrkqLsEntry
 	for _, path := range paths {
+		path, err = selectors.CanonicalizeProjectShort(a.db, path)
+		if err != nil {
+			return nil, NewInternalError(err)
+		}
 		rows, perr := a.lsEntriesForPath(ctx, path, p, filter, pruneEmpty, pag)
 		if perr != nil {
 			return nil, perr

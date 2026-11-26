@@ -35,6 +35,16 @@ func ValidateContainerKind(kind string) error {
 	}
 }
 
+var projectShortPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,15}$`)
+
+// ValidateProjectShort validates a nonempty registered project alias.
+func ValidateProjectShort(short string) error {
+	if !projectShortPattern.MatchString(short) {
+		return fmt.Errorf("invalid project short: expected ^[a-z][a-z0-9-]{1,15}$")
+	}
+	return nil
+}
+
 // ValidateTaskKind validates a task kind
 func ValidateTaskKind(kind string) error {
 	switch kind {
