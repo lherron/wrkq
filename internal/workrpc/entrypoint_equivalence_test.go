@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -127,15 +128,29 @@ func runRPCProcess(t *testing.T, entrypoint, dbPath string, requests []string, e
 	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
+	// `go run` execs the built binary as its child. Run it in its own process
+	// group and kill the whole group on timeout: killing only `go` orphans the
+	// server, which keeps the pipes open and leaves Write and Wait blocked.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start %s: %v", entrypoint, err)
 	}
-	for _, req := range requests {
-		if _, err := stdin.Write([]byte(req + "\n")); err != nil {
-			t.Fatalf("%s write request: %v", entrypoint, err)
+	// Write requests while stdout is read below. Writing everything before
+	// reading deadlocks once the server blocks on a full stdout pipe while this
+	// side blocks on a full stdin pipe (seen with the 8 MiB frame under load).
+	writeErr := make(chan error, 1)
+	go func() {
+		defer func() { _ = stdin.Close() }()
+		for _, req := range requests {
+			if _, err := stdin.Write([]byte(req + "\n")); err != nil {
+				writeErr <- err
+				return
+			}
 		}
-	}
-	_ = stdin.Close()
+		writeErr <- nil
+	}()
 
 	var frames []map[string]any
 	scanner := bufio.NewScanner(stdout)
@@ -152,6 +167,9 @@ func runRPCProcess(t *testing.T, entrypoint, dbPath string, requests []string, e
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("%s stdout scan: %v", entrypoint, err)
+	}
+	if err := <-writeErr; err != nil {
+		t.Fatalf("%s write request: %v; stderr=%s", entrypoint, err, stderr.String())
 	}
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("%s failed: %v; stderr=%s", entrypoint, err, stderr.String())
