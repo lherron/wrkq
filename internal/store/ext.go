@@ -69,13 +69,18 @@ func (s *Store) ExtPut(attr attribution.Attribution, target ExtTarget, ns, kind,
 			return extFailure("conflict", "extension etag conflict")
 		}
 		now := time.Now().UTC().Format(time.RFC3339Nano)
+		// The 256-row cap guards task and room subjects against a runaway
+		// writer. Containers are long-lived and accumulate rows (one per
+		// feedback report, for example), so they are not capped.
 		if created {
-			var count int
-			if err := tx.QueryRow("SELECT count(*) FROM ext WHERE "+column+"=?", target.UUID).Scan(&count); err != nil {
-				return err
-			}
-			if count >= 256 {
-				return extFailure("ext_quota", "ext_quota: subject has 256 extension rows")
+			if target.Type != "container" {
+				var count int
+				if err := tx.QueryRow("SELECT count(*) FROM ext WHERE "+column+"=?", target.UUID).Scan(&count); err != nil {
+					return err
+				}
+				if count >= 256 {
+					return extFailure("ext_quota", "ext_quota: subject has 256 extension rows")
+				}
 			}
 			_, err = tx.Exec("INSERT INTO ext(uuid,"+column+",ns,kind,id,body,etag,created_at,updated_at,updated_by_principal_ref,updated_by_scope_ref) VALUES(?,?,?,?,?,?,1,?,?,?,?)", uuid.NewString(), target.UUID, ns, kind, id, body, now, now, attr.PrincipalRef, scopeSQL(attr))
 		} else {

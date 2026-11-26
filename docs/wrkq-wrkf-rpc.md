@@ -2856,7 +2856,7 @@ maximum `limit` is 500.
 Namespace and kind accept 1–4 dot-separated segments, each beginning lowercase,
 alphanumeric, at most 64 characters per segment and 128 bytes total. IDs are
 1–200 bytes without control characters. Body must be a JSON object at most
-65,536 bytes; a subject may hold at most 256 rows. Validation refuses
+65,536 bytes; a task or room subject may hold at most 256 rows, and a container subject is not capped. Validation refuses
 `ext_invalid`, quota refuses `ext_quota`, an unknown subject refuses `not_found`,
 and a stale/create-only fence refuses `conflict`.
 

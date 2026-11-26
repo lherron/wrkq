@@ -199,3 +199,21 @@ func TestExtensionBodyPreservesLargeJSONNumbers(t *testing.T) {
 		t.Fatalf("body changed: %s", encoded)
 	}
 }
+
+// Containers (projects, directories) are long-lived and accumulate rows such as
+// one per feedback report, so only task and room subjects carry the 256-row cap.
+func TestExtensionContainerSubjectHasNoRowCap(t *testing.T) {
+	api, s := newMonitorAPI(t)
+	projectUUID := seedMonitorProject(t, s)
+	var projectID string
+	if err := api.db.QueryRow("SELECT id FROM containers WHERE uuid=?", projectUUID).Scan(&projectID); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for i := 0; i < 257; i++ {
+		p := ExtPutParams{Subject: ExtSubject{Container: projectID}, NS: "feedback", Kind: "report", ID: fmt.Sprint(i), Body: map[string]any{}, PrincipalRef: "agent:faber"}
+		if _, err := api.ExtPut(ctx, p); err != nil {
+			t.Fatalf("row %d: %v", i, err)
+		}
+	}
+}
