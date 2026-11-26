@@ -65,7 +65,11 @@ func main() {
 		PollSampleWindow: *pollSampleWindow,
 	}
 
-	if err := wrkqd.ServeDaemon(opts); err != nil {
+	handoff, err := wrkqd.ServeDaemon(opts)
+	if err == nil && handoff != nil {
+		err = wrkqd.ExecHandoff(handoff)
+	}
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

@@ -119,7 +119,7 @@ func TestServeDaemonRefusesInlineAndFileNodeTokensTogether(t *testing.T) {
 
 	t.Run("inline and file together is refused before listening", func(t *testing.T) {
 		addr := freeAddr(t)
-		err := ServeDaemon(DaemonOptions{Addr: addr, DBPath: dbPath, NodeTokens: "max3=tok-max3", NodeTokensFile: tokensFile})
+		_, err := ServeDaemon(DaemonOptions{Addr: addr, DBPath: dbPath, NodeTokens: "max3=tok-max3", NodeTokensFile: tokensFile})
 		if err == nil || !strings.Contains(err.Error(), "not both") {
 			t.Fatalf("ServeDaemon err = %v; want the inline-or-file refusal", err)
 		}

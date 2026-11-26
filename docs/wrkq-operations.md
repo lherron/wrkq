@@ -274,10 +274,25 @@ wrkq server restart
 `-unsafe-no-token` allows a non-loopback listener without a bearer token —
 dev-only, never for a reachable deployment.
 
-On macOS, `wrkq server restart` reloads the launchd job (`bootout`, wait for the
-job to disappear, `bootstrap`) instead of `launchctl kickstart -k`, and reports
-success only after the daemon answers. launchd pins a code requirement to the
-cdhash of the binary present when the job was bootstrapped; `go build` re-signs
+On macOS, `wrkq server restart` first asks the running launchd-owned daemon
+to hand off its listening socket. On SIGHUP, wrkqd drains requests for up to
+five seconds, closes the database, and execs the binary at its original path
+with the same arguments and environment. The TCP or Unix socket stays open
+and queues connections while the new image starts. The CLI requires a new
+`X-Wrkqd-Instance` value from the health endpoint, which also sends it on
+HTTP 401. A new instance with the same PID reports `method: handoff`. A new
+instance from launchd's KeepAlive with a different PID reports
+`method: respawn`. If the old image sends no instance ID or the handoff
+cannot be confirmed within ten seconds of signaling, the CLI reloads the job
+and reports `method: reload`. Use `wrkq server restart --reload` after
+changing a loaded job's plist so launchd reads its new arguments, environment,
+and paths.
+
+The reload path uses `bootout`, waits for the job to disappear, runs
+`bootstrap`, and reports success after the daemon answers.
+
+launchd pins a code requirement to the cdhash of the binary present when
+the job was bootstrapped; `go build` re-signs
 adhoc on every build, so a rebuilt `wrkqd` fails the pinned requirement and
 every respawn inside the existing job is SIGKILLed with `OS_REASON_CODESIGNING`,
 writing nothing to the log. Only a bootout/bootstrap cycle re-derives it.
@@ -297,6 +312,25 @@ migrations under a serving daemon: that preceded canonical-store corruption on
 2026-10-04 (T-10158). `wrkq server stop` refuses under launchd. `wrkq server
 status` reports `binaryStale`, and `wrkq server health` fails on it. Only the
 authorized service operator activates the canonical daemon.
+
+Handoff limits:
+
+- Follow the offline procedure above for releases with pending migrations.
+- A new image that fails during startup creates a crash window until recovery.
+  A login-time code pin can kill the first handoff after reboot. In that case
+  expect roughly three to five seconds of refusals while the fallback reloads
+  the job. Later handoffs run under the reloaded job.
+- A request that runs past the five-second shutdown cap or is written to a
+  keep-alive connection as it closes can fail. Connections beyond the listen
+  backlog can also fail.
+- Replace the installed binary by removing the old file and copying in the new
+  file. Overwriting the running file in place can cause `OS_REASON_CODESIGNING`.
+- For a plist that runs a wrapper such as `wrkq server serve`, wrkqd hands off
+  to its own binary path. The existing code-hash comparison still uses the
+  plist program.
+- Keep `--addr`, `--unix`, and their environment defaults pointed at the
+  launchd job being restarted. An override aimed at a different wrkqd can make
+  the CLI miss the handoff and reload the job.
 
 `wrkq server health` resolves the daemon's token the way the CLI transport does
 (`WRKQD_TOKEN`, else `WRKQD_TOKEN_FILE`). On a node running per-node tokens an

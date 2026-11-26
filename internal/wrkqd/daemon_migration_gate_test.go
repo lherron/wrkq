@@ -96,7 +96,7 @@ func TestServeDaemonRefusesPendingMigrationBeforeExposingRPC(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			addr := freeAddr(t)
 
-			err := ServeDaemon(DaemonOptions{Addr: addr, DBPath: tc.dbPath, Token: "test-token"})
+			_, err := ServeDaemon(DaemonOptions{Addr: addr, DBPath: tc.dbPath, Token: "test-token"})
 			if err == nil {
 				t.Fatal("ServeDaemon exposed a daemon backed by a DB with a pending migration")
 			}

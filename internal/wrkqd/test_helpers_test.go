@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -49,35 +50,63 @@ func setupTestEnv(t *testing.T) (*db.DB, string) {
 // shutdown. Signal delivery is intercepted, so no real signal is involved.
 func serveDaemon(t *testing.T, opts DaemonOptions) (stop func()) {
 	t.Helper()
-	sigCh := make(chan chan<- os.Signal, 1)
-	oldNotify, oldStop := signalNotify, signalStop
-	signalNotify = func(ch chan<- os.Signal) { sigCh <- ch }
-	signalStop = func(chan<- os.Signal) {}
-	t.Cleanup(func() { signalNotify, signalStop = oldNotify, oldStop })
-
-	done := make(chan error, 1)
-	go func() { done <- ServeDaemon(opts) }()
-
-	var daemonSig chan<- os.Signal
-	select {
-	case daemonSig = <-sigCh:
-	case err := <-done:
-		t.Fatalf("ServeDaemon exited before serving: %v", err)
-	case <-time.After(10 * time.Second):
-		t.Fatal("ServeDaemon did not start serving")
-	}
-
+	stopDaemon := startDaemonForTest(t, opts)
 	conn, err := net.DialTimeout("tcp", opts.Addr, time.Second)
 	if err != nil {
 		t.Fatalf("daemon not accepting connections on %s: %v", opts.Addr, err)
 	}
 	_ = conn.Close()
-
 	return func() {
 		t.Helper()
-		daemonSig <- os.Interrupt
-		if err := <-done; err != nil {
-			t.Fatalf("ServeDaemon shutdown: %v", err)
+		if file := stopDaemon(os.Interrupt); file != nil {
+			_ = file.Close()
+			t.Fatal("interrupt returned a handoff listener")
 		}
 	}
+}
+
+func startDaemonForTest(t *testing.T, opts DaemonOptions) func(os.Signal) *os.File {
+	t.Helper()
+	stdout := os.Stdout
+	oldNotify, oldStop := signalNotify, signalStop
+	ready := make(chan chan<- os.Signal, 1)
+	signalNotify = func(ch chan<- os.Signal) { ready <- ch }
+	signalStop = func(chan<- os.Signal) {}
+	type result struct {
+		file *os.File
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		file, err := ServeDaemon(opts)
+		done <- result{file, err}
+	}()
+	var signals chan<- os.Signal
+	select {
+	case signals = <-ready:
+	case result := <-done:
+		t.Fatalf("ServeDaemon exited before serving: %v", result.err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("daemon did not start")
+	}
+	stopped := false
+	stop := func(sig os.Signal) *os.File {
+		t.Helper()
+		signals <- sig
+		result := <-done
+		stopped = true
+		os.Stdout, signalNotify, signalStop = stdout, oldNotify, oldStop
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		return result.file
+	}
+	t.Cleanup(func() {
+		if !stopped {
+			if file := stop(syscall.SIGTERM); file != nil {
+				_ = file.Close()
+			}
+		}
+	})
+	return stop
 }

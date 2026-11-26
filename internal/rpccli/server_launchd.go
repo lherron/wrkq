@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// launchd restarts are a bootout + bootstrap cycle rather than `kickstart -k`.
+// The launchd reload path is a bootout + bootstrap cycle rather than `kickstart -k`.
 // launchd derives a Lightweight Code Requirement (LWCR) pinning the cdhash of
 // the binary present when the job was bootstrapped. `go build` emits a fresh
 // adhoc signature on every build, so a rebuilt wrkqd no longer satisfies the
@@ -75,6 +75,40 @@ type binaryIdentity struct {
 
 func (b binaryIdentity) stale() bool {
 	return b.comparable && b.onDisk != b.running
+}
+
+var launchdHandoffTimeout = 10 * time.Second
+
+func tryLaunchdHandoff(owner *launchdOwner, probe *serverOptions) (string, error) {
+	if owner.pid == nil {
+		return "", fmt.Errorf("launchd job has no running pid")
+	}
+	before, answered := probeServerInstance(probe, 2*time.Second)
+	if !answered {
+		return "", fmt.Errorf("daemon did not answer before SIGHUP")
+	}
+	if before == "" {
+		return "", fmt.Errorf("daemon did not report an instance id")
+	}
+	if out, err := runLaunchctl("kill", "SIGHUP", owner.serviceTarget); err != nil {
+		return "", fmt.Errorf("SIGHUP failed: %s", launchctlDetail(out, err))
+	}
+
+	deadline := time.Now().Add(launchdHandoffTimeout)
+	for remaining := time.Until(deadline); remaining > 0; remaining = time.Until(deadline) {
+		after, _ := probeServerInstance(probe, min(remaining, 2*time.Second))
+		if after != "" && after != before {
+			current := detectWrkqLaunchdOwner()
+			if current != nil && current.pid != nil {
+				if *current.pid == *owner.pid {
+					return "handoff", nil
+				}
+				return "respawn", nil
+			}
+		}
+		time.Sleep(min(launchdPollInterval, time.Until(deadline)))
+	}
+	return "", fmt.Errorf("no new daemon instance confirmed within %s after SIGHUP", launchdHandoffTimeout)
 }
 
 func detectWrkqLaunchdOwner() *launchdOwner {

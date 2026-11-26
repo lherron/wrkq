@@ -3656,6 +3656,13 @@
                 "hidden": true
               },
               {
+                "name": "reload",
+                "usage": "Reload the launchd job from its plist without a handoff",
+                "type": "bool",
+                "default": "false",
+                "hidden": false
+              },
+              {
                 "name": "timeout-ms",
                 "usage": "Shutdown/startup timeout in milliseconds",
                 "type": "int",

@@ -222,6 +222,7 @@ install *flags:
   echo "Installing to ~/.local/bin/..."
   mkdir -p ~/.local/bin
   # Remove old binaries first to avoid crashes when overwriting running binaries
+  # Replace wrkqd by remove-then-copy. Overwriting in place kills handoff with OS_REASON_CODESIGNING.
   rm -f ~/.local/bin/wrkq ~/.local/bin/wrkf ~/.local/bin/wrkc ~/.local/bin/wrkp ~/.local/bin/wrkqadm ~/.local/bin/wrkqd ~/.local/bin/wrkq-rpccli
   cp bin/wrkq ~/.local/bin/wrkq
   cp bin/wrkf ~/.local/bin/wrkf

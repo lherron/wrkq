@@ -50,6 +50,7 @@ type serverOptions struct {
 	unsafeNoToken bool
 	timeoutMS     int
 	force         bool
+	reload        bool
 }
 
 func newServerCmd() *cobra.Command {
@@ -123,6 +124,7 @@ func newServerCmd() *cobra.Command {
 	restartCmd.Flags().BoolVar(&opts.daemon, "daemon", false, "Run as a background process when launchd is not loaded")
 	restartCmd.Flags().IntVar(&opts.timeoutMS, "timeout-ms", 30000, "Shutdown/startup timeout in milliseconds")
 	restartCmd.Flags().BoolVar(&opts.force, "force", false, "Escalate to SIGKILL if graceful shutdown times out")
+	restartCmd.Flags().BoolVar(&opts.reload, "reload", false, "Reload the launchd job from its plist without a handoff")
 
 	statusCmd.Flags().BoolVar(&opts.json, "json", false, "Output as JSON")
 	return cmd
@@ -147,7 +149,7 @@ func runServerStart(cmd *cobra.Command, opts *serverOptions) error {
 			return launchdLifecycleError("start", detectWrkqLaunchdOwner(), err)
 		}
 		if !isStdoutTTY(cmd.OutOrStdout()) {
-			return writeServerLifecycleJSON(cmd, "started", "launchd", collectWrkqServerStatus(probe))
+			return writeServerLifecycleJSON(cmd, "started", "launchd", "", collectWrkqServerStatus(probe))
 		}
 		fmt.Fprintf(cmd.ErrOrStderr(), "wrkq: daemon started via launchd (%s)\n", owner.serviceTarget)
 		return nil
@@ -159,7 +161,7 @@ func runServerStart(cmd *cobra.Command, opts *serverOptions) error {
 		return err
 	}
 	if !isStdoutTTY(cmd.OutOrStdout()) {
-		return writeServerLifecycleJSON(cmd, "started", mode, collectWrkqServerStatus(opts))
+		return writeServerLifecycleJSON(cmd, "started", mode, "", collectWrkqServerStatus(opts))
 	}
 	fmt.Fprintln(cmd.ErrOrStderr(), "wrkq: daemon started")
 	return nil
@@ -178,7 +180,7 @@ func runServerStop(cmd *cobra.Command, opts *serverOptions) error {
 	status := collectWrkqServerStatus(opts)
 	if !status.Running && status.PID == nil {
 		if !isStdoutTTY(cmd.OutOrStdout()) {
-			return writeServerLifecycleJSON(cmd, "not_running", "", status)
+			return writeServerLifecycleJSON(cmd, "not_running", "", "", status)
 		}
 		fmt.Fprintln(cmd.ErrOrStderr(), "wrkq: daemon is not running")
 		return nil
@@ -190,7 +192,7 @@ func runServerStop(cmd *cobra.Command, opts *serverOptions) error {
 		return err
 	}
 	if !isStdoutTTY(cmd.OutOrStdout()) {
-		return writeServerLifecycleJSON(cmd, "stopped", "", collectWrkqServerStatus(opts))
+		return writeServerLifecycleJSON(cmd, "stopped", "", "", collectWrkqServerStatus(opts))
 	}
 	fmt.Fprintln(cmd.ErrOrStderr(), "wrkq: daemon stopped")
 	return nil
@@ -203,21 +205,7 @@ func runServerRestart(cmd *cobra.Command, opts *serverOptions) error {
 		return err
 	}
 	if owner := detectWrkqLaunchdOwner(); owner != nil {
-		probe := launchdProbeOptions(opts, owner)
-		if err := restartLaunchdDaemon(cmd, owner); err != nil {
-			return err
-		}
-		// A live pid is not evidence of a working daemon: launchd SIGKILLs a
-		// respawn that fails the pinned code requirement, and the process dies
-		// before it can log. Report success only once it answers.
-		if err := waitForServerAnswer(probe, time.Duration(opts.timeoutMS)*time.Millisecond); err != nil {
-			return launchdLifecycleError("restart", detectWrkqLaunchdOwner(), err)
-		}
-		if !isStdoutTTY(cmd.OutOrStdout()) {
-			return writeServerLifecycleJSON(cmd, "restarted", "launchd", collectWrkqServerStatus(probe))
-		}
-		fmt.Fprintf(cmd.ErrOrStderr(), "wrkq: daemon restarted via launchd (%s)\n", owner.serviceTarget)
-		return nil
+		return runLaunchdRestart(cmd, opts, owner)
 	}
 	if err := stopWrkqServerProcess(opts, time.Duration(opts.timeoutMS)*time.Millisecond, opts.force); err != nil && !errors.Is(err, errWrkqServerNotRunning) {
 		return err
@@ -229,9 +217,37 @@ func runServerRestart(cmd *cobra.Command, opts *serverOptions) error {
 		return err
 	}
 	if !isStdoutTTY(cmd.OutOrStdout()) {
-		return writeServerLifecycleJSON(cmd, "restarted", mode, collectWrkqServerStatus(opts))
+		return writeServerLifecycleJSON(cmd, "restarted", mode, "", collectWrkqServerStatus(opts))
 	}
 	fmt.Fprintln(cmd.ErrOrStderr(), "wrkq: daemon restarted")
+	return nil
+}
+
+func runLaunchdRestart(cmd *cobra.Command, opts *serverOptions, owner *launchdOwner) error {
+	probe := launchdProbeOptions(opts, owner)
+	method, reason := "reload", ""
+	if !opts.reload {
+		var err error
+		method, err = tryLaunchdHandoff(owner, probe)
+		if err != nil {
+			method, reason = "reload", err.Error()
+		}
+	}
+	if method == "reload" {
+		if err := restartLaunchdDaemon(cmd, owner); err != nil {
+			return err
+		}
+		if err := waitForServerAnswer(probe, time.Duration(opts.timeoutMS)*time.Millisecond); err != nil {
+			return launchdLifecycleError("restart", detectWrkqLaunchdOwner(), err)
+		}
+	}
+	if !isStdoutTTY(cmd.OutOrStdout()) {
+		return writeServerLifecycleJSON(cmd, "restarted", "launchd", method, collectWrkqServerStatus(probe))
+	}
+	if reason != "" {
+		reason = " (handoff fallback: " + strings.Join(strings.Fields(reason), " ") + ")"
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "wrkq: daemon restarted via launchd %s (%s)%s\n", method, owner.serviceTarget, reason)
 	return nil
 }
 
@@ -287,13 +303,16 @@ func runServerHealth(cmd *cobra.Command, opts *serverOptions) error {
 	return nil
 }
 
-func writeServerLifecycleJSON(cmd *cobra.Command, action, mode string, status serverRuntimeStatus) error {
+func writeServerLifecycleJSON(cmd *cobra.Command, action, mode, method string, status serverRuntimeStatus) error {
 	payload := map[string]any{
 		"action": action,
 		"status": status,
 	}
 	if mode != "" {
 		payload["mode"] = mode
+	}
+	if method != "" {
+		payload["method"] = method
 	}
 	encoder := json.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent("", "  ")
@@ -505,16 +524,22 @@ func waitForServerAnswer(opts *serverOptions, timeout time.Duration) error {
 // A 401 still proves the process is alive and serving, which is what a
 // lifecycle command needs to verify; token correctness is `server health` work.
 func serverAnswers(opts *serverOptions) bool {
-	client, req, err := newServerHealthRequest(opts, 2*time.Second)
+	_, answered := probeServerInstance(opts, 2*time.Second)
+	return answered
+}
+
+func probeServerInstance(opts *serverOptions, timeout time.Duration) (instance string, answered bool) {
+	client, req, err := newServerHealthRequest(opts, timeout)
 	if err != nil {
-		return false
+		return "", false
 	}
+	req.Close = true
 	resp, err := client.Do(req)
 	if err != nil {
-		return false
+		return "", false
 	}
 	_ = resp.Body.Close()
-	return true
+	return resp.Header.Get("X-Wrkqd-Instance"), true
 }
 
 func launchdLifecycleError(action string, owner *launchdOwner, cause error) error {

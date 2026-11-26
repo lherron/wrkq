@@ -189,7 +189,7 @@ func TestDaemonClaimDerivesNodeFromBearerIdentity(t *testing.T) {
 
 func TestServeDaemonRejectsNonLoopbackWithoutToken(t *testing.T) {
 	database, _ := setupTestEnv(t)
-	err := ServeDaemon(DaemonOptions{Addr: "0.0.0.0:0", DBPath: database.Path()})
+	_, err := ServeDaemon(DaemonOptions{Addr: "0.0.0.0:0", DBPath: database.Path()})
 	if err == nil {
 		t.Fatal("expected non-loopback without token rejection")
 	}

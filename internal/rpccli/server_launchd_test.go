@@ -2,12 +2,17 @@ package rpccli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -398,6 +403,107 @@ func TestServerHealthTreatsAnyAnswerAsServingAndFlagsARejectedToken(t *testing.T
 			}
 			if !strings.Contains(stderr.String(), tc.wantStderr) {
 				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), tc.wantStderr)
+			}
+		})
+	}
+}
+
+func TestLaunchdRestartSelectsMethod(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("launchd restart is macOS-only")
+	}
+	for _, tc := range []struct {
+		name, initialID, nextID, method string
+		newPID, reload, wantSignal      bool
+	}{
+		{name: "handoff", initialID: "old", nextID: "new", method: "handoff", wantSignal: true},
+		{name: "respawn", initialID: "old", nextID: "new", method: "respawn", newPID: true, wantSignal: true},
+		{name: "same instance", initialID: "old", nextID: "old", method: "reload", wantSignal: true},
+		{name: "legacy endpoint", method: "reload"},
+		{name: "explicit reload", initialID: "old", method: "reload", reload: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("WRKQD_ADDR", "")
+			t.Setenv("WRKQD_UNIX", "")
+			t.Setenv("WRKQ_RUNTIME_DIR", t.TempDir())
+			owner := testOwner(t)
+			var signaled, reloaded atomic.Bool
+			var handoffProbes atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				id := tc.initialID
+				if signaled.Load() {
+					if !reloaded.Load() {
+						handoffProbes.Add(1)
+					}
+					id = tc.nextID
+				}
+				if id != "" {
+					w.Header().Set("X-Wrkqd-Instance", id)
+				}
+				w.WriteHeader(http.StatusUnauthorized)
+			}))
+			t.Cleanup(srv.Close)
+			oldLaunchctl, oldTimeout := runLaunchctl, launchdHandoffTimeout
+			if tc.name == "same instance" {
+				launchdHandoffTimeout = time.Second
+			}
+			t.Cleanup(func() { runLaunchctl, launchdHandoffTimeout = oldLaunchctl, oldTimeout })
+			loaded := true
+			var bootout, bootstrap int
+			runLaunchctl = func(args ...string) (string, error) {
+				switch args[0] {
+				case "print":
+					if !loaded {
+						return "", errors.New("job unloaded")
+					}
+					pid := os.Getpid()
+					if signaled.Load() && tc.newPID {
+						pid++
+					}
+					return fmt.Sprintf("gui/501/label = {\n\tpath = %s\n\tpid = %d\n}\n", owner.plistPath, pid), nil
+				case "kill":
+					if len(args) != 3 || args[1] != "SIGHUP" {
+						t.Fatalf("unexpected launchctl signal: %v", args)
+					}
+					signaled.Store(true)
+				case "bootout":
+					bootout++
+					loaded = false
+					reloaded.Store(true)
+				case "bootstrap":
+					bootstrap++
+					loaded = true
+				default:
+					t.Fatalf("unexpected launchctl call: %v", args)
+				}
+				return "", nil
+			}
+
+			cmd := NewRootCmdFor("wrkq")
+			args := []string{"server", "restart", "--addr", strings.TrimPrefix(srv.URL, "http://")}
+			if tc.reload {
+				args = append(args, "--reload")
+			}
+			cmd.SetArgs(args)
+			var stdout bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetErr(io.Discard)
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got["method"] != tc.method || got["action"] != "restarted" || got["mode"] != "launchd" {
+				t.Fatalf("unexpected restart result: %s", stdout.String())
+			}
+			if tc.wantSignal && handoffProbes.Load() == 0 {
+				t.Fatal("expected a post-SIGHUP health probe")
+			}
+			if signaled.Load() != tc.wantSignal || (tc.method == "reload" && (bootout != 1 || bootstrap != 1)) ||
+				(tc.method != "reload" && (bootout != 0 || bootstrap != 0)) {
+				t.Fatalf("signal=%t, bootout=%d, bootstrap=%d", signaled.Load(), bootout, bootstrap)
 			}
 		})
 	}

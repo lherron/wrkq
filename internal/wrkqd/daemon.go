@@ -2,6 +2,7 @@ package wrkqd
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -41,51 +42,60 @@ type DaemonOptions struct {
 	PollSampleWindow time.Duration
 }
 
-// ServeDaemon starts the wrkqd daemon.
-func ServeDaemon(opts DaemonOptions) error {
+// ServeDaemon starts the daemon. On SIGHUP it returns the socket for exec
+// after all daemon resources have been released.
+func ServeDaemon(opts DaemonOptions) (*os.File, error) {
+	inherited, err := takeInheritedListener()
+	if err != nil {
+		return nil, err
+	}
+	if inherited != nil {
+		defer func() { _ = inherited.Close() }()
+	}
+
 	cfg, err := config.LoadWithDBOverride(opts.DBPath, true)
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
 	nodes, err := loadNodeRegistry(opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if cfg.RemoteEndpoint != "" {
-		return fmt.Errorf("wrkqd requires a local database path; WRKQ_DB_PATH and --db must not be rpc:// locators")
+		return nil, fmt.Errorf("wrkqd requires a local database path; WRKQ_DB_PATH and --db must not be rpc:// locators")
 	}
 	if cfg.DBPath == "" {
-		return config.MissingDatabasePathError()
+		return nil, config.MissingDatabasePathError()
 	}
 
 	release, err := db.AcquireServingLease(cfg.DBPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer release()
 
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	if err := database.RequiresMigrationError(); err != nil {
 		_ = database.Close()
-		return err
+		return nil, err
 	}
 	defer func() { _ = database.Close() }()
 
 	if opts.PIDPath != "" {
 		if err := writePIDFile(opts.PIDPath); err != nil {
-			return err
+			return nil, err
 		}
 		defer func() { _ = os.Remove(opts.PIDPath) }()
 	}
 	api, rpcOpts, err := bootstrap.DaemonServer(database, cfg)
 	if err != nil {
-		return fmt.Errorf("failed to initialize workrpc registry: %w", err)
+		return nil, fmt.Errorf("failed to initialize workrpc registry: %w", err)
 	}
 	rpcOpts.ServerVersion = Version
 	rpcOpts.ServerRevision = GitCommit
@@ -120,33 +130,57 @@ func ServeDaemon(opts DaemonOptions) error {
 	// hold it to its deadline on every restart.
 	httpServer.RegisterOnShutdown(rpcServer.Drain)
 
-	if opts.Unix != "" {
-		_ = os.Remove(opts.Unix)
-		listener, err := net.Listen("unix", opts.Unix)
-		if err != nil {
-			return fmt.Errorf("failed to listen on unix socket: %w", err)
-		}
-		defer func() { _ = listener.Close() }()
-		httpServer.Handler = withRequestLog(mux, listenerUnix)
-		return serveHTTPWithSignals(httpServer, listener, listenerUnix)
-	}
-
 	addr := opts.Addr
 	if addr == "" {
 		addr = "127.0.0.1:7171"
 	}
 	if opts.Unix == "" && opts.Token == "" && !nodes.Enabled() && !opts.UnsafeNoToken && !isLoopbackListenAddr(addr) {
-		return fmt.Errorf("refusing to bind wrkqd on non-loopback address %s without --token; pass --unsafe-no-token for explicit dev-only override", addr)
+		return nil, fmt.Errorf("refusing to bind wrkqd on non-loopback address %s without --token; pass --unsafe-no-token for explicit dev-only override", addr)
 	}
-	httpServer.Addr = addr
 
-	listener, err := net.Listen("tcp", addr)
+	name := listenerMain
+	if opts.Unix != "" {
+		name = listenerUnix
+	} else {
+		httpServer.Addr = addr
+	}
+	listener, err := openDaemonListener(addr, opts.Unix, inherited)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = listener.Close() }()
-	httpServer.Handler = withRequestLog(mux, listenerMain)
-	return serveHTTPWithSignals(httpServer, listener, listenerMain)
+	instance := rand.Text()
+	logged := withRequestLog(mux, name)
+	httpServer.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Wrkqd-Instance", instance)
+		logged.ServeHTTP(w, r)
+	})
+	return serveHTTPWithSignals(httpServer, listener, name, inherited != nil)
+}
+
+func openDaemonListener(addr, unixPath string, inherited *os.File) (net.Listener, error) {
+	if inherited != nil {
+		listener, err := net.FileListener(inherited)
+		_ = inherited.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to adopt inherited listener: %w", err)
+		}
+		if listener, ok := listener.(*net.UnixListener); ok {
+			// FileListener defaults to leaving the path behind. Restore the
+			// normal unlink on shutdown unless we hand off again.
+			listener.SetUnlinkOnClose(true)
+		}
+		return listener, nil
+	}
+	if unixPath != "" {
+		_ = os.Remove(unixPath)
+		listener, err := net.Listen("unix", unixPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to listen on unix socket: %w", err)
+		}
+		return listener, nil
+	}
+	return net.Listen("tcp", addr)
 }
 
 func isLoopbackListenAddr(addr string) bool {
@@ -169,10 +203,18 @@ func writePIDFile(path string) error {
 	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
 }
 
-func serveHTTPWithSignals(server *http.Server, listener net.Listener, name string) error {
+func serveHTTPWithSignals(server *http.Server, listener net.Listener, name string, inherited bool) (*os.File, error) {
+	sigCh := make(chan os.Signal, 1)
+	signalNotify(sigCh)
+	defer signalStop(sigCh)
+
+	data := map[string]string{"listener": name, "address": listener.Addr().String(), "transport": listener.Addr().Network()}
+	if inherited {
+		data["inherited"] = "true"
+	}
 	writeHTTPLogLine(requestLogLine{
 		Level: "info", Component: "http", Event: "http.listen",
-		Data: map[string]string{"listener": name, "address": listener.Addr().String(), "transport": listener.Addr().Network()},
+		Data: data,
 		TS:   time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
 	})
 	errCh := make(chan error, 1)
@@ -180,33 +222,54 @@ func serveHTTPWithSignals(server *http.Server, listener net.Listener, name strin
 		errCh <- server.Serve(listener)
 	}()
 
-	sigCh := make(chan os.Signal, 1)
-	signalNotify(sigCh)
-	defer signalStop(sigCh)
-
 	select {
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+			return nil, nil
 		}
-		return err
-	case <-sigCh:
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
-			_ = server.Close()
-			return err
+		return nil, err
+	case sig := <-sigCh:
+		var handoff *os.File
+		if sig == syscall.SIGHUP {
+			logHandoff("daemon.handoff.begin", data)
+			var err error
+			handoff, err = duplicateListener(listener)
+			if err != nil {
+				return nil, fmt.Errorf("failed to duplicate listener for handoff: %w", err)
+			}
 		}
-		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
+		err := shutdownHTTP(server, errCh)
+		if handoff != nil {
+			// shutdownHTTP force-closes active connections at the cap.
+			// The duplicate keeps queued connections alive for the new image.
+			if errors.Is(err, context.DeadlineExceeded) {
+				return handoff, nil
+			}
+			if err != nil {
+				_ = handoff.Close()
+				return nil, err
+			}
 		}
-		return nil
+		return handoff, err
 	}
+}
+
+func shutdownHTTP(server *http.Server, serveErr <-chan error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		_ = server.Close()
+		return err
+	}
+	if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
 var (
 	signalNotify = func(ch chan<- os.Signal) {
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	}
 	signalStop = signal.Stop
 )
