@@ -287,7 +287,7 @@ armed to die on its next respawn — keepalive, a crash, a reboot, or anyone's
 restart, unbounded time later. When `just install` replaces a `wrkqd` that a
 running job still holds, its read-only migration probe permits an automatic
 restart when there are no pending migrations. It resolves the database from the
-job's own `--db` or launchd environment, not the caller's shell
+job's own `--db` or launchd environment independently of the caller's shell
 (`scripts/resolve-job-db.sh`). If resolution or the probe fails, or migrations
 are pending, it leaves the daemon armed and exits non-zero after installing.
 For a migration release, take a backup, boot out the job and wait for it to
@@ -343,7 +343,9 @@ there and compare `commit` to max3's.
   A migration release follows the offline sequence above. Upgrade mini first
   and the other nodes after it: a new client refuses an old server.
 - **hrcdev**: same PATH export, then `git pull --ff-only && just install no-sync=1`.
-  It runs no wrkqd; its clients point at mini (`HRC_WRKQ_DB=rpc://…:7171`).
+  Its clients point at mini (`HRC_WRKQ_DB=rpc://…:7171`). Seed its loopback
+  registry with the exact timestamped `@wrkq/client` version published by mini
+  for the release. A new producer publish generates a different version.
 - **thestill** (Lance's laptop): a client-only node with no wrkqd, no HRC and
   just `~/.local/bin/wrkq` plus `~/.config/wrkq/node-token`. Don't build there.
   From max3, run `just install-thestill`. It copies max3's installed `wrkq`,

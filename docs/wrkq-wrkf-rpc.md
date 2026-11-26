@@ -226,8 +226,9 @@ $/cancelRequest
 `rpc.initialize` must be the first call. Business methods called before
 initialization return a structured validation error (`WRKQ_VALIDATION`).
 
-`$/cancelRequest` is accepted and treated as best-effort. The server does not
-guarantee handler cancellation.
+The stdio server accepts `$/cancelRequest` as a no-op. The remote stdio bridge
+drops the notification. HTTP request-context cancellation is a separate
+mechanism.
 
 ### rpc.initialize
 
@@ -273,9 +274,8 @@ Result:
 }
 ```
 
-`capabilities.cancel: true` means best-effort cancellation via `$/cancelRequest`
-is accepted. Do not advertise strong cancellation unless every handler is
-context-aware.
+`capabilities.cancel: true` indicates that the protocol recognizes
+`$/cancelRequest`. The current stdio handler performs no cancellation.
 
 `server.revision` is diagnostic build provenance, not a compatibility
 authority. A stamped `wrkqd` reports its full Git revision and retains the

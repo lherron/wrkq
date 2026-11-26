@@ -1,26 +1,17 @@
-# wrkq Promises: Design Handoff
+# wrkq promise contract
 
-Status: design handoff with decisions closed 2026-08-23; ready to shape into an implementation specification
-
-Discussion date: 2026-08-23
-
-Tracking task: `T-07485`
+Design decisions closed 2026-08-23 (`T-07485`).
 
 ## Purpose
 
-This document captures the full context and provisional design for a wrkq
-promise mechanism. It is intended to let a new session resume the work without
-needing the conversation that produced it.
-
-The central problem is not task scheduling. It is loss of intentional,
-long-running threads from a principal's active memory. wrkq can represent work
-and group it into campaigns, but it cannot currently let a human or agent say:
+Promises bring long-running threads back to a principal's attention at a
+scheduled review time. They let a human or agent say:
 
 > I am allowed to forget this for now, but wrkq must put it back in front of me
 > at a specified time and require me to decide what happens next.
 
-The proposed product noun and CLI surface are **promises**. The explanatory
-mental model is an **attention lease**.
+The review time marks when a decision is due. It leaves the subject's own
+schedule and lifecycle independent.
 
 ## Canonical motivating example: HRC envelopes
 

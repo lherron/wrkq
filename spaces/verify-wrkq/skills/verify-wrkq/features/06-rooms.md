@@ -28,9 +28,10 @@ and `internal/store/` (rooms, envelopes, `envelope_send.go`, `envelope_lifecycle
 - **Addressing.** Only an addressee presents: `--to`, or a seat-handle ref. A say without either is a log entry:
   `to: null`, `obligation: none`, nobody presented, and nothing acked. `--to a,b` fans out into one envelope per
   addressee under a shared `groupId`.
-- **A handle ref implies `--to`** (3cc20a7, b3301fd, T-13787). Any ref containing `@` (`rooms_routing.go:234`)
+- **A handle ref implies `--to`** (3cc20a7, b3301fd, T-13787). Any ref containing `@` (`internal/wrkqapi/rooms_routing.go#refIsHandle`)
   addresses that handle, and since b3301fd that satisfies `--fyi`, `--note`, `--ttl`, `--preempt`, `--wait` and
-  `--discharges` without an explicit `--to` (`rooms_say.go:39-63`, CLI mirror `wrkc_say.go:102`). Before, each was
+  `--discharges` without an explicit `--to` (`internal/wrkqapi/rooms_say.go#API.RoomSay`,
+  CLI mirror `internal/rpccli/wrkc_say.go#newWrkcSayCmd`). Before, each was
   refused ("--fyi requires --to", exit 2 for `--note`, exit 1 for the rest). From a `:primary` scope it lands in an
   ad-hoc pair room (`R-00001`), and the other party's `wrkc say clod@<p>:primary --discharges EN-<n>` reuses it
   (`acked: [EN-<n>]`). Task/`R-`/`EN-`/`W-`/path refs still refuse (`--fyi requires --to` `WRKQ_VALIDATION`,
@@ -43,7 +44,9 @@ and `internal/store/` (rooms, envelopes, `envelope_send.go`, `envelope_lifecycle
   without an addressee is a log entry`).
 - **`dischargedBy`** (c0e607e, T-13013). An envelope acked by a reply (`reply`, wide reply-is-ack) or by
   `--discharges` (`reply_scoped`) carries `dischargedBy: EN-<reply>`, the reply addressed to that envelope's
-  sender: in a fan-out reply to two senders each original names its own envelope (`envelope_send.go:123,354,375`).
+  sender: in a fan-out reply to two senders each original names its own envelope (`internal/store/envelope_send.go#RoomStore.CreateEnvelopesAndDischargeWithAttribution`,
+  `internal/store/envelope_send.go#RoomStore.AckSenderObligationsWithAttribution`,
+  and `internal/store/envelope_send.go#dischargingEnvelopeID`).
   The note that discharges has `dischargedBy: null`, and notes, operator ack, expiry, withdraw and fail never set
   it; replies older than c0e607e have none (no backfill). JSON only: human `wrkc show` prints `reason: reply` and
   no discharge line. Driven 2026-11-23, T-14442.

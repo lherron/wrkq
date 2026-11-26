@@ -39,7 +39,7 @@ remain unchanged.
 
 Revision 1 incorrectly claimed old clients would keep working after the new
 method changed the complete protocol schema hash. Source inspection of
-`pkg/client/transport.go:224` established that Go clients refuse a different
+`pkg/client/transport.go#validateInitializeResult` established that Go clients refuse a different
 hash before business dispatch, irrespective of which methods they use.
 
 Revision 2 resolves that flaw by declaring a coordinated producer/client

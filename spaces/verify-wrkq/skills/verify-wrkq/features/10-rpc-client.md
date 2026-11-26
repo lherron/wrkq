@@ -59,15 +59,15 @@ stdio server and exposes `client.wrkq.*` and `client.wrkf.*`. Every CLI also rid
   `changed:false` with the same token (published `0.1.0-dev.20261118085100`, driven 2026-11-23, T-14442).
 - **Publishing.** A main-checkout `just install` on a producer node with a clean tracked tree (source read: `justfile`) publishes a timestamped `@wrkq/client` to the node's
   Verdaccio (`npm view @wrkq/client dist-tags`). Consumers pin it. Only the **Go** client (every Go CLI over `rpc://`)
-  refuses a server whose protocol hash differs (`pkg/client/transport.go:230-235`, source-only). The TS client never
-  compares: `createClient` only awaits `rpc.initialize` (`client.ts:450-452`), so `0.1.0-dev.20261111054154`
+  refuses a server whose protocol hash differs (`pkg/client/transport.go#validateInitializeResult`, source-only). The TS client never
+  compares: `createClient` only awaits `rpc.initialize` (`packages/client/src/client.ts#createClient`), so `0.1.0-dev.20261111054154`
   (pinned `7ef5b72a`) ran `client-drive.ts` clean against `3f36f085` (2026-11-23, T-14442). The server refuses
   only a wrong `protocolVersion`.
 - **Cancel is a no-op.** `rpc.initialize` advertises `capabilities.cancel: true`, but `$/cancelRequest` does
-  nothing on the stdio server (`server.go:128-131`) and the `rpc://` bridge drops notifications
-  (`remote_stdio.go:99-104`): a 3 s `commit.wait` cancelled at once still answered `changed:false` after 3.0 s.
-  `docs/wrkf-rpc.md` (7bb0600) says so; `docs/wrkq-wrkf-rpc.md:229,276` still says "best-effort" (2026-11-23,
-  T-14442).
+  nothing on the stdio server (`internal/workrpc/server.go#Server.dispatch`) and the `rpc://` bridge drops notifications
+  (`internal/workrpc/remote_stdio.go#ServeRemoteStdio`): a 3 s `commit.wait` cancelled at once still answered `changed:false` after 3.0 s.
+  See the transport behavior in `docs/wrkf-rpc.md#transport-and-initialization` and the capability definition in
+  `docs/wrkq-wrkf-rpc.md#rpcinitialize`.
 
 ## How to get to it
 
@@ -122,10 +122,9 @@ cd "$WV_STATE/client" && bun --env-file=/dev/null run client-drive.ts
   `principalRef`.
 - The repo's `packages/client/dist` may not be what consumers run. Drive the published version and record it
   (`jq -r .version node_modules/@wrkq/client/package.json`).
-- On a stale `expectEtag`, the update is refused `WRKQ_CONFLICT` before the principal check runs, so a missing
-  principal can hide behind a conflict. Re-driven 2026-11-09 (T-12762) with `WRKQ_PRINCIPAL_REF`, `HRC_SESSION_REF`,
-  `AGENT_SCOPE_REF` and `ASP_AGENT_ID` unset: still `WRKQ_CONFLICT`, though source (`task_update.go:33`) now
-  attributes first, so a principal may still resolve from the remaining seat env.
+- `internal/wrkqapi/task_update.go#API.TaskUpdate` resolves attribution before checking a stale `expectEtag`.
+  The 2026-11-09 drive (T-12762) still got `WRKQ_CONFLICT` with `WRKQ_PRINCIPAL_REF`, `HRC_SESSION_REF`,
+  `AGENT_SCOPE_REF` and `ASP_AGENT_ID` unset. The remaining seat environment could still supply a principal.
 
 ## Proven when
 

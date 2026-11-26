@@ -1,14 +1,11 @@
 # wrkq Canonical Specification
 
-Status: current implementation contract as of 2026-06-07.
-
 This is the source of truth for wrkq's product model, CLI behavior, local daemon
 surface, configuration, and validation rules. Supporting docs may explain how to
 use or operate the system, but when they conflict with this file, this file wins.
 
-The wrkf JSON-RPC stdio contract is intentionally separate at
-[`docs/wrkf-rpc.md`](docs/wrkf-rpc.md) because source files and tests reference it as
-a machine contract.
+The maintained machine contract is `docs/wrkq-wrkf-rpc.md`.
+`docs/wrkf-rpc.md` covers workflow client recovery.
 
 ## 1. Purpose
 
@@ -639,7 +636,7 @@ General contract:
 | `1` | Generic runtime, IO, DB, or validation error unless a command defines a narrower code. |
 | `2` | Usage error, invalid selector context, or unresolvable handoff scope for handoff commands. |
 | `3` | Not found in the general contract; handoff create uses it for idempotency payload mismatch. |
-| `4` | Conflict or not found for command-specific handoff get behavior. |
+| `4` | Handoff get could not find the requested record. |
 | `5` | Partial success for bulk operations; already acknowledged for handoff acknowledge. |
 | `6` | Handoff acknowledge `etag` mismatch. |
 
@@ -748,7 +745,7 @@ Current implementation facts:
   freeform `data` for human/agent context.
 - Transition idempotency, run external binding, and effect lease token hardening
   are implemented by the current migration series.
-- The JSON-RPC stdio contract is frozen in `docs/wrkf-rpc.md`.
+- The wire contract lives in `docs/wrkq-wrkf-rpc.md`.
 
 Known limits:
 
@@ -768,26 +765,6 @@ Known limits:
   capabilities, or delivery refs. This does not make low-level hook/effect
   catalogs durable by implication.
 
-## 12. Supporting Markdown Disposition
+## 12. Related documents
 
-This cleanup intentionally collapses the former wrkq PRD, CLI reference,
-architecture note, domain model, deleted/restore proposal, async-run linkage
-note, and state-machine proposal into this file.
-
-Canonical markdown that remains:
-
-| File | Status |
-| --- | --- |
-| `README.md` | User-facing overview and install quick start. |
-| `AGENTS.md` / `CLAUDE.md` | Agent operating instructions; `CLAUDE.md` is a symlink. |
-| `docs/SPEC.md` | Canonical wrkq specification. |
-| `docs/wrkf-rpc.md` | Frozen wrkf JSON-RPC machine contract. |
-| `internal/rpccli/embedded/WRKQ-USAGE.md` | Embedded agent guide; the single source served by `usage`/`info`/`agent-info`. |
-| `internal/rpccli/embedded/WRKC-USAGE.md` | Embedded wrkc agent guide served by `wrkc info`. |
-| `docs/wrkq-concepts.md` | Guide to room routing and obligations, search, monitoring, and handoffs. |
-| `mcp-server/README.md` | Local package README for the MCP stdio wrapper. |
-| `pbc/templates/` | Workflow artifact templates used by the PBC sample preset. |
-| `vendor/` | Third-party vendored documentation; not a wrkq spec surface. |
-
-Historical scratch/proposal markdown should live in git history or wrkq tasks,
-not as top-level repo docs.
+See the [documentation catalog](README.md) for the related contracts and guides.

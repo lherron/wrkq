@@ -259,6 +259,8 @@ contracts. See [AGENTS.md](AGENTS.md) for agent-specific working rules.
 
 ## Documentation
 
+Browse the [documentation catalog](docs/README.md) for contracts and guides.
+
 - [docs/SPEC.md](docs/SPEC.md): canonical product, domain, CLI and daemon
   contract. It wins when docs disagree.
 - Run `wrkq <command> --help` for current command syntax.

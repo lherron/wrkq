@@ -152,7 +152,7 @@ export WRKQ_PRINCIPAL_REF=agent:<you>
   refusal ends with a `code: <CODE>` line after `Error:` (and `hint:`), so a replay of any text refusal from
   before d1e7b9c differs by that line (2026-11-16, T-13642 `replay/triage.md`).
 - **`covers.tasks` takes only `T-` ids.** Covering a workstream from another workstream refuses `WRKQ_NOT_FOUND`
-  "task not found: W-00046" although the row exists (`internal/wrkqapi/workstream.go:39`), and the hint says
+  "task not found: W-00046" although the row exists (`internal/wrkqapi/workstream.go#validateCoversOn`), and the hint says
   "a task is T-<n>". By design covers list tasks; the wording misleads (2026-11-16, T-13642).
 - Closing a task prints a hint about reconciling worktrees under `~/praesidium/under-construction/`. On a scratch
   it means nothing.
@@ -160,7 +160,7 @@ export WRKQ_PRINCIPAL_REF=agent:<you>
 - **A one-character task slug fails with a raw store error.** `wrkq touch inbox/x -t x` returns `WRKQ_CONFLICT`
   with `retryable:true` (since d1e7b9c surfaced the server's code; it read `WRKQ_ERROR` before) and the raw
   `CHECK constraint failed: slug = lower(slug) AND slug GLOB '[a-z0-9][a-z0-9-]*' ...`, because that GLOB needs
-  two characters, and `mapStoreError` (`internal/wrkqapi/task_read.go:238`) calls any constraint a conflict. Don't
+  two characters, and `mapStoreError` (`internal/wrkqapi/task_read.go#mapStoreError`) calls any constraint a conflict. Don't
   retry it. Use slugs of two or more characters. Product task T-10355 (2026-10-05, T-10349; task half still
   reproduces at 1f59e43, 2026-11-16, T-13642; the container half is a clean `WRKQ_VALIDATION` since e9c5054).
 

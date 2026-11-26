@@ -12,7 +12,7 @@
 
 ### Dense embeddings — llama-server (`internal/search/embed/embed.go`)
 
-The dense provider defaults to `llama-cpp` at `http://127.0.0.1:8080` (see `cfg.Search.Dense*`). The configured model is `Qwen/Qwen3-Embedding-8B-GGUF:Q4_K_M`, dim 4096. Operating notes from this codebase's experience:
+The dense provider defaults to `llama-cpp` at `http://127.0.0.1:18480` (see `cfg.Search.Dense*`). The configured model is `Qwen/Qwen3-Embedding-8B-GGUF:Q4_K_M`, dim 4096. Operating notes from this codebase's experience:
 
 - **`--pooling last` reliably crashes llama.cpp 9260 with this model** (`EXC_BREAKPOINT` in `llama_context::decode`, malloc heap-protection trap). Use **`--pooling mean`** instead. Crash reports land in `~/Library/Logs/DiagnosticReports/llama-server-*.ips`.
 - **`--parallel N>1` also crashes** under the same model+quant. Single slot is stable.

@@ -15,7 +15,7 @@ the store's lifecycle: `init`, `migrate`, `doctor`, `db`, `state`, `attach`. Cod
   or `timeoutMs` (`changed:false`, the same token). `timeoutMs` defaults to 25000 and is clamped to 1000..30000, so
   10 waits about 1 s. An unknown key (`sinse`) or a string `timeoutMs` is `-32602`. `monitor`, `wrkf watch`,
   `wrkp log --follow` and `wrkc say --wait` park on it between reads (7f26a88). Driven 2026-11-09, T-12762.
-  At most 512 waits park at once; the next answers `changed:false` at once without parking (`commit_wait.go:19,37-41`,
+  At most 512 waits park at once; the next answers `changed:false` at once without parking (`internal/workrpc/commit_wait.go#registerCommitWait`,
   source-only).
 - **Shutdown drains parked waits** (908ffb7, T-13697). On SIGTERM `http.Server.Shutdown` runs `workrpc.Server.Drain`:
   every parked `commit.wait`, and any that arrives after, answers at once `changed:false` with the caller's **own**

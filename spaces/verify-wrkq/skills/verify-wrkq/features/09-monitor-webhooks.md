@@ -32,7 +32,7 @@ downward) or global, on the internal root. Code: `internal/rpccli/monitor.go`, `
   `collaboration_ledger_meta` id and `head` is `MAX(event_log.id)`, both read in the same snapshot as `items`. A
   cursor above `head` keeps it as `high_water` (cursor 999999 -> `high_water 999999`, `head 125`). A client can tell a
   restored or replaced store from a quiet one. Driven 2026-11-02, T-12309 against `sqlite3 -readonly` on the scratch file.
-- **Event classes** (docs/campaign-webhook.md since 7bb0600; `internal/webhooks/webhooks.go:861-923`). A bare URL
+- **Event classes** (docs/campaign-webhook.md since 7bb0600; `internal/webhooks/webhooks.go#subscriptionMatchesEvent`). A bare URL
   gets every family. `--webhook-events` takes `task`, `workflow`, `container`, `promise`/`promise.*`,
   `envelope`/`envelope.*`/`room`/`room.*`/`collaboration`, or an exact event name (an unknown name such as
   `nope.event` is accepted, rc 0). `container set --help` still lists only `task, workflow, container`. A bare
