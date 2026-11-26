@@ -13,16 +13,19 @@ set -euo pipefail
 print="$(cat)"
 
 # Lines of one top-level block (`\t<name> = {` ... `\t}`), inner indent stripped.
+# Neither awk exits early: under pipefail, a reader that stops before its writer
+# finishes kills the writer with SIGPIPE and the script exits 141.
 block() {
   printf '%s\n' "$print" | awk -v name="$1" '
+    done { next }
     $0 == "\t" name " = {" { inside = 1; next }
-    inside && $0 == "\t}" { exit }
+    inside && $0 == "\t}" { done = 1; next }
     inside { sub(/^\t+/, ""); print }
   '
 }
 
 env_value() {
-  block environment | awk -v key="$1" -F' => ' '$1 == key { sub(/^[^=]*=> /, ""); print; exit }'
+  block environment | awk -v key="$1" -F' => ' '!found && $1 == key { sub(/^[^=]*=> /, ""); print; found = 1 }'
 }
 
 fail() {
