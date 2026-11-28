@@ -45,6 +45,7 @@ func expectedProtocolMismatch(serverProtocol, serverHash, revision string) strin
 		"  client: protocol " + workrpc.ProtocolVersion + ", schema " + workrpc.ProtocolSchemaHash() + "\n" +
 		"  server: protocol " + serverProtocol + ", schema " + serverHash + ", wrkqd revision " + revisionDetail + "\n" +
 		"  Update this host's wrkq checkout to at least " + updateTarget + " and run `just install`.\n" +
+		"  On a client-only node with no wrkq checkout, run `just install-thestill <node>` from a wrkq checkout at that revision.\n" +
 		"  If this host is deliberately ahead of the canonical wrkqd, redeploy wrkqd from your revision instead — host binaries never lead wrkqd (conventions-full.md)."
 }
 

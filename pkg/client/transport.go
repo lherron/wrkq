@@ -86,6 +86,7 @@ func (e *ProtocolMismatchError) Error() string {
 			"  client: protocol %s, schema %s\n"+
 			"  server: protocol %s, schema %s, wrkqd revision %s\n"+
 			"  Update this host's wrkq checkout to at least %s and run `just install`.\n"+
+			"  On a client-only node with no wrkq checkout, run `just install-thestill <node>` from a wrkq checkout at that revision.\n"+
 			"  If this host is deliberately ahead of the canonical wrkqd, redeploy wrkqd from your revision instead — host binaries never lead wrkqd (conventions-full.md).",
 		protocolIdentity(e.ClientProtocol),
 		protocolIdentity(e.ClientSchemaHash),
