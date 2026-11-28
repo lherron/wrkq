@@ -151,7 +151,8 @@ func Report(w io.Writer, err error, mode ErrorMode, family string) {
 		_ = enc.Encode(map[string]StructuredError{"error": s})
 	default:
 		text := err.Error()
-		if coded {
+		var jsonCode interface{ OmitTextCode() bool }
+		if coded && (!errors.As(err, &jsonCode) || !jsonCode.OmitTextCode()) {
 			_, rest, hasRest := strings.Cut(text, "\n")
 			text = s.Message
 			if hasRest {

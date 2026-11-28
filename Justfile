@@ -172,6 +172,7 @@ install *flags:
   allow_dirty=""
   no_sync=""
   install_armed=""
+  dirty=""
   for flag in {{flags}} ""; do
     [ -n "$flag" ] || continue
     case "$flag" in
@@ -236,6 +237,11 @@ install *flags:
   chmod +x ~/.local/bin/wrkp
   chmod +x ~/.local/bin/wrkqadm
   chmod +x ~/.local/bin/wrkqd
+  if [ -n "$dirty" ]; then
+    echo "Skipping wrkq client staging for the dirty build"
+  else
+    bash scripts/stage-wrkq-client.sh
+  fi
   # launchd runs wrkqd from this fixed path; a stable signature keeps its TCC
   # grants across rebuilds (T-12226). A signing failure is reported but does not
   # stop the install: the ad-hoc binary still runs.

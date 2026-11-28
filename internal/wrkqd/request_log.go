@@ -86,6 +86,7 @@ type requestLogField struct {
 	Status     int     `json:"status"`
 	DurationMs int64   `json:"durationMs"`
 	Remote     *string `json:"remote"`
+	Node       string  `json:"node,omitempty"`
 	Op         string  `json:"op,omitempty"`
 	Suppressed int     `json:"suppressed,omitempty"`
 	Code       any     `json:"code,omitempty"`
@@ -94,8 +95,9 @@ type requestLogField struct {
 
 type rpcLogKey struct{}
 
-// rpcLogNote is filled by the /v1/rpc handler for the request log to read.
+// rpcLogNote is filled by handlers for the request log to read.
 type rpcLogNote struct {
+	node   string
 	method string
 	caller any
 	err    *workrpc.RPCError
@@ -161,6 +163,7 @@ func withRequestLog(next http.Handler, listener string) http.Handler {
 			Status:     rec.status,
 			DurationMs: time.Since(start).Milliseconds(),
 			Remote:     remoteHost(r.RemoteAddr),
+			Node:       note.node,
 			Op:         note.method,
 		}
 		if _, present := r.Header["X-Praesidium-Caller"]; present {

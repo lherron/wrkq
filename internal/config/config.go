@@ -19,14 +19,15 @@ func MissingDatabasePathError() error {
 
 // Config represents the application configuration
 type Config struct {
-	DBLocator           string       `yaml:"db_locator"`
-	DBPath              string       `yaml:"db_path"`
-	RemoteEndpoint      string       `yaml:"remote_endpoint"`
-	AttachDir           string       `yaml:"attach_dir"`
-	AttachmentsMaxMB    int          `yaml:"attachments_max_mb"`
-	DefaultPrincipalRef string       `yaml:"default_principal_ref"`
-	ProjectRoot         string       `yaml:"project_root"`
-	Search              SearchConfig `yaml:"search"`
+	ClientSelfUpdateEndpoint string       `yaml:"client_self_update_endpoint"`
+	DBLocator                string       `yaml:"db_locator"`
+	DBPath                   string       `yaml:"db_path"`
+	RemoteEndpoint           string       `yaml:"remote_endpoint"`
+	AttachDir                string       `yaml:"attach_dir"`
+	AttachmentsMaxMB         int          `yaml:"attachments_max_mb"`
+	DefaultPrincipalRef      string       `yaml:"default_principal_ref"`
+	ProjectRoot              string       `yaml:"project_root"`
+	Search                   SearchConfig `yaml:"search"`
 }
 
 // SearchConfig controls the derived local search sidecar.
@@ -80,7 +81,19 @@ func Load() (*Config, error) {
 // explicit choice, so it moots a WRKQ_DB_PATH conflict. pathOnly rejects
 // rpc:// overrides, as ApplyDBLocator does.
 func LoadWithDBOverride(override string, pathOnly bool) (*Config, error) {
-	cfg, conflict, err := load()
+	return loadWithDBOverride(override, pathOnly, nil)
+}
+
+// PreviewWithDBOverride resolves the same locator and effective environment
+// without exporting dotenv entries before a command starts.
+func PreviewWithDBOverride(override string) (*Config, func(string) string, error) {
+	var getenv func(string) string
+	cfg, err := loadWithDBOverride(override, false, &getenv)
+	return cfg, getenv, err
+}
+
+func loadWithDBOverride(override string, pathOnly bool, previewEnv *func(string) string) (*Config, error) {
+	cfg, conflict, err := load(previewEnv)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +109,7 @@ func LoadWithDBOverride(override string, pathOnly bool) (*Config, error) {
 	return cfg, nil
 }
 
-func load() (*Config, *DBEnvConflictError, error) {
+func load(previewEnv *func(string) string) (*Config, *DBEnvConflictError, error) {
 	cfg := &Config{
 		AttachmentsMaxMB: 50,
 		Search: SearchConfig{
@@ -121,32 +134,23 @@ func load() (*Config, *DBEnvConflictError, error) {
 	aspProject := os.Getenv("ASP_PROJECT")
 	processDBLocator := strings.TrimSpace(os.Getenv("WRKQ_DB"))
 
-	// A process-provided token file is an explicit credential source. Keep an
-	// absent inline token absent-from-dotenv by reserving the key with an empty
-	// value before godotenv loads. This preserves an explicitly exported inline
-	// token while preventing a nearby .env.local default from silently
-	// shadowing the safer file reference.
-	if strings.TrimSpace(os.Getenv("WRKQD_TOKEN_FILE")) != "" {
-		if _, inlineTokenExplicit := os.LookupEnv("WRKQD_TOKEN"); !inlineTokenExplicit {
-			_ = os.Setenv("WRKQD_TOKEN", "")
-		}
-	}
-
-	// Load .env.local if it exists (walking up parent directories)
 	envLocalPath := findEnvLocal()
-	if envLocalPath != "" {
-		_ = godotenv.Load(envLocalPath)
+	getenv := loadEnvLocal(envLocalPath, previewEnv != nil)
+	if previewEnv != nil {
+		*previewEnv = getenv
 	}
 
 	// Load ~/.config/wrkq/config.yaml if it exists (optional, errors ignored)
-	_ = loadYAMLConfig(cfg)
+	if err := loadYAMLConfig(cfg); err != nil {
+		cfg.ClientSelfUpdateEndpoint = ""
+	}
 	locatorSource := ""
 	if strings.TrimSpace(cfg.DBLocator) != "" {
 		locatorSource = "config.yaml db_locator"
 	}
 
 	// Override with environment variables
-	explicitDBLocator := strings.TrimSpace(os.Getenv("WRKQ_DB"))
+	explicitDBLocator := strings.TrimSpace(getenv("WRKQ_DB"))
 	if explicitDBLocator != "" {
 		if err := ApplyDBLocator(cfg, explicitDBLocator, false); err != nil {
 			return nil, nil, err
@@ -157,7 +161,7 @@ func load() (*Config, *DBEnvConflictError, error) {
 		}
 	}
 	var conflict *DBEnvConflictError
-	if dbPath, dbPathVar := getDBPathEnv(); dbPath != "" {
+	if dbPath, dbPathVar := getDBPathEnv(getenv); dbPath != "" {
 		switch {
 		case IsRemoteLocator(dbPath) && explicitDBLocator == "":
 			return nil, nil, fmt.Errorf("WRKQ_DB_PATH is path-only; use WRKQ_DB for rpc:// locators")
@@ -169,16 +173,16 @@ func load() (*Config, *DBEnvConflictError, error) {
 			conflict = &DBEnvConflictError{Var: dbPathVar, Value: dbPath, Locator: cfg.DBLocator, Source: locatorSource}
 		}
 	}
-	if attachDir := os.Getenv("WRKQ_ATTACH_DIR"); attachDir != "" {
+	if attachDir := getenv("WRKQ_ATTACH_DIR"); attachDir != "" {
 		cfg.AttachDir = attachDir
 	}
-	if maxMB := os.Getenv("WRKQ_ATTACH_MAX_MB"); maxMB != "" {
+	if maxMB := getenv("WRKQ_ATTACH_MAX_MB"); maxMB != "" {
 		var parsed int
 		if _, err := fmt.Sscanf(maxMB, "%d", &parsed); err == nil && parsed >= 0 {
 			cfg.AttachmentsMaxMB = parsed
 		}
 	}
-	if defaultPrincipalRef := os.Getenv("WRKQ_PRINCIPAL_REF"); defaultPrincipalRef != "" {
+	if defaultPrincipalRef := getenv("WRKQ_PRINCIPAL_REF"); defaultPrincipalRef != "" {
 		cfg.DefaultPrincipalRef = defaultPrincipalRef
 	}
 	// Project-root precedence (high -> low):
@@ -194,34 +198,34 @@ func load() (*Config, *DBEnvConflictError, error) {
 		cfg.ProjectRoot = explicitProjectRoot
 	} else if aspProject != "" {
 		cfg.ProjectRoot = aspProject
-	} else if projectRoot := os.Getenv("WRKQ_PROJECT_ROOT"); projectRoot != "" {
+	} else if projectRoot := getenv("WRKQ_PROJECT_ROOT"); projectRoot != "" {
 		cfg.ProjectRoot = projectRoot
 	}
-	if searchEnabled := os.Getenv("WRKQ_SEARCH_ENABLED"); searchEnabled != "" {
+	if searchEnabled := getenv("WRKQ_SEARCH_ENABLED"); searchEnabled != "" {
 		cfg.Search.Enabled = searchEnabled != "0" && searchEnabled != "false" && searchEnabled != "FALSE"
 	}
-	if searchDBPath := os.Getenv("WRKQ_SEARCH_DB_PATH"); searchDBPath != "" {
+	if searchDBPath := getenv("WRKQ_SEARCH_DB_PATH"); searchDBPath != "" {
 		cfg.Search.DBPath = searchDBPath
 	}
-	if provider := os.Getenv("WRKQ_SEARCH_DENSE_PROVIDER"); provider != "" {
+	if provider := getenv("WRKQ_SEARCH_DENSE_PROVIDER"); provider != "" {
 		cfg.Search.DenseProvider = provider
 	}
-	if baseURL := os.Getenv("WRKQ_SEARCH_DENSE_BASE_URL"); baseURL != "" {
+	if baseURL := getenv("WRKQ_SEARCH_DENSE_BASE_URL"); baseURL != "" {
 		cfg.Search.DenseBaseURL = baseURL
 	}
-	if model := os.Getenv("WRKQ_SEARCH_DENSE_MODEL"); model != "" {
+	if model := getenv("WRKQ_SEARCH_DENSE_MODEL"); model != "" {
 		cfg.Search.DenseModel = model
 	}
-	if dim := os.Getenv("WRKQ_SEARCH_DENSE_DIM"); dim != "" {
+	if dim := getenv("WRKQ_SEARCH_DENSE_DIM"); dim != "" {
 		var parsed int
 		if _, err := fmt.Sscanf(dim, "%d", &parsed); err == nil && parsed > 0 {
 			cfg.Search.DenseDimension = parsed
 		}
 	}
-	if instruction := os.Getenv("WRKQ_SEARCH_QUERY_INSTRUCTION"); instruction != "" {
+	if instruction := getenv("WRKQ_SEARCH_QUERY_INSTRUCTION"); instruction != "" {
 		cfg.Search.QueryInstruction = instruction
 	}
-	if batchSize := os.Getenv("WRKQ_SEARCH_INDEX_BATCH_SIZE"); batchSize != "" {
+	if batchSize := getenv("WRKQ_SEARCH_INDEX_BATCH_SIZE"); batchSize != "" {
 		var parsed int
 		if _, err := fmt.Sscanf(batchSize, "%d", &parsed); err == nil && parsed > 0 {
 			cfg.Search.IndexBatchSize = parsed
@@ -253,11 +257,11 @@ func load() (*Config, *DBEnvConflictError, error) {
 
 // getDBPathEnv returns the trimmed WRKQ_DB_PATH value (or WRKQ_DB_PATH_FILE
 // contents) and the name of the variable that supplied it.
-func getDBPathEnv() (string, string) {
-	if val := strings.TrimSpace(os.Getenv("WRKQ_DB_PATH")); val != "" {
+func getDBPathEnv(getenv func(string) string) (string, string) {
+	if val := strings.TrimSpace(getenv("WRKQ_DB_PATH")); val != "" {
 		return val, "WRKQ_DB_PATH"
 	}
-	if val := strings.TrimSpace(getEnvOrFile("WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE")); val != "" {
+	if val := strings.TrimSpace(getEnvOrFile(getenv, "WRKQ_DB_PATH", "WRKQ_DB_PATH_FILE")); val != "" {
 		return val, "WRKQ_DB_PATH_FILE"
 	}
 	return "", ""
@@ -333,12 +337,12 @@ func loadYAMLConfig(cfg *Config) error {
 
 // getEnvOrFile gets an environment variable value, or reads it from a file
 // if the _FILE variant is set
-func getEnvOrFile(envVar, fileVar string) string {
-	if val := os.Getenv(envVar); val != "" {
+func getEnvOrFile(getenv func(string) string, envVar, fileVar string) string {
+	if val := getenv(envVar); val != "" {
 		return val
 	}
 
-	if filePath := os.Getenv(fileVar); filePath != "" {
+	if filePath := getenv(fileVar); filePath != "" {
 		data, err := os.ReadFile(filePath)
 		if err == nil {
 			return string(data)
@@ -346,6 +350,35 @@ func getEnvOrFile(envVar, fileVar string) string {
 	}
 
 	return ""
+}
+
+// An explicit token file reserves the inline token key against dotenv, unless
+// the process explicitly supplied that key too.
+func loadEnvLocal(path string, preview bool) func(string) string {
+	_, inlineTokenExplicit := os.LookupEnv("WRKQD_TOKEN")
+	reserveInline := strings.TrimSpace(os.Getenv("WRKQD_TOKEN_FILE")) != "" && !inlineTokenExplicit
+	if preview {
+		var values map[string]string
+		if path != "" {
+			values, _ = godotenv.Read(path)
+		}
+		return func(key string) string {
+			if value, present := os.LookupEnv(key); present {
+				return value
+			}
+			if key == "WRKQD_TOKEN" && reserveInline {
+				return ""
+			}
+			return values[key]
+		}
+	}
+	if reserveInline {
+		_ = os.Setenv("WRKQD_TOKEN", "")
+	}
+	if path != "" {
+		_ = godotenv.Load(path)
+	}
+	return os.Getenv
 }
 
 // findEnvLocal searches for .env.local starting from cwd and walking up parent

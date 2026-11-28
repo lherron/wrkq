@@ -6,8 +6,7 @@ import (
 	"testing"
 )
 
-// TestRemovedRESTRoutesAnswer404 pins the T-12856 removal: wrkqd serves only
-// /v1/health and /v1/rpc, so the retired REST routes are unknown paths.
+// TestRemovedRESTRoutesAnswer404 pins the T-12856 removal of the retired REST routes.
 func TestRemovedRESTRoutesAnswer404(t *testing.T) {
 	mux := http.NewServeMux()
 	(&daemonServer{}).registerRoutes(mux)

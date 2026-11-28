@@ -55,9 +55,19 @@ func (d TokenDiagnostic) String() string {
 // shadow warning, so the surprise is named once per process even when auth
 // subsequently succeeds.
 func ResolveToken() (string, TokenDiagnostic) {
+	token, diag := ResolveTokenFromEnv(os.Getenv)
+	if diag.FileShadowed {
+		warnEnvTokenShadowsFile(diag.FilePath)
+	}
+	return token, diag
+}
+
+// ResolveTokenFromEnv applies credential precedence to an environment preview
+// without reporting diagnostics before the command performs its own load.
+func ResolveTokenFromEnv(getenv func(string) string) (string, TokenDiagnostic) {
 	diag := TokenDiagnostic{}
-	envToken := strings.TrimSpace(os.Getenv("WRKQD_TOKEN"))
-	path := strings.TrimSpace(os.Getenv("WRKQD_TOKEN_FILE"))
+	envToken := strings.TrimSpace(getenv("WRKQD_TOKEN"))
+	path := strings.TrimSpace(getenv("WRKQD_TOKEN_FILE"))
 
 	var fileToken string
 	if path != "" {
@@ -74,9 +84,6 @@ func ResolveToken() (string, TokenDiagnostic) {
 		diag.Source = "WRKQD_TOKEN env"
 		diag.Length = len(envToken)
 		diag.FileShadowed = diag.FileReadable
-		if diag.FileShadowed {
-			warnEnvTokenShadowsFile(path)
-		}
 		return envToken, diag
 	}
 	if fileToken != "" {

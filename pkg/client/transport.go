@@ -97,6 +97,12 @@ func (e *ProtocolMismatchError) Error() string {
 	)
 }
 
+// Code identifies protocol mismatches for structured CLI errors.
+func (*ProtocolMismatchError) Code() string { return "protocol_mismatch" }
+
+// OmitTextCode preserves the human-readable mismatch diagnostic.
+func (*ProtocolMismatchError) OmitTextCode() bool { return true }
+
 func protocolIdentity(value string) string {
 	if value = strings.TrimSpace(value); value != "" {
 		return value
@@ -394,37 +400,60 @@ func (e *UnreachableError) Error() string {
 func (e *UnreachableError) Unwrap() error { return e.Err }
 
 type remoteTransport struct {
-	mu      sync.Mutex
-	client  *http.Client
-	url     string
-	token   string
-	nextID  int
-	closed  bool
-	profile Profile
-	caller  string
+	mu     sync.Mutex
+	client *http.Client
+	url    string
+	token  string
+	nextID int
+	closed bool
+	caller string
 }
 
 func NewRemote(endpoint, token string, profile Profile) (Transport, error) {
+	return newRemote(context.Background(), endpoint, token, profile, nil)
+}
+
+// RemoteIdentity is the release and protocol reported by rpc.initialize.
+type RemoteIdentity struct {
+	Revision           string
+	ProtocolVersion    string
+	ProtocolSchemaHash string
+}
+
+// NewRemoteWithIdentity opens a remote transport and returns its initialized
+// identity. A protocol mismatch supplies the server identity in the error.
+func NewRemoteWithIdentity(ctx context.Context, endpoint, token string, profile Profile) (Transport, RemoteIdentity, error) {
+	var identity RemoteIdentity
+	tr, err := newRemote(ctx, endpoint, token, profile, &identity)
+	return tr, identity, err
+}
+
+func newRemote(ctx context.Context, endpoint, token string, profile Profile, identity *RemoteIdentity) (Transport, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
 		return nil, errors.New("remote endpoint is required")
 	}
 	t := &remoteTransport{
-		client:  http.DefaultClient,
-		url:     "http://" + endpoint + "/v1/rpc",
-		token:   token,
-		profile: profile,
-		caller:  useragent.ResolveCaller(profile.ComponentName),
+		client: http.DefaultClient,
+		url:    "http://" + endpoint + "/v1/rpc",
+		token:  token,
+		caller: useragent.ResolveCaller(profile.ComponentName),
 	}
-	if err := t.initialize(); err != nil {
+	res, err := t.request(ctx, "rpc.initialize", map[string]string{"protocolVersion": workrpc.ProtocolVersion})
+	if err := validateInitializeResponse(res, err, profile); err != nil {
 		return nil, err
 	}
+	if identity != nil {
+		var init initializeResult
+		if err := json.Unmarshal(res, &init); err != nil {
+			return nil, err
+		}
+		*identity = RemoteIdentity{
+			Revision: init.Server.Revision, ProtocolVersion: init.ProtocolVersion,
+			ProtocolSchemaHash: init.ProtocolSchemaHash,
+		}
+	}
 	return t, nil
-}
-
-func (t *remoteTransport) initialize() error {
-	res, err := t.request(context.Background(), "rpc.initialize", map[string]string{"protocolVersion": workrpc.ProtocolVersion})
-	return validateInitializeResponse(res, err, t.profile)
 }
 
 func (t *remoteTransport) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {

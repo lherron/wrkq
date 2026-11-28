@@ -23,13 +23,34 @@ func NewRemote(endpoint, token string) (Transport, error) {
 
 func remoteTokenFromEnv() string { return workrpcclient.TokenFromEnv() }
 
+type preflightKey struct{}
+
+type preflightRemote struct {
+	Transport
+	endpoint, token string
+}
+
+// Close leaves the preflight transport available for the invocation. HTTP
+// response bodies are closed per request, and HTTP connections use the shared pool.
+func (preflightRemote) Close() error { return nil }
+
+func remoteForCommand(cmd *cobra.Command, endpoint, token string) (Transport, error) {
+	if ctx := cmd.Context(); ctx != nil {
+		if preflight, ok := ctx.Value(preflightKey{}).(preflightRemote); ok &&
+			preflight.endpoint == endpoint && preflight.token == token {
+			return preflight, nil
+		}
+	}
+	return NewRemote(endpoint, token)
+}
+
 func openConfiguredTransport(cmd *cobra.Command) (Transport, *config.Config, func(), error) {
 	cfg, err := config.LoadWithDBOverride(dbOverride(cmd), false)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if cfg.RemoteEndpoint != "" {
-		tr, err := NewRemote(cfg.RemoteEndpoint, remoteTokenFromEnv())
+		tr, err := remoteForCommand(cmd, cfg.RemoteEndpoint, remoteTokenFromEnv())
 		if err != nil {
 			return nil, nil, nil, err
 		}

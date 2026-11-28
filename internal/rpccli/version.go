@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/lherron/wrkq/internal/workrpc"
 	"github.com/spf13/cobra"
 )
 
@@ -27,6 +28,8 @@ func newVersionCmd() *cobra.Command {
 					"version":                   Version,
 					"commit":                    GitCommit,
 					"build_date":                BuildDate,
+					"protocol_version":          workrpc.ProtocolVersion,
+					"protocol_schema_hash":      workrpc.ProtocolSchemaHash(),
 					"machine_interface_version": 1,
 					"supported_commands": []string{
 						"init", "whoami", "actors", "actor",
@@ -34,7 +37,7 @@ func newVersionCmd() *cobra.Command {
 						"cat", "set", "mv", "rm", "restore",
 						"campaign",
 						"timeline",
-						"version", "completion", "config",
+						"version", "completion", "config", "self-update",
 						"edit", "apply", "log", "watch", "diff", "find",
 						"attach", "cp", "doctor",
 					},

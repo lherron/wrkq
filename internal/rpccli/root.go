@@ -76,14 +76,19 @@ func NewRootCmd() *cobra.Command {
 // command surface, wiring implemented RPC-backed commands plus any explicit
 // temporary stubs listed in topLevelCommands.
 func NewRootCmdFor(commandName string) *cobra.Command {
+	return newRootCmdFor(commandName, defaultClientUpdater())
+}
+
+func newRootCmdFor(commandName string, updater clientUpdater) *cobra.Command {
 	if commandName == "" {
 		commandName = "wrkq"
 	}
 	root := &cobra.Command{
-		Use:           commandName,
-		Short:         "Task management CLI",
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Use:               commandName,
+		Short:             "Task management CLI",
+		SilenceUsage:      true,
+		SilenceErrors:     true,
+		PersistentPreRunE: updater.preRun,
 	}
 	// Mirror the production persistent flags verbatim so the parity test and the
 	// transport DB override line up.
@@ -132,6 +137,7 @@ func NewRootCmdFor(commandName string) *cobra.Command {
 	root.AddCommand(newSearchCmd())
 	root.AddCommand(newIndexCmd())
 	root.AddCommand(newVersionCmd())
+	root.AddCommand(updater.command())
 	root.AddCommand(newUsageCmd())
 	root.AddCommand(newAgentInfoCmd())
 	root.AddCommand(newWhoamiCmd())

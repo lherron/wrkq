@@ -22,7 +22,7 @@ func newWhoamiCmd() *cobra.Command {
 				return cfgErr
 			}
 			if cfg.RemoteEndpoint != "" {
-				tr, err := NewRemote(cfg.RemoteEndpoint, remoteTokenFromEnv())
+				tr, err := remoteForCommand(cmd, cfg.RemoteEndpoint, remoteTokenFromEnv())
 				if err != nil {
 					return err
 				}

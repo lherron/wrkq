@@ -3565,6 +3565,22 @@
         ]
       },
       {
+        "name": "self-update",
+        "use": "self-update",
+        "short": "Replace the installed wrkq with the configured wrkqd's client",
+        "hidden": false,
+        "available": true,
+        "flags": [
+          {
+            "name": "json",
+            "usage": "Output as JSON",
+            "type": "bool",
+            "default": "false",
+            "hidden": true
+          }
+        ]
+      },
+      {
         "name": "server",
         "use": "server",
         "short": "Manage the wrkq daemon server",

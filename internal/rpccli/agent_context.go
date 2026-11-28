@@ -147,7 +147,7 @@ func tryAgentContextLookups(cmd *cobra.Command, resolved scope.ResolvedScope, re
 		return nil, "", false, fmt.Sprintf("config load failed: %v", err), "", "", ""
 	}
 	if cfg.RemoteEndpoint != "" {
-		tr, err := NewRemote(cfg.RemoteEndpoint, remoteTokenFromEnv())
+		tr, err := remoteForCommand(cmd, cfg.RemoteEndpoint, remoteTokenFromEnv())
 		if err != nil {
 			return nil, "", false, fmt.Sprintf("remote rpc failed: %v", err), "remote", cfg.DBLocator, cfg.RemoteEndpoint
 		}

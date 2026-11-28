@@ -16,6 +16,7 @@ import (
 func (s *daemonServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/health", s.withAuth(s.handleHealth))
 	mux.HandleFunc("/v1/rpc", s.withAuth(s.handleWorkRPC))
+	mux.HandleFunc("/v1/client/wrkq", s.withAuth(s.handleClientDownload))
 }
 
 func (s *daemonServer) withAuth(next http.HandlerFunc) http.HandlerFunc {
